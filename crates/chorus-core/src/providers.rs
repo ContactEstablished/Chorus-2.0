@@ -140,16 +140,19 @@ pub fn route(
             // Ported from Chorus 1's measured route (codex.ts): Codex 0.162.1 takes a custom
             // provider from `-c` and accepts only the Responses wire API.
             let p = CODEX_PROVIDER_ID;
-            let args = [
+            let mut overrides = vec![
                 format!("model_provider=\"{p}\""),
                 format!("model_providers.{p}.name=\"{}\"", name.trim()),
                 format!("model_providers.{p}.base_url=\"{url}\""),
                 format!("model_providers.{p}.env_key=\"{key_var}\""),
                 format!("model_providers.{p}.wire_api=\"responses\""),
-            ]
-            .into_iter()
-            .flat_map(|a| ["-c".to_owned(), a])
-            .collect();
+            ];
+            // Codex has no metadata for most provider models and falls back to defaults; the
+            // context window is the one figure it takes from config (`model_context_window`).
+            if let Some(context) = catalog.and_then(|c| c.context_length) {
+                overrides.push(format!("model_context_window={context}"));
+            }
+            let args = overrides.into_iter().flat_map(|a| ["-c".to_owned(), a]).collect();
             Ok(Route { key_var, args, model: model.to_owned(), opencode_provider: None })
         }
         AgentKind::Opencode => {
@@ -487,6 +490,10 @@ mod tests {
                 "model_providers.chorus.wire_api=\"responses\""
             ]
         );
+        // With the catalog's context window.
+        let models = parse_openrouter_catalog(CATALOG).unwrap();
+        let known = route(AgentKind::Codex, ProviderKind::Openrouter, "OpenRouter", "", &models[0].id, Some(&models[0])).unwrap();
+        assert_eq!(known.args[known.args.len() - 2..], ["-c", "model_context_window=1000000"]);
         let g = route(AgentKind::Codex, ProviderKind::Gateway, "Work gateway", "https://llm.example.com/v1/", "gpt-5.5", None).unwrap();
         assert!(g.args.contains(&"model_providers.chorus.base_url=\"https://llm.example.com/v1\"".to_owned()));
         assert_eq!(g.key_var, "CHORUS_GATEWAY_KEY");
