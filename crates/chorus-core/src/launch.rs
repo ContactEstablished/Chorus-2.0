@@ -91,7 +91,7 @@ pub fn plan(preset: Preset, agent: AgentKind, installed: &[AgentKind]) -> Result
             None => Err(format!("Pair needs a second agent CLI, and only {} was found.", agent.display_name())),
         },
         Preset::Workbench => Ok(vec![builder, Slot { agent: AgentKind::Shell, role: Some(Role::Shell) }]),
-        Preset::Swarm => Err("Swarm gives each agent its own worktree, which arrives with worktrees (phase 5).".into()),
+        Preset::Swarm => Err("Swarm waits for worktrees, which arrive in phase 5.".into()),
     }
 }
 
@@ -156,7 +156,7 @@ mod tests {
             plan(Preset::Workbench, Claude, &[]).unwrap(),
             [Slot { agent: Claude, role: Some(Role::Builder) }, Slot { agent: Shell, role: Some(Role::Shell) }]
         );
-        assert!(plan(Preset::Swarm, Codex, &[Codex]).unwrap_err().contains("worktree"));
+        assert!(plan(Preset::Swarm, Codex, &[Codex]).unwrap_err().contains("worktrees"));
         assert!(Preset::Pair.note().unwrap().contains("not a sandbox"));
     }
 

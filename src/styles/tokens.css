@@ -75,7 +75,8 @@ html.fleet body {
 /* Base controls for the bare P1 screens. P4's components replace them with the mockup's. */
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
   color: var(--text);
 }
@@ -111,7 +112,8 @@ button.quiet {
   color: var(--text-2);
 }
 input,
-select {
+select,
+textarea {
   background: var(--surface);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-control);
@@ -120,6 +122,7 @@ select {
 }
 input:focus,
 select:focus,
+textarea:focus,
 button:focus-visible {
   outline: 2px solid var(--accent-line);
   outline-offset: 1px;
