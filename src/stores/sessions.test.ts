@@ -53,6 +53,11 @@ function session(id: number, over: Partial<SessionSummary> = {}): SessionSummary
     createdAtSecs: 0,
     runStartedAtSecs: 0,
     scrollbackError: null,
+    options: { effort: null, permission: null, model: null },
+    agentSessionId: null,
+    cliVersion: null,
+    versionFit: null,
+    resumed: false,
     ...over,
   }
 }
@@ -94,7 +99,7 @@ describe('sessions store', () => {
     ipc.sessionCreate.mockResolvedValue({ status: 'ok', data: session(5) })
     const store = useSessionsStore()
     await store.init()
-    await store.create({ agent: 'shell', cwd: 'C:\\work', name: null, credential: null, cols: 120, rows: 30 })
+    await store.create({ agent: 'shell', cwd: 'C:\\work', name: null, credential: null, cols: 120, rows: 30, options: { effort: null, permission: null, model: null } })
     expect(store.selectedId).toBe(5)
   })
 })

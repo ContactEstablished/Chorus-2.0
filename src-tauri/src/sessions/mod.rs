@@ -24,7 +24,9 @@ use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
+use chorus_core::agent::{LaunchOptions, ResumeKind, uuid_v4};
 use chorus_core::batch::{PTY_BATCH, SCRUB_CARRY_RELEASE_MS};
+use chorus_core::cli::{VersionFit, fit, parse_version};
 use chorus_core::conpty::{CURSOR_REPORT, Handshake};
 use chorus_core::env::{ChildEnvInput, compose_child_env, valid_secret_var};
 use chorus_core::scrollback::{boundary, exit_line, restart_screen};
@@ -36,8 +38,9 @@ use specta::Type;
 use tauri::ipc::{InvokeResponseBody, IpcResponse};
 use tauri_specta::Event;
 
+use crate::agents::detect::Detector;
 use crate::agents::{self, AgentKind};
-use crate::store::sessions::{self as rows, NewSession, SessionRow};
+use crate::store::sessions::{self as rows, NewRun, NewSession, SessionRow};
 use crate::store::{Store, credentials};
 use crate::vault;
 use job::Job;
@@ -101,6 +104,16 @@ pub struct SessionSummary {
     pub created_at_secs: u32,
     pub run_started_at_secs: Option<u32>,
     pub scrollback_error: Option<String>,
+    /// What the session asked its agent for, with the declared defaults filled in.
+    pub options: LaunchOptions,
+    /// The agent's own conversation id, once Chorus has one.
+    pub agent_session_id: Option<String>,
+    /// The CLI version detected for the last run, and how it compares with the version Chorus
+    /// checked the agent's options against.
+    pub cli_version: Option<String>,
+    pub version_fit: Option<VersionFit>,
+    /// The last run continued the agent's conversation rather than starting one.
+    pub resumed: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
@@ -119,6 +132,8 @@ pub struct CreateSession {
     pub credential: Option<CredentialUse>,
     pub cols: u16,
     pub rows: u16,
+    /// Checked against what the agent declares; anything it lacks is refused with a reason.
+    pub options: LaunchOptions,
 }
 
 #[derive(Debug, Clone, Deserialize, Type)]
@@ -148,6 +163,10 @@ fn check_size(cols: u16, rows: u16) -> Result<PtySize, String> {
         return Err(format!("terminal size {cols}x{rows} is out of range"));
     }
     Ok(PtySize { cols, rows, pixel_width: 0, pixel_height: 0 })
+}
+
+fn version_note(kind: AgentKind, d: &agents::detect::Detection) -> Option<String> {
+    chorus_core::cli::version_note(kind.display_name(), d.version.as_deref(), kind.spec().verified, d.fit?)
 }
 
 /// A folder for a new session: a full path to a folder that exists.
@@ -307,15 +326,40 @@ pub struct SessionManager {
     live: Mutex<HashMap<u32, Arc<Live>>>,
     quitting: AtomicBool,
     notify: Notify,
+    agents: Detector,
 }
 
 impl SessionManager {
     pub fn new(store: Store, data_dir: PathBuf, notify: Notify) -> Arc<Self> {
-        Arc::new(Self { store, data_dir, live: Mutex::new(HashMap::new()), quitting: AtomicBool::new(false), notify })
+        Arc::new(Self {
+            store,
+            data_dir,
+            live: Mutex::new(HashMap::new()),
+            quitting: AtomicBool::new(false),
+            notify,
+            agents: Detector::default(),
+        })
     }
 
     pub fn store(&self) -> &Store {
         &self.store
+    }
+
+    pub fn agents(&self) -> &Detector {
+        &self.agents
+    }
+
+    /// Detects every agent CLI again. Runs started before the first detection get its version
+    /// filled in.
+    pub fn refresh_agents(&self) -> Vec<(AgentKind, agents::detect::Detection)> {
+        let parent: Vec<(String, String)> = std::env::vars().collect();
+        let found = self.agents.refresh(&parent, &self.data_dir.join("detect"));
+        for (kind, d) in &found {
+            if let Some(v) = &d.version {
+                let _ = rows::fill_cli_version(&self.store, *kind, v);
+            }
+        }
+        found
     }
 
     pub fn data_dir(&self) -> &Path {
@@ -375,6 +419,13 @@ impl SessionManager {
             created_at_secs: vault::commands::secs(row.created_at),
             run_started_at_secs: last.as_ref().filter(|r| r.ended_at.is_none()).map(|r| vault::commands::secs(r.started_at)),
             scrollback_error: live.as_ref().and_then(|l| l.hub.scrollback_error()),
+            options: row.options.clone(),
+            agent_session_id: row.agent_session_id.clone(),
+            version_fit: last.as_ref().and_then(|r| r.cli_version.as_deref()).map(|v| {
+                fit(parse_version(v), row.agent.spec().verified.and_then(parse_version))
+            }),
+            cli_version: last.as_ref().and_then(|r| r.cli_version.clone()),
+            resumed: last.as_ref().is_some_and(|r| r.resumed),
         }
     }
 
@@ -384,6 +435,13 @@ impl SessionManager {
 
     fn notify_id(&self, id: u32) {
         if let Ok(s) = self.summary(id) {
+            (self.notify)(s);
+        }
+    }
+
+    /// Sends every open session's summary to the front end again.
+    pub fn notify_all(&self) {
+        for s in self.list().unwrap_or_default() {
             (self.notify)(s);
         }
     }
@@ -423,6 +481,12 @@ impl SessionManager {
             }
             credentials::get(&self.store, c.id)?.ok_or("That key no longer exists.")?;
         }
+        let spec = req.agent.spec();
+        let options = spec.resolve(&req.options)?;
+        // Chorus names the conversation up front where the agent lets it, so every later run can
+        // resume it.
+        let conversation =
+            (spec.resume.kind() == ResumeKind::Assigned).then(|| uuid_v4(vault::random_bytes(16).try_into().expect("16 bytes")));
         let fallback = format!("{} {}", req.agent.display_name(), rows::count_by_agent(&self.store, req.agent)? + 1);
         let name = clean_name(req.name.as_deref(), &fallback)?;
         let id = rows::insert(
@@ -435,6 +499,8 @@ impl SessionManager {
                 credential_env: req.credential.as_ref().map(|c| c.env_var.as_str()),
                 cols: req.cols,
                 rows: req.rows,
+                options: &options,
+                agent_session_id: conversation.as_deref(),
             },
         )?;
         let live = self.live_for(id);
@@ -466,7 +532,11 @@ impl SessionManager {
         std::fs::create_dir_all(&state_dir).map_err(|e| format!("creating {}: {e}", state_dir.display()))?;
 
         let parent: Vec<(String, String)> = std::env::vars().collect();
-        let launch = agents::resolve(row.agent, &parent, &state_dir)?;
+        let mut launch = agents::resolve(row.agent, &parent, &state_dir)?;
+        if row.agent == AgentKind::Codex {
+            // Codex writes this into its rollout, which is how the session finds its conversation.
+            launch.additions.push(("CODEX_INTERNAL_ORIGINATOR_OVERRIDE", chorus_core::codex::originator_for(row.id)));
+        }
         let mut secrets: Vec<(String, String)> = Vec::new();
         match (row.credential_id, &row.credential_env) {
             (Some(cid), Some(var)) => secrets.push((var.clone(), vault::decrypt(&self.store, cid)?)),
@@ -478,8 +548,20 @@ impl SessionManager {
         let additions: Vec<(&str, &str)> = launch.additions.iter().map(|(k, v)| (*k, v.as_str())).collect();
         let env = compose_child_env(&ChildEnvInput { parent: &parent, required: &[], additions: &additions, secrets: &secrets });
 
+        // The CLI's own arguments, then the options, then the conversation, which goes last
+        // because for Codex it is a subcommand.
+        let spec = row.agent.spec();
+        let mut args = launch.args.clone();
+        args.extend(spec.option_args(&row.options));
+        let conversation = row.agent_session_id.as_deref();
+        let exists = conversation.is_some_and(|id| agents::conversation_exists(row.agent, id, &parent));
+        let resumed = exists && spec.resume.kind() != ResumeKind::None;
+        args.extend(spec.conversation_args(conversation, exists));
+        let detected = self.agents.get(row.agent);
+        let cli_version = detected.as_ref().and_then(|d| d.version.clone());
+
         let mut cmd = CommandBuilder::new(&launch.program);
-        cmd.args(&launch.args);
+        cmd.args(&args);
         cmd.cwd(&row.cwd);
         cmd.env_clear();
         for (k, v) in &env {
@@ -487,6 +569,7 @@ impl SessionManager {
         }
 
         let job = Job::new().map_err(|e| format!("creating the job object: {e}"))?;
+        let launched_ms = crate::store::now_ms();
         let pair = native_pty_system().openpty(size).map_err(|e| e.to_string())?;
         let mut child = pair.slave.spawn_command(cmd).map_err(|e| format!("starting {}: {e}", launch.program.display()))?;
         drop(pair.slave);
@@ -501,14 +584,28 @@ impl SessionManager {
         let reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
         let writer = pair.master.take_writer().map_err(|e| e.to_string())?;
 
-        let run_id = rows::start_run(&self.store, row.id, Some(pid), &launch.program.display().to_string(), &launch.args)?;
+        let run_id = rows::start_run(
+            &self.store,
+            &NewRun {
+                session_id: row.id,
+                pid: Some(pid),
+                program: &launch.program.display().to_string(),
+                args: &args,
+                cli_version: cli_version.as_deref(),
+                resumed,
+            },
+        )?;
         if let Some(cid) = row.credential_id {
             let _ = credentials::touch(&self.store, cid);
         }
-        let note = (unreadable > 0).then(|| {
-            format!("{unreadable} stored key(s) couldn't be decrypted, so they aren't redacted in this session.")
-        });
-        rows::set_note(&self.store, row.id, note.as_deref())?;
+        let mut notes: Vec<String> = Vec::new();
+        if unreadable > 0 {
+            notes.push(format!("{unreadable} stored key(s) couldn't be decrypted, so they aren't redacted in this session."));
+        }
+        if let Some(n) = detected.as_ref().and_then(|d| version_note(row.agent, d)) {
+            notes.push(n);
+        }
+        rows::set_note(&self.store, row.id, (!notes.is_empty()).then(|| notes.join(" ")).as_deref())?;
 
         let run = Arc::new(Run {
             id: run_id,
@@ -521,9 +618,36 @@ impl SessionManager {
             finished: (Mutex::new(false), Condvar::new()),
         });
         *live.run.lock().expect("run lock") = Some(run.clone());
+        if spec.resume.kind() == ResumeKind::Discovered && row.agent_session_id.is_none() {
+            self.watch_for_conversation(&row, &run, launched_ms, &parent);
+        }
         self.spawn_threads(live.clone(), run, child, reader, StreamScrubber::new(redact, builtin_patterns()));
         self.notify_id(row.id);
         Ok(())
+    }
+
+    /// Codex names its conversation once the first prompt is sent. Look for it every few seconds
+    /// while the run lives, and once more when it ends.
+    fn watch_for_conversation(self: &Arc<Self>, row: &SessionRow, run: &Arc<Run>, launched_ms: i64, parent: &[(String, String)]) {
+        let Some(root) = agents::codex::sessions_root(parent) else {
+            return;
+        };
+        let (m, run, id, cwd) = (self.clone(), run.clone(), row.id, row.cwd.clone());
+        let originator = chorus_core::codex::originator_for(id);
+        let _ = std::thread::Builder::new().name(format!("codex-find-{}", run.id)).spawn(move || {
+            loop {
+                let ended = run.wait_finished(agents::codex::POLL);
+                if let Some(found) = agents::codex::find(&root, &originator, &cwd, launched_ms) {
+                    if rows::set_agent_session_id(&m.store, id, &found).is_ok() {
+                        m.notify_id(id);
+                    }
+                    return;
+                }
+                if ended {
+                    return;
+                }
+            }
+        });
     }
 
     fn spawn_threads(

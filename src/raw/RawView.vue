@@ -11,11 +11,14 @@ import KeysPanel from './KeysPanel.vue'
 import { useSessionsStore } from '../stores/sessions'
 import { useKeysStore } from '../stores/keys'
 import { commands, unwrap, type AgentKind, type CreateSession, type SessionSummary } from '../ipc'
+import { optionsText, versionText } from './labels'
+import { useAgentsStore } from '../stores/agents'
 
 const props = defineProps<{ dev: boolean }>()
 
 const sessions = useSessionsStore()
 const keys = useKeysStore()
+const agents = useAgentsStore()
 const mode = ref<'session' | 'new' | 'keys'>('session')
 const busy = ref(false)
 const pin = ref('')
@@ -32,7 +35,7 @@ const AGENT_NAMES: Record<AgentKind, string> = {
 }
 
 onMounted(async () => {
-  await Promise.all([sessions.init(), keys.load()])
+  await Promise.all([sessions.init(), keys.load(), agents.load(false)])
   if (sessions.list.length === 0) mode.value = 'new'
 })
 onUnmounted(() => sessions.dispose())
@@ -90,9 +93,13 @@ if (props.dev) {
   const plain = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T
   const api = {
     list: () => plain(sessions.list),
-    create: async (request: CreateSession) => {
-      await create(request)
+    create: async (request: Omit<CreateSession, 'options'> & { options?: CreateSession['options'] }) => {
+      await create({ ...request, options: request.options ?? { effort: null, permission: null, model: null } })
       return plain(sessions.selected)
+    },
+    agents: async (refresh = false) => {
+      await agents.load(refresh)
+      return plain(agents.list)
     },
     select,
     write: (id: number, data: string) => unwrap(commands.sessionWrite(id, data)),
@@ -167,6 +174,11 @@ if (props.dev) {
         <p class="meta">
           {{ AGENT_NAMES[current.agent] }} · <code>{{ current.cwd }}</code>
           <template v-if="current.credentialLabel"> · key {{ current.credentialLabel }} as <code>{{ current.credentialEnv }}</code></template>
+        </p>
+        <p v-if="current.agent !== 'shell'" class="meta">
+          <template v-if="optionsText(current)">{{ optionsText(current) }} · </template>
+          {{ versionText(current.cliVersion, current.versionFit, agents.byKind.get(current.agent)?.verifiedVersion ?? null) }}
+          <template v-if="current.agentSessionId"> · conversation <code :title="current.agentSessionId">{{ current.agentSessionId.slice(0, 8) }}</code>{{ current.resumed ? ' (resumed)' : '' }}</template>
         </p>
         <p v-if="current.note" class="note">{{ current.note }}</p>
         <p v-if="current.scrollbackError" class="note">{{ current.scrollbackError }}</p>

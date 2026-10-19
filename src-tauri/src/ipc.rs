@@ -8,7 +8,7 @@ use specta_typescript::Typescript;
 use std::path::Path;
 use tauri_specta::{Builder, collect_commands, collect_events};
 
-use crate::{app, fleet, lock, sessions, splash, vault};
+use crate::{agents, app, fleet, lock, sessions, splash, vault};
 
 /// Where the generated bindings live, relative to this crate.
 pub const BINDINGS_FILE: &str = "../src/ipc/bindings.ts";
@@ -19,6 +19,7 @@ pub fn builder() -> Builder<tauri::Wry> {
     Builder::<tauri::Wry>::new()
         .commands(collect_commands![
             app::app_info,
+            agents::commands::agents_list,
             s::sessions_list,
             s::session_create,
             s::session_attach,

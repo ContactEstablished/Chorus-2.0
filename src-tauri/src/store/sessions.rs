@@ -1,10 +1,10 @@
 //! Sessions and runs (ARCHITECTURE §4, §7). A session is long-lived; each launch is a run.
 
+use chorus_core::agent::{AgentKind, LaunchOptions};
 use chorus_core::session::{RunEnd, SessionState};
 use rusqlite::{OptionalExtension, Row, params};
 
 use super::{Store, now_ms};
-use crate::agents::AgentKind;
 
 #[derive(Debug, Clone)]
 pub struct SessionRow {
@@ -20,6 +20,9 @@ pub struct SessionRow {
     pub locked: bool,
     pub note: Option<String>,
     pub created_at: i64,
+    /// Resolved: defaults filled in, checked against the agent's declaration.
+    pub options: LaunchOptions,
+    pub agent_session_id: Option<String>,
 }
 
 pub struct NewSession<'a> {
@@ -30,6 +33,17 @@ pub struct NewSession<'a> {
     pub credential_env: Option<&'a str>,
     pub cols: u16,
     pub rows: u16,
+    pub options: &'a LaunchOptions,
+    pub agent_session_id: Option<&'a str>,
+}
+
+pub struct NewRun<'a> {
+    pub session_id: u32,
+    pub pid: Option<u32>,
+    pub program: &'a str,
+    pub args: &'a [String],
+    pub cli_version: Option<&'a str>,
+    pub resumed: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -42,10 +56,12 @@ pub struct RunRow {
     pub ended_at: Option<i64>,
     pub exit_code: Option<u32>,
     pub end_reason: Option<RunEnd>,
+    pub cli_version: Option<String>,
+    pub resumed: bool,
 }
 
-const SESSION_COLUMNS: &str =
-    "id, name, agent, cwd, state, credential_id, credential_env, cols, rows, locked, note, created_at";
+const SESSION_COLUMNS: &str = "id, name, agent, cwd, state, credential_id, credential_env, cols, rows, locked, note, \
+                               created_at, options, agent_session_id";
 
 fn session_from(r: &Row<'_>) -> rusqlite::Result<SessionRow> {
     let bad = |i: usize, what: &str, v: String| {
@@ -53,6 +69,7 @@ fn session_from(r: &Row<'_>) -> rusqlite::Result<SessionRow> {
     };
     let agent: String = r.get(2)?;
     let state: String = r.get(4)?;
+    let options: String = r.get(12)?;
     Ok(SessionRow {
         id: r.get(0)?,
         name: r.get(1)?,
@@ -66,15 +83,30 @@ fn session_from(r: &Row<'_>) -> rusqlite::Result<SessionRow> {
         locked: r.get(9)?,
         note: r.get(10)?,
         created_at: r.get(11)?,
+        options: serde_json::from_str(&options).map_err(|_| bad(12, "options", options.clone()))?,
+        agent_session_id: r.get(13)?,
     })
 }
 
 pub fn insert(store: &Store, s: &NewSession<'_>) -> Result<u32, String> {
+    let options = serde_json::to_string(s.options).map_err(|e| e.to_string())?;
     store.with(|c| {
         c.execute(
-            "INSERT INTO sessions (name, agent, cwd, state, credential_id, credential_env, cols, rows, created_at)
-             VALUES (?1, ?2, ?3, 'running', ?4, ?5, ?6, ?7, ?8)",
-            params![s.name, s.agent.as_str(), s.cwd, s.credential_id, s.credential_env, s.cols, s.rows, now_ms()],
+            "INSERT INTO sessions (name, agent, cwd, state, credential_id, credential_env, cols, rows, created_at,
+                                   options, agent_session_id)
+             VALUES (?1, ?2, ?3, 'running', ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            params![
+                s.name,
+                s.agent.as_str(),
+                s.cwd,
+                s.credential_id,
+                s.credential_env,
+                s.cols,
+                s.rows,
+                now_ms(),
+                options,
+                s.agent_session_id
+            ],
         )?;
         Ok(c.last_insert_rowid() as u32)
     })
@@ -120,14 +152,35 @@ pub fn set_locked(store: &Store, id: u32, locked: bool) -> Result<(), String> {
     store.with(|c| c.execute("UPDATE sessions SET locked = ?1 WHERE id = ?2", params![locked, id]).map(|_| ()))
 }
 
-pub fn start_run(store: &Store, session_id: u32, pid: Option<u32>, program: &str, args: &[String]) -> Result<u32, String> {
-    let args = serde_json::to_string(args).map_err(|e| e.to_string())?;
+/// Records the agent's conversation id once it is known (Codex names it after launch).
+pub fn set_agent_session_id(store: &Store, id: u32, agent_session_id: &str) -> Result<(), String> {
+    store.with(|c| {
+        c.execute("UPDATE sessions SET agent_session_id = ?1 WHERE id = ?2", params![agent_session_id, id]).map(|_| ())
+    })
+}
+
+pub fn start_run(store: &Store, run: &NewRun<'_>) -> Result<u32, String> {
+    let args = serde_json::to_string(run.args).map_err(|e| e.to_string())?;
     store.with(|c| {
         c.execute(
-            "INSERT INTO runs (session_id, pid, program, args, started_at) VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![session_id, pid, program, args, now_ms()],
+            "INSERT INTO runs (session_id, pid, program, args, started_at, cli_version, resumed)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![run.session_id, run.pid, run.program, args, now_ms(), run.cli_version, run.resumed],
         )?;
         Ok(c.last_insert_rowid() as u32)
+    })
+}
+
+/// Fills in the CLI version on open runs of `agent` that started before the version was detected
+/// (relaunches at start-up don't wait for detection).
+pub fn fill_cli_version(store: &Store, agent: AgentKind, version: &str) -> Result<(), String> {
+    store.with(|c| {
+        c.execute(
+            "UPDATE runs SET cli_version = ?1 WHERE cli_version IS NULL AND ended_at IS NULL
+               AND session_id IN (SELECT id FROM sessions WHERE agent = ?2)",
+            params![version, agent.as_str()],
+        )
+        .map(|_| ())
     })
 }
 
@@ -154,7 +207,7 @@ pub fn open_runs(store: &Store) -> Result<Vec<u32>, String> {
 pub fn last_run(store: &Store, session_id: u32) -> Result<Option<RunRow>, String> {
     store.with(|c| {
         c.query_row(
-            "SELECT id, pid, started_at, ended_at, exit_code, end_reason FROM runs
+            "SELECT id, pid, started_at, ended_at, exit_code, end_reason, cli_version, resumed FROM runs
              WHERE session_id = ?1 ORDER BY id DESC LIMIT 1",
             [session_id],
             |r| {
@@ -166,6 +219,8 @@ pub fn last_run(store: &Store, session_id: u32) -> Result<Option<RunRow>, String
                     ended_at: r.get(3)?,
                     exit_code: r.get(4)?,
                     end_reason: reason.as_deref().and_then(RunEnd::parse),
+                    cli_version: r.get(6)?,
+                    resumed: r.get(7)?,
                 })
             },
         )
@@ -177,6 +232,8 @@ pub fn last_run(store: &Store, session_id: u32) -> Result<Option<RunRow>, String
 mod tests {
     use super::*;
 
+    const NO_OPTIONS: LaunchOptions = LaunchOptions { effort: None, permission: None, model: None };
+
     fn new<'a>() -> NewSession<'a> {
         NewSession {
             name: "Shell 1",
@@ -186,7 +243,28 @@ mod tests {
             credential_env: None,
             cols: 120,
             rows: 30,
+            options: &NO_OPTIONS,
+            agent_session_id: None,
         }
+    }
+
+    fn run<'a>(session_id: u32) -> NewRun<'a> {
+        NewRun { session_id, pid: Some(42), program: "cmd.exe", args: &[], cli_version: None, resumed: false }
+    }
+
+    #[test]
+    fn options_and_the_conversation_id_are_kept() {
+        use chorus_core::agent::{Effort, Permission};
+        let store = Store::in_memory();
+        let options = LaunchOptions { effort: Some(Effort::Deep), permission: Some(Permission::Plan), model: Some("opus".into()) };
+        let id = insert(&store, &NewSession { agent: AgentKind::Claude, options: &options, ..new() }).unwrap();
+        assert_eq!(get(&store, id).unwrap().unwrap().options, options);
+        set_agent_session_id(&store, id, "0f8fad5b-d9cb-469f-a165-70867728950e").unwrap();
+        let row = get(&store, id).unwrap().unwrap();
+        assert_eq!(row.agent_session_id.as_deref(), Some("0f8fad5b-d9cb-469f-a165-70867728950e"));
+        start_run(&store, &NewRun { cli_version: Some("2.1.300"), resumed: true, ..run(id) }).unwrap();
+        let last = last_run(&store, id).unwrap().unwrap();
+        assert_eq!((last.cli_version.as_deref(), last.resumed), (Some("2.1.300"), true));
     }
 
     #[test]
@@ -195,6 +273,7 @@ mod tests {
         let id = insert(&store, &new()).unwrap();
         let row = get(&store, id).unwrap().unwrap();
         assert_eq!((row.state, row.agent, row.cols, row.locked), (SessionState::Running, AgentKind::Shell, 120, false));
+        assert_eq!(row.options, NO_OPTIONS);
         set_size(&store, id, 90, 20).unwrap();
         set_locked(&store, id, true).unwrap();
         set_state(&store, id, SessionState::Exited, Some("claude.exe not found")).unwrap();
@@ -210,7 +289,7 @@ mod tests {
     fn a_run_ends_once() {
         let store = Store::in_memory();
         let sid = insert(&store, &new()).unwrap();
-        let run = start_run(&store, sid, Some(42), "cmd.exe", &["/K".into()]).unwrap();
+        let run = start_run(&store, &run(sid)).unwrap();
         assert_eq!(open_runs(&store).unwrap(), vec![run]);
         assert!(end_run(&store, run, RunEnd::Closed, Some(1)).unwrap());
         assert!(!end_run(&store, run, RunEnd::ChorusClosed, None).unwrap());

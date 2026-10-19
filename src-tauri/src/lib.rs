@@ -66,6 +66,13 @@ pub fn run() {
                 }),
             );
             manager.restore()?;
+            // Look for the agent CLIs without holding up the window. Runs relaunched before this
+            // finishes get their CLI version filled in afterwards.
+            let detecting = manager.clone();
+            std::thread::Builder::new().name("detect-agents".into()).spawn(move || {
+                detecting.refresh_agents();
+                detecting.notify_all();
+            })?;
             app.manage(manager);
             app::start_pulse(app.handle().clone());
             Ok(())

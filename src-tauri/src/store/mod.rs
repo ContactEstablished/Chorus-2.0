@@ -14,7 +14,10 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use rusqlite::Connection;
 
 /// Every migration, in order. `migrations_are_all_listed` fails if a file is missing here.
-const MIGRATION_FILES: &[(&str, &str)] = &[("0001_initial.sql", include_str!("../../migrations/0001_initial.sql"))];
+const MIGRATION_FILES: &[(&str, &str)] = &[
+    ("0001_initial.sql", include_str!("../../migrations/0001_initial.sql")),
+    ("0002_agent_options.sql", include_str!("../../migrations/0002_agent_options.sql")),
+];
 
 pub struct Store {
     conn: Mutex<Connection>,

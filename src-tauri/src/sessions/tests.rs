@@ -32,6 +32,7 @@ impl Fixture {
             credential,
             cols: 100,
             rows: 30,
+            options: Default::default(),
         };
         let s = self.manager.create(req).unwrap();
         assert!(s.live, "shell should be running: {:?}", s.note);
@@ -244,6 +245,7 @@ fn bad_input_is_refused_at_the_boundary() {
         credential: None,
         cols: 100,
         rows: 30,
+        options: Default::default(),
     };
     assert!(f.manager.create(req.clone()).unwrap_err().contains("full path"));
     req.cwd = f.dir.join("missing").display().to_string();

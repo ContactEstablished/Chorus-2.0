@@ -8,6 +8,11 @@ import * as __TAURI_EVENT from "@tauri-apps/api/event";
 /** Commands */
 export const commands = {
 	appInfo: () => __TAURI_INVOKE<AppInfo>("app_info"),
+	/**
+	 *  Every agent and what it declares. With `refresh`, looks for each CLI again first (a second or
+	 *  two); otherwise returns what the last detection found.
+	 */
+	agentsList: (refresh: boolean) => typedError<AgentInfo[], string>(__TAURI_INVOKE("agents_list", { refresh })),
 	sessionsList: () => typedError<SessionSummary[], string>(__TAURI_INVOKE("sessions_list")),
 	sessionCreate: (request: CreateSession) => typedError<SessionSummary, string>(__TAURI_INVOKE("session_create", { request })),
 	/**
@@ -56,6 +61,25 @@ export const events = {
 };
 
 /* Types */
+export type AgentInfo = {
+	kind: AgentKind,
+	displayName: string,
+	/**
+	 *  Empty when the agent has no setting for it; the form then leaves the control out and says
+	 *  why.
+	 */
+	efforts: EffortChoice[],
+	defaultEffort: Effort | null,
+	permissions: PermissionChoice[],
+	defaultPermission: Permission | null,
+	takesModel: boolean,
+	resume: ResumeKind,
+	/**  The CLI version the options were checked against. */
+	verifiedVersion: string | null,
+	/**  None until the first detection finishes. */
+	detection: Detection | null,
+};
+
 export type AgentKind = "shell" | "claude" | "codex" | "opencode" | "grok";
 
 export type AppInfo = {
@@ -91,6 +115,8 @@ export type CreateSession = {
 	credential: CredentialUse | null,
 	cols: number,
 	rows: number,
+	/**  Checked against what the agent declares; anything it lacks is refused with a reason. */
+	options: LaunchOptions,
 };
 
 export type CredentialSummary = {
@@ -105,6 +131,27 @@ export type CredentialSummary = {
 export type CredentialUse = {
 	id: number,
 	envVar: string,
+};
+
+/**  What Chorus found for one agent. */
+export type Detection = {
+	found: boolean,
+	/**  The program a launch runs (behind any npm shim). */
+	program: string | null,
+	/**  The version as `x.y.z`, when it could be read. */
+	version: string | null,
+	fit: VersionFit | null,
+	/**  Why the agent can't be launched, or why its version couldn't be read. */
+	problem: string | null,
+};
+
+/**  One effort scale for every agent. */
+export type Effort = "fast" | "balanced" | "deep" | "max";
+
+export type EffortChoice = {
+	effort: Effort,
+	/**  The arguments it adds, as typed on a command line. */
+	args: string,
 };
 
 export type FileLeak = {
@@ -137,6 +184,17 @@ export type FleetProbe = {
 	foregroundHwnd: string,
 };
 
+/**
+ *  What a session asks for. An empty field means the agent's declared default, or for the model,
+ *  the CLI's own choice.
+ */
+export type LaunchOptions = {
+	effort: Effort | null,
+	permission: Permission | null,
+	/**  A model name in the form the CLI takes (`opus`, `gpt-5.5`). */
+	model: string | null,
+};
+
 export type LeakReport = {
 	/**  Longest run of the key (8 bytes or more) found in the text passed in, such as a pane's screen. */
 	text: number,
@@ -144,6 +202,35 @@ export type LeakReport = {
 	files: FileLeak[],
 	filesScanned: number,
 };
+
+/**  How much the agent may do without asking. */
+export type Permission = 
+/**  Asks before acting. */
+"manual" | 
+/**  The agent's own judgement of what is safe to do without asking. */
+"auto" | 
+/**  Edits files without asking. */
+"accept-edits" | 
+/**  Plans only. */
+"plan" | 
+/**  No sandbox and no questions. */
+"full-access";
+
+export type PermissionChoice = {
+	permission: Permission,
+	args: string,
+};
+
+/**  How a session's next run picks up the agent's conversation. */
+export type ResumeKind = 
+/**  Nothing to resume. */
+"none" | 
+/**  Chorus chooses the conversation id at launch and passes it back to resume. */
+"assigned" | 
+/**  The agent chooses the id; Chorus finds it in the agent's files after launch. */
+"discovered" | 
+/**  The conversation lives in a server Chorus runs for the session. */
+"server";
 
 export type SessionStatus = "running" | "exited" | "closed";
 
@@ -174,11 +261,28 @@ export type SessionSummary = {
 	createdAtSecs: number,
 	runStartedAtSecs: number | null,
 	scrollbackError: string | null,
+	/**  What the session asked its agent for, with the declared defaults filled in. */
+	options: LaunchOptions,
+	/**  The agent's own conversation id, once Chorus has one. */
+	agentSessionId: string | null,
+	/**
+	 *  The CLI version detected for the last run, and how it compares with the version Chorus
+	 *  checked the agent's options against.
+	 */
+	cliVersion: string | null,
+	versionFit: VersionFit | null,
+	/**  The last run continued the agent's conversation rather than starting one. */
+	resumed: boolean,
 };
 
 export type SessionUpdated = {
 	session: SessionSummary,
 };
+
+/**  How a found version relates to the one Chorus checked. */
+export type VersionFit = "verified" | "newer" | "older" | 
+/**  The CLI ran but printed no version Chorus could read. */
+"unreadable";
 
 /* Tauri Specta runtime */
 async function typedError<T, E>(result: Promise<T>): Promise<{ status: "ok"; data: T } | { status: "error"; error: E }> {

@@ -1,53 +1,19 @@
-//! Where each agent CLI lives and how to start it (spike S1; the full adapters, with declared
-//! options and capabilities, are P2).
+//! Where each agent CLI lives and how to start it. The options each agent declares, and their
+//! arguments, are in `chorus_core::agent`; finding the CLI and its version is [`detect`].
 //!
 //! Each CLI is launched through its real install, never through `cmd.exe /c`: `claude` and `grok`
 //! are native executables; `codex` and `opencode` are npm `.cmd` shims, resolved to their target
 //! (LESSONS L14). Auto-update is switched off for every agent that has a switch (LESSONS L7).
 
+pub mod codex;
+pub mod commands;
+pub mod detect;
+
 use std::path::{Path, PathBuf};
 
 use chorus_core::shim::{ShimKind, parse_npm_shim};
-use serde::{Deserialize, Serialize};
-use specta::Type;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
-#[serde(rename_all = "lowercase")]
-pub enum AgentKind {
-    Shell,
-    Claude,
-    Codex,
-    Opencode,
-    Grok,
-}
-
-impl AgentKind {
-    /// The stored and serialised name.
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Shell => "shell",
-            Self::Claude => "claude",
-            Self::Codex => "codex",
-            Self::Opencode => "opencode",
-            Self::Grok => "grok",
-        }
-    }
-
-    pub fn parse(s: &str) -> Option<Self> {
-        [Self::Shell, Self::Claude, Self::Codex, Self::Opencode, Self::Grok].into_iter().find(|k| k.as_str() == s)
-    }
-
-    /// How the agent is named in the UI and in default session names.
-    pub fn display_name(self) -> &'static str {
-        match self {
-            Self::Shell => "Shell",
-            Self::Claude => "Claude Code",
-            Self::Codex => "Codex",
-            Self::Opencode => "opencode",
-            Self::Grok => "Grok",
-        }
-    }
-}
+pub use chorus_core::agent::AgentKind;
 
 /// A resolved launch: what to run and what the agent needs beyond the baseline environment.
 #[derive(Debug, Clone)]
@@ -129,6 +95,28 @@ fn find_on_path(path: &str, name: &str) -> Option<PathBuf> {
     path.split(';').filter(|d| !d.is_empty()).map(|d| Path::new(d).join(name)).find(|p| p.is_file())
 }
 
-fn env_value(env: &[(String, String)], name: &str) -> Option<String> {
+pub fn env_value(env: &[(String, String)], name: &str) -> Option<String> {
     env.iter().find(|(k, _)| k.eq_ignore_ascii_case(name)).map(|(_, v)| v.clone())
+}
+
+/// Whether the agent has recorded the conversation `id`, so the next run resumes it instead of
+/// starting it. Claude Code writes `<config>/projects/<folder>/<id>.jsonl` once the conversation has
+/// a message; Grok keeps `~/.grok/sessions/<folder>/<id>/` (its bundled docs, unverified while Grok
+/// isn't signed in). The folder part is derived from the working directory, so every folder is
+/// searched rather than re-deriving its name. Codex's ids are only known once it has written them.
+pub fn conversation_exists(kind: AgentKind, id: &str, parent_env: &[(String, String)]) -> bool {
+    let home = || env_value(parent_env, "USERPROFILE").map(PathBuf::from);
+    let (root, file) = match kind {
+        AgentKind::Claude => {
+            let config = env_value(parent_env, "CLAUDE_CONFIG_DIR").map(PathBuf::from).or_else(|| home().map(|h| h.join(".claude")));
+            (config.map(|c| c.join("projects")), format!("{id}.jsonl"))
+        }
+        AgentKind::Grok => (home().map(|h| h.join(".grok").join("sessions")), id.to_owned()),
+        AgentKind::Codex => return true,
+        AgentKind::Shell | AgentKind::Opencode => return false,
+    };
+    let Some(Ok(folders)) = root.map(std::fs::read_dir) else {
+        return false;
+    };
+    folders.flatten().any(|f| f.path().join(&file).exists())
 }

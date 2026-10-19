@@ -2,6 +2,7 @@
 // never edit it by hand). Import IPC from here, not from bindings.ts directly.
 export { commands, events } from './bindings'
 export type {
+  AgentInfo,
   AgentKind,
   AppInfo,
   BackendPulse,
@@ -9,11 +10,19 @@ export type {
   CreateSession,
   CredentialSummary,
   CredentialUse,
+  Detection,
+  Effort,
+  EffortChoice,
   FleetClick,
   Flavor,
+  LaunchOptions,
   LeakReport,
+  Permission,
+  PermissionChoice,
+  ResumeKind,
   SessionStatus,
   SessionSummary,
+  VersionFit,
 } from './bindings'
 
 /** The result shape of every fallible generated command. */
