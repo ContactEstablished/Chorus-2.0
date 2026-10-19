@@ -176,7 +176,21 @@ async function screenKeyFragment(label: string): Promise<number> {
   return res.data
 }
 
+async function openFleet() {
+  const res = await commands.spikeFleetOpen()
+  if (res.status === 'error') throw new Error(res.error)
+  return res.data
+}
+
+async function probeFleet() {
+  const res = await commands.spikeFleetProbe()
+  if (res.status === 'error') throw new Error(res.error)
+  return res.data
+}
+
 const api = {
+  openFleet,
+  probeFleet,
   spawn,
   addFakeKey,
   importSecretFile,

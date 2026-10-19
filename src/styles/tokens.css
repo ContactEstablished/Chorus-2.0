@@ -64,3 +64,10 @@ body {
 #app {
   height: 100%;
 }
+
+/* The fleet strip window draws its own rounded pill on a transparent-looking background. */
+html.fleet,
+html.fleet body {
+  background: var(--bg);
+  overflow: hidden;
+}

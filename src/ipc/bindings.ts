@@ -24,11 +24,18 @@ export const commands = {
 	 *  opencode server password), so it can be injected like any vault key. The value never crosses IPC.
 	 */
 	spikeVaultImportFile: (label: string, fileName: string) => typedError<FakeKeyInfo, string>(__TAURI_INVOKE("spike_vault_import_file", { label, fileName })),
+	/**
+	 *  Opens the strip (or returns the open one) without activating it. Async because building a window
+	 *  inside a synchronous command deadlocks on Windows.
+	 */
+	spikeFleetOpen: () => typedError<FleetProbe, string>(__TAURI_INVOKE("spike_fleet_open")),
+	spikeFleetProbe: () => typedError<FleetProbe, string>(__TAURI_INVOKE("spike_fleet_probe")),
 };
 
 /** Events */
 export const events = {
 	backendPulse: makeEvent<BackendPulse>("backend-pulse"),
+	fleetClick: makeEvent<FleetClick>("fleet-click"),
 	ptyExited: makeEvent<PtyExited>("pty-exited"),
 };
 
@@ -76,6 +83,28 @@ export type FakeKeyInfo = {
 
 /**  Dev or release, as the front end sees it. */
 export type Flavor = "dev" | "release";
+
+/**
+ *  A click on the strip, in physical pixels from its top-left corner. The page turns it into a
+ *  click on the element under that point.
+ */
+export type FleetClick = {
+	x: number,
+	y: number,
+};
+
+export type FleetProbe = {
+	hwnd: string,
+	left: number,
+	top: number,
+	width: number,
+	height: number,
+	dpi: number,
+	noActivate: boolean,
+	topmost: boolean,
+	shield: boolean,
+	foregroundHwnd: string,
+};
 
 /**  Run opencode's TUI against a server Chorus started (`opencode attach`), as ARCHITECTURE §5 plans. */
 export type OpencodeAttach = {

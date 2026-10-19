@@ -2,6 +2,7 @@
 
 mod agents;
 mod app;
+mod fleet;
 mod ipc;
 mod sessions;
 mod vault;

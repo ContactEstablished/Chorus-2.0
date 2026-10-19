@@ -7,7 +7,7 @@ and written up in `S<n>.md`; raw evidence stays in `_verify/`, which is never co
 |---|---|---|
 | S1 | PTY host: ConPTY to xterm.js over a Tauri channel, Job Object cleanup | [Pass](S1.md): 10 MB burst with no frame over 9 ms; Close and crash kill whole trees; Close must spare browsers |
 | S2 | ~~Push-to-talk hotkey~~ | Removed (D22) |
-| S3 | Fleet strip: on top, never activated, draggable | pending |
+| S3 | Fleet strip: on top, never activated, draggable | [Changed approach, pass](S3.md): needs a native input shield; then an external app keeps focus through clicks and drags. Multi-DPI untested (one monitor) |
 | S4 | DPAPI vault and env-only key injection | [Pass](S4.md): key reaches the child (length and hash match), never in argv, redacted on screen even when split |
 | S5 | Agent channels per CLI | [Pass, Grok changed approach](S5.md): Claude Code, Codex and opencode approvals, questions and queueing answered from Chorus; Grok unverifiable (not signed in) |
 | S6 | ~~Local transcription~~ | Removed (D22) |

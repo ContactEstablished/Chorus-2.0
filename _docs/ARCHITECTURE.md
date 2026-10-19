@@ -30,7 +30,8 @@ P0 spike in [PLAN.md](PLAN.md) reports.
   ConPTY, grouped in a Windows Job Object so Close (or a crash of 2.0) never leaves orphans.
 - **Sessions belong to the back end.** A window attaches to a `session_id` and can come and go freely.
 - **Windows:** `main` (frameless, custom title bar), `splash` (short-lived), `fleet` (status strip, always
-  on top, never activated, so an external dictation app keeps focus: D23, spike S3). Each window gets only
+  on top, never activated, so an external dictation app keeps focus: D23; it takes input through a native
+  input shield, D38, spike S3). Each window gets only
   the Tauri capabilities it needs (Tauri 2's per-window permission files).
 - **Dictation compatibility (D23):** voice lives in a separate app (D22). Chorus never steals focus, the
   composer and the Raw terminal accept inserted or pasted text, and nothing Chorus receives is

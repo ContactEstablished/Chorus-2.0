@@ -119,6 +119,12 @@ questions, permissions, todos and queued prompts all work over the server API wi
 Basic auth comes from `OPENCODE_SERVER_PASSWORD` (environment). The keyless free model once took five
 minutes to time out a request before opencode retried; a stall is not a failure signal by itself.
 
+**L28 — `WS_EX_NOACTIVATE` does not stop a WebView2 window taking focus (S3).** A click lands on
+WebView2's `Chrome_RenderWidgetHostHWND`, which lives in the browser process and activates its
+top-level ancestor whatever that window's styles say. A never-activated web window needs a native child
+window over the content that answers `MA_NOACTIVATE` and forwards input (D38). Also: build windows in
+async commands; building one inside a synchronous command deadlocks on Windows.
+
 ## Money and models
 
 **L16 — Read-then-revoke under-reports OpenRouter spend.** Reading a capped key's usage right after the
