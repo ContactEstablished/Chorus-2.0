@@ -150,6 +150,19 @@ elevated setting kept as fallback. Under MXC, `read-only` blocked writes, and `w
 writes inside the workspace and blocked them outside. `codex sandbox -P :read-only -C <dir> -- <cmd>`
 tests the sandbox without a model turn.
 
+**L32 — ConPTY waits for the terminal before drawing anything (P1).** portable-pty 0.9 creates the
+pseudoconsole with `PSEUDOCONSOLE_INHERIT_CURSOR`. The first output is a cursor-position request
+(`ESC[6n`), and ConPTY sends nothing more until it gets an answer. In S1, xterm.js answered it. A
+session with no view attached, which includes every session relaunched at boot, would hang with the
+request as its only output. Chorus answers the request itself and removes it from the stream
+(`chorus_core::conpty`); otherwise xterm.js answers a second time and its reply arrives as typed
+input. The answer has to be true, so every run starts on a screen Chorus prepared: the top-left of a
+new terminal, or the row under the dividing line after a Restart or relaunch.
+
+**L33 — Claude Code 2.1.300's folder-trust prompt defaults to "No, exit" (P1).** In a folder it hasn't
+seen, Enter declines, and the session exits with code 1. P2's Claude adapter should recognise that
+prompt and say what it is, not just show "exited (1)".
+
 ## Money and models
 
 **L16 — Read-then-revoke under-reports OpenRouter spend.** Reading a capped key's usage right after the

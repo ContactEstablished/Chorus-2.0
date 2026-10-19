@@ -89,8 +89,8 @@ SessionManager in Rust: spawn, stream, resize, input and kill PTYs; minimal chil
 plus imposed `TERM`/`COLORTERM`, LESSONS L13); secret scrubber on all output; scrollback mirrored to disk
 and replayed on attach; restore after restart (relaunch what was running, heal records whose processes
 are gone); **Restart** and **Close** as the only session controls (Close kills the session's Job
-Object but spares a browser the agent opened, and the child joins its job atomically at spawn: S1
-findings 1 and 2); agent lock with optional PIN; plain shell sessions (UTF-8 code page). SQLite store with forward-only migrations. DPAPI vault. A bare Raw view to drive it.
+Object but spares a browser the agent opened, and the child joins its job at spawn, with any process it
+started in that moment adopted (D41): S1 findings 1 and 2); agent lock with optional PIN; plain shell sessions (UTF-8 code page). SQLite store with forward-only migrations. DPAPI vault. A bare Raw view to drive it.
 
 **Exit:** a shell and a Claude Code session survive closing their view, an app restart, and a reboot
 (they are relaunched); a planted fake key never appears in the pane, the scrollback file or the DB.

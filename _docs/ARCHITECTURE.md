@@ -94,8 +94,17 @@ composer/actions ─► ActionRouter ─► structured channel if available, els
 - **Run records:** a *session* is long-lived (name, project, bot, history); each launch is a *run* (pid,
   CLI version, args minus secrets, exit code). Restart = end the current run and start a new one in the same
   session, resuming the conversation when the agent supports it.
-- **Restore on boot:** sessions marked running are relaunched (with resume); runs whose process is gone are
-  closed out with a reason.
+- **Restore on boot:** sessions marked running are relaunched (with resume from P2); runs whose process is
+  gone are closed out with a reason. A clean quit records each live run as `chorus-closed` but leaves the
+  session running, so it comes back. A run still open at start-up is recorded as `chorus-crashed`. A child
+  that exits while Windows is shutting down doesn't count as exiting by itself (`chorus_core::session`).
+- **One emit path:** scrubbed, batched output goes to a per-session hub, which appends to the mirror
+  before sending to views. A view that attaches is sent the mirror, then live output, under one lock,
+  so nothing is lost or repeated. Views come and go; the session runs headless meanwhile. Chorus answers
+  ConPTY's opening cursor request itself (LESSONS L32).
+- **Close spares windows:** Close ends the run's job but leaves processes with visible windows, and what
+  runs under them, alive: a browser the agent opened survives (LESSONS L22). A locked session refuses
+  Close and Restart.
 - **Writes that submit:** prompt text and Enter are sent as **two writes**, so the TUI doesn't treat Enter
   as part of a paste (LESSONS L4).
 
