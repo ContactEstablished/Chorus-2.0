@@ -324,9 +324,41 @@ impl StreamScrubber {
     }
 }
 
+/// The length of the longest run of `secret` that appears in `hay`, counting only runs of at
+/// least `min` bytes (0 if none). Used to prove a key leaked nowhere, partially or whole, without
+/// ever showing it: callers report the number, never the bytes.
+pub fn longest_shared_run(secret: &[u8], hay: &[u8], min: usize) -> usize {
+    if min == 0 || secret.len() < min || hay.len() < min {
+        return 0;
+    }
+    let pieces: std::collections::HashMap<&[u8], Vec<usize>> =
+        secret.windows(min).enumerate().fold(std::collections::HashMap::new(), |mut m, (i, w)| {
+            m.entry(w).or_insert_with(Vec::new).push(i);
+            m
+        });
+    let mut best = 0;
+    for (h, w) in hay.windows(min).enumerate() {
+        let Some(starts) = pieces.get(w) else { continue };
+        for &s in starts {
+            let n = secret[s..].iter().zip(&hay[h..]).take_while(|(a, b)| a == b).count();
+            best = best.max(n);
+        }
+    }
+    best
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn longest_shared_run_finds_partial_leaks() {
+        let key = b"sk-or-v1-0123456789abcdef";
+        assert_eq!(longest_shared_run(key, b"nothing here", 8), 0);
+        assert_eq!(longest_shared_run(key, b"x 0123456789ab y", 8), 12);
+        assert_eq!(longest_shared_run(key, &[b"..".as_slice(), key, b".."].concat(), 8), key.len());
+        assert_eq!(longest_shared_run(key, b"0123456", 8), 0);
+    }
 
     // Fake keys are assembled at run time, so the repo's own secret scan never sees a key shape.
     fn fake(prefix: &str, n: usize) -> String {

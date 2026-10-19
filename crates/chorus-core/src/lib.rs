@@ -7,6 +7,12 @@
 
 pub mod batch;
 pub mod build;
+pub mod conpty;
 pub mod env;
+pub mod lock;
+pub mod migrate;
+pub mod scrollback;
 pub mod scrub;
+pub mod session;
 pub mod shim;
+pub mod tree;
