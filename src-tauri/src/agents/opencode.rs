@@ -11,8 +11,8 @@ use std::process::{Child, Command, Stdio};
 use std::sync::{Mutex, mpsc};
 use std::time::Duration;
 
-use chorus_core::opencode::{self, ModelCheck, Observed};
-use serde_json::json;
+use chorus_core::opencode::{self, ModelCheck};
+use serde_json::{Value, json};
 
 use crate::sessions::job::Job;
 
@@ -20,8 +20,11 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 /// The first start in a new data folder sets that folder up.
 const START_TIMEOUT: Duration = Duration::from_secs(30);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
-/// How often a run reads back what its newest turn ran with.
-pub const POLL: Duration = Duration::from_secs(3);
+/// How long a dropped event stream waits before reconnecting, and how many times it tries.
+pub const RECONNECT_WAIT: Duration = Duration::from_secs(1);
+pub const RECONNECT_TRIES: u32 = 30;
+/// An event stream that never completes an event is cut off here.
+const MAX_EVENT_BUFFER: usize = 4 * 1024 * 1024;
 
 /// The state folder `agents::resolve` gives opencode inside a session's folder. Its TUI keeps the
 /// last variant it used per model there, and that beats the configuration (LESSONS L5).
@@ -164,11 +167,49 @@ impl Api {
         Ok(opencode::check_model(&body, model))
     }
 
-    pub fn latest_user_turn(&self, session_id: &str) -> Result<Option<Observed>, String> {
-        let (status, body) = self.get(&format!("/session/{session_id}/message?limit={}", opencode::READ_BACK_MESSAGES))?;
-        if status != 200 {
-            return Err(format!("opencode answered {status} when asked for the session's messages"));
+    /// The server's event stream (`GET /event`, S5), open until the server ends.
+    pub fn events(&self) -> Result<EventStream, String> {
+        // No overall timeout: the stream stays open for the whole run.
+        let client = reqwest::Client::builder()
+            .connect_timeout(REQUEST_TIMEOUT)
+            .no_proxy()
+            .build()
+            .map_err(|e| format!("making the HTTP client: {e}"))?;
+        let request = client.get(format!("{}/event", self.url)).basic_auth(opencode::USERNAME, Some(&self.password));
+        let response = tauri::async_runtime::block_on(request.send()).map_err(|e| format!("opencode's event stream: {e}"))?;
+        if !response.status().is_success() {
+            return Err(format!("opencode answered {} for its event stream", response.status().as_u16()));
         }
-        Ok(opencode::latest_user_turn(&body))
+        Ok(EventStream { response, buffer: Vec::new() })
+    }
+}
+
+/// opencode's events as they arrive.
+pub struct EventStream {
+    response: reqwest::Response,
+    /// Bytes of an event not yet complete. Kept as bytes so a character split across chunks
+    /// isn't mangled.
+    buffer: Vec<u8>,
+}
+
+impl EventStream {
+    /// The next complete events; `None` when the stream ends.
+    pub fn next(&mut self) -> Option<Vec<Value>> {
+        loop {
+            let chunk = tauri::async_runtime::block_on(self.response.chunk()).ok()??;
+            self.buffer.extend(chunk.iter().filter(|b| **b != b'\r'));
+            let Some(end) = self.buffer.windows(2).rposition(|w| w == b"\n\n") else {
+                if self.buffer.len() > MAX_EVENT_BUFFER {
+                    self.buffer.clear();
+                }
+                continue;
+            };
+            let complete: Vec<u8> = self.buffer.drain(..end + 2).collect();
+            let mut text = String::from_utf8_lossy(&complete).into_owned();
+            let events = opencode::take_sse_events(&mut text);
+            if !events.is_empty() {
+                return Some(events);
+            }
+        }
     }
 }

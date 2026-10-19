@@ -1023,22 +1023,48 @@ impl SessionManager {
     /// What each new opencode turn ran with, read back every few seconds while the run lives
     /// (P3 moves this onto the server's events).
     fn watch_opencode(self: &Arc<Self>, session_id: u32, run: &Arc<Run>, api: Api, conversation: String) {
-        let name = format!("opencode-watch-{}", run.id);
+        let name = format!("opencode-events-{}", run.id);
         let (m, run) = (self.clone(), run.clone());
         let _ = std::thread::Builder::new().name(name).spawn(move || {
-            while !run.wait_finished(agents::opencode::POLL) {
-                let Ok(Some(seen)) = api.latest_user_turn(&conversation) else { continue };
-                let changed = {
-                    let mut slot = run.observed.lock().expect("observed lock");
-                    let changed = slot.as_ref() != Some(&seen);
-                    *slot = Some(seen);
-                    changed
-                };
-                if changed {
-                    m.notify_id(session_id);
+            let mut parser = oc::EventParser::new(&conversation);
+            let mut tries = 0;
+            while !run.wait_finished(Duration::ZERO) && tries < agents::opencode::RECONNECT_TRIES {
+                if let Ok(mut stream) = api.events() {
+                    tries = 0;
+                    while let Some(events) = stream.next() {
+                        for event in events {
+                            m.record_opencode(session_id, &run, &event, &mut parser);
+                        }
+                    }
+                }
+                tries += 1;
+                if run.wait_finished(agents::opencode::RECONNECT_WAIT) {
+                    break;
                 }
             }
         });
+    }
+
+    /// One event from opencode's server: what a new prompt ran with, and the turn events it means.
+    fn record_opencode(&self, session_id: u32, run: &Run, event: &serde_json::Value, parser: &mut oc::EventParser) {
+        let mut changed = false;
+        if event.get("type").and_then(serde_json::Value::as_str) == Some("message.updated")
+            && let Some(seen) = event.pointer("/properties/info").and_then(oc::observed_from_user_info)
+        {
+            let mut slot = run.observed.lock().expect("observed lock");
+            changed |= slot.as_ref() != Some(&seen);
+            *slot = Some(seen);
+        }
+        let events = parser.push(event);
+        if !events.is_empty() {
+            let mut recorder = run.recorder.lock().expect("recorder lock");
+            let before = recorder.activity();
+            recorder.record(&self.store, "opencode", event, &events, crate::store::now_ms());
+            changed |= before != recorder.activity();
+        }
+        if changed {
+            self.notify_id(session_id);
+        }
     }
 
     /// Codex names its conversation once the first prompt is sent. Look for it every few seconds

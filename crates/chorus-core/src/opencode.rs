@@ -9,6 +9,7 @@ use serde_json::{Map, Value, json};
 use specta::Type;
 
 use crate::agent::{LaunchOptions, Spec};
+use crate::events::AgentEvent;
 
 /// The basic-auth user `opencode serve` expects when only a password is set.
 pub const USERNAME: &str = "opencode";
@@ -164,6 +165,174 @@ pub fn latest_user_turn(messages_body: &str) -> Option<Observed> {
     })
 }
 
+/// What a user message on opencode's event stream says the turn ran with (its `info`).
+pub fn observed_from_user_info(info: &Value) -> Option<Observed> {
+    if info.get("role").and_then(Value::as_str) != Some("user") {
+        return None;
+    }
+    let text = |o: &Value, k: &str| o.get(k).and_then(Value::as_str).map(str::to_owned);
+    let model = info.get("model")?;
+    Some(Observed {
+        model: format!("{}/{}", text(model, "providerID")?, text(model, "modelID")?),
+        variant: text(model, "variant"),
+        agent: text(info, "agent"),
+    })
+}
+
+/// Turns opencode 1.19.3's server events (`GET /event`, S5) into [`AgentEvent`]s for one session.
+/// It keeps a little state: which messages are the user's, their text, and which tool calls have
+/// started. A turn is a user message; it ends when an assistant message replying to it
+/// (`parentID`) finishes with `stop`, or fails or is aborted.
+#[derive(Debug, Default)]
+pub struct EventParser {
+    session_id: String,
+    user_messages: std::collections::HashSet<String>,
+    started: std::collections::HashSet<String>,
+    /// Message id → its text parts, by part id, in arrival order.
+    texts: std::collections::HashMap<String, Vec<(String, String)>>,
+    tools_started: std::collections::HashSet<String>,
+}
+
+impl EventParser {
+    pub fn new(session_id: &str) -> Self {
+        Self { session_id: session_id.to_owned(), ..Default::default() }
+    }
+
+    fn text_of(&self, message_id: &str) -> Option<String> {
+        let parts = self.texts.get(message_id)?;
+        let joined = parts.iter().map(|(_, t)| t.as_str()).collect::<Vec<_>>().join("\n");
+        (!joined.trim().is_empty()).then_some(joined)
+    }
+
+    fn start(&mut self, message_id: &str) -> Option<AgentEvent> {
+        if !self.user_messages.contains(message_id) || self.started.contains(message_id) {
+            return None;
+        }
+        let prompt = self.text_of(message_id)?;
+        self.started.insert(message_id.to_owned());
+        Some(AgentEvent::TurnStarted { turn: Some(message_id.to_owned()), prompt: Some(prompt) })
+    }
+
+    /// One event from the stream, as the events it means.
+    pub fn push(&mut self, event: &Value) -> Vec<AgentEvent> {
+        let kind = event.get("type").and_then(Value::as_str).unwrap_or_default();
+        let p = event.get("properties").cloned().unwrap_or(Value::Null);
+        let text = |o: &Value, k: &str| o.get(k).and_then(Value::as_str).map(str::to_owned);
+        let session = text(&p, "sessionID").or_else(|| p.pointer("/info/sessionID").and_then(Value::as_str).map(str::to_owned));
+        if session.as_deref() != Some(self.session_id.as_str()) {
+            return Vec::new();
+        }
+        match kind {
+            "message.updated" => {
+                let info = p.get("info").cloned().unwrap_or(Value::Null);
+                let Some(id) = text(&info, "id") else { return Vec::new() };
+                match info.get("role").and_then(Value::as_str) {
+                    Some("user") => {
+                        self.user_messages.insert(id.clone());
+                        self.start(&id).into_iter().collect()
+                    }
+                    Some("assistant") => {
+                        let parent = text(&info, "parentID");
+                        if let Some(error) = info.get("error").filter(|e| !e.is_null()) {
+                            let name = text(error, "name").unwrap_or_default();
+                            if name.contains("Abort") {
+                                return vec![AgentEvent::TurnInterrupted { turn: parent }];
+                            }
+                            let message = error.pointer("/data/message").and_then(Value::as_str).map(str::to_owned).unwrap_or(name);
+                            return vec![AgentEvent::TurnFailed { turn: parent, error: message }];
+                        }
+                        let completed = info.pointer("/time/completed").is_some_and(|t| !t.is_null());
+                        if completed && info.get("finish").and_then(Value::as_str) == Some("stop") {
+                            return vec![AgentEvent::TurnEnded { turn: parent, message: self.text_of(&id) }];
+                        }
+                        Vec::new()
+                    }
+                    _ => Vec::new(),
+                }
+            }
+            "message.part.updated" => {
+                let part = p.get("part").cloned().unwrap_or(Value::Null);
+                let Some(message_id) = text(&part, "messageID") else { return Vec::new() };
+                match part.get("type").and_then(Value::as_str) {
+                    Some("text") => {
+                        let part_id = text(&part, "id").unwrap_or_default();
+                        let body = text(&part, "text").unwrap_or_default();
+                        let parts = self.texts.entry(message_id.clone()).or_default();
+                        match parts.iter_mut().find(|(id, _)| *id == part_id) {
+                            Some(slot) => slot.1 = body,
+                            None => parts.push((part_id, body)),
+                        }
+                        self.start(&message_id).into_iter().collect()
+                    }
+                    Some("tool") => {
+                        let call = text(&part, "callID");
+                        let tool = text(&part, "tool").unwrap_or_default();
+                        let state = part.get("state").cloned().unwrap_or(Value::Null);
+                        let target = state.get("input").and_then(crate::events::tool_target);
+                        let key = call.clone().unwrap_or_default();
+                        match state.get("status").and_then(Value::as_str) {
+                            Some("pending" | "running") if self.tools_started.insert(key.clone()) => {
+                                vec![AgentEvent::ToolStarted { turn: None, call, tool, target }]
+                            }
+                            Some(status @ ("completed" | "error")) => {
+                                vec![AgentEvent::ToolFinished { turn: None, call, tool, target, failed: status == "error" }]
+                            }
+                            _ => Vec::new(),
+                        }
+                    }
+                    _ => Vec::new(),
+                }
+            }
+            "permission.asked" => {
+                let target = p
+                    .pointer("/metadata/filepath")
+                    .or_else(|| p.pointer("/metadata/command"))
+                    .or_else(|| p.pointer("/patterns/0"))
+                    .and_then(Value::as_str)
+                    .map(str::to_owned);
+                vec![AgentEvent::ApprovalAsked { turn: None, ask: text(&p, "id"), tool: text(&p, "permission").unwrap_or_default(), target }]
+            }
+            "permission.replied" => vec![AgentEvent::ApprovalAnswered {
+                ask: text(&p, "requestID"),
+                allowed: p.get("reply").and_then(Value::as_str) != Some("reject"),
+            }],
+            "question.asked" => vec![AgentEvent::QuestionAsked {
+                turn: None,
+                ask: text(&p, "id"),
+                question: p.pointer("/questions/0/question").and_then(Value::as_str).unwrap_or_default().to_owned(),
+            }],
+            "question.replied" => vec![AgentEvent::QuestionAnswered {
+                ask: text(&p, "requestID"),
+                answer: p.pointer("/answers/0/0").and_then(Value::as_str).map(str::to_owned),
+            }],
+            "session.error" => vec![AgentEvent::TurnFailed {
+                turn: None,
+                error: p.pointer("/error/data/message").and_then(Value::as_str).unwrap_or("the turn failed").to_owned(),
+            }],
+            _ => Vec::new(),
+        }
+    }
+}
+
+/// Splits a server-sent-events buffer into complete `data:` payloads, leaving any partial event
+/// in `buffer`.
+pub fn take_sse_events(buffer: &mut String) -> Vec<Value> {
+    let mut out = Vec::new();
+    while let Some(end) = buffer.find("\n\n") {
+        let block: String = buffer.drain(..end + 2).collect();
+        let data: String = block
+            .lines()
+            .filter_map(|l| l.strip_prefix("data:"))
+            .map(|d| d.strip_prefix(' ').unwrap_or(d))
+            .collect::<Vec<_>>()
+            .join("\n");
+        if let Ok(v) = serde_json::from_str(&data) {
+            out.push(v);
+        }
+    }
+    out
+}
+
 /// How a turn differs from what the session asked for, one phrase each; empty when it matches.
 /// An agent other than `plan` is only a difference when Plan was asked for: switching agents in
 /// the TUI is the user's own choice.
@@ -299,6 +468,63 @@ mod tests {
         );
         assert_eq!(latest_user_turn("[]"), None);
         assert_eq!(latest_user_turn("{}"), None);
+    }
+
+    #[test]
+    fn server_events_become_a_turn() {
+        // Shapes from S5's capture of opencode's /event stream (trimmed).
+        let s = "ses_1";
+        let ev = |kind: &str, props: Value| json!({ "type": kind, "properties": props });
+        let mut p = EventParser::new(s);
+        let mut all = Vec::new();
+        for e in [
+            ev("message.updated", json!({"sessionID":s,"info":{"id":"msg_u","role":"user","sessionID":s,"agent":"build","model":{"providerID":"opencode","modelID":"big-pickle"}}})),
+            ev("message.part.updated", json!({"sessionID":s,"part":{"type":"text","text":"make hello.txt","messageID":"msg_u","id":"prt_1"}})),
+            ev("session.status", json!({"sessionID":s,"status":{"type":"busy"}})),
+            ev("message.part.updated", json!({"sessionID":s,"part":{"type":"tool","tool":"write","callID":"c1","messageID":"msg_a","state":{"status":"pending","input":{}}}})),
+            ev("message.part.updated", json!({"sessionID":s,"part":{"type":"tool","tool":"write","callID":"c1","messageID":"msg_a","state":{"status":"running","input":{"filePath":"hello.txt"}}}})),
+            ev("permission.asked", json!({"id":"per_1","sessionID":s,"permission":"edit","patterns":["hello.txt"],"metadata":{"filepath":"C:\\w\\hello.txt"}})),
+            ev("permission.replied", json!({"sessionID":s,"requestID":"per_1","reply":"once"})),
+            ev("message.part.updated", json!({"sessionID":s,"part":{"type":"tool","tool":"write","callID":"c1","messageID":"msg_a","state":{"status":"completed","input":{"filePath":"hello.txt"},"output":"ok"}}})),
+            ev("question.asked", json!({"id":"que_1","sessionID":s,"questions":[{"question":"Which greeting?"}]})),
+            ev("question.replied", json!({"sessionID":s,"requestID":"que_1","answers":[["hi"]]})),
+            ev("message.updated", json!({"sessionID":s,"info":{"id":"msg_a","role":"assistant","parentID":"msg_u","time":{"completed":5},"finish":"tool-calls"}})),
+            ev("message.part.updated", json!({"sessionID":s,"part":{"type":"text","text":"Created hello.txt.","messageID":"msg_b","id":"prt_9"}})),
+            ev("message.updated", json!({"sessionID":s,"info":{"id":"msg_b","role":"assistant","parentID":"msg_u","time":{"completed":9},"finish":"stop"}})),
+            ev("session.idle", json!({"sessionID":"other"})),
+        ] {
+            all.extend(p.push(&e));
+        }
+        assert_eq!(
+            all,
+            [
+                AgentEvent::TurnStarted { turn: Some("msg_u".into()), prompt: Some("make hello.txt".into()) },
+                AgentEvent::ToolStarted { turn: None, call: Some("c1".into()), tool: "write".into(), target: None },
+                AgentEvent::ApprovalAsked { turn: None, ask: Some("per_1".into()), tool: "edit".into(), target: Some("C:\\w\\hello.txt".into()) },
+                AgentEvent::ApprovalAnswered { ask: Some("per_1".into()), allowed: true },
+                AgentEvent::ToolFinished { turn: None, call: Some("c1".into()), tool: "write".into(), target: Some("hello.txt".into()), failed: false },
+                AgentEvent::QuestionAsked { turn: None, ask: Some("que_1".into()), question: "Which greeting?".into() },
+                AgentEvent::QuestionAnswered { ask: Some("que_1".into()), answer: Some("hi".into()) },
+                AgentEvent::TurnEnded { turn: Some("msg_u".into()), message: Some("Created hello.txt.".into()) },
+            ]
+        );
+        // An aborted reply interrupts the turn; a provider error fails it.
+        let aborted = ev("message.updated", json!({"sessionID":s,"info":{"id":"msg_c","role":"assistant","parentID":"msg_u","error":{"name":"MessageAbortedError"}}}));
+        assert_eq!(p.push(&aborted), [AgentEvent::TurnInterrupted { turn: Some("msg_u".into()) }]);
+        let observed = observed_from_user_info(&json!({"role":"user","agent":"plan","model":{"providerID":"opencode","modelID":"glm","variant":"high"}}));
+        assert_eq!(observed.unwrap(), Observed { model: "opencode/glm".into(), variant: Some("high".into()), agent: Some("plan".into()) });
+    }
+
+    #[test]
+    fn the_event_stream_is_split_into_payloads() {
+        let mut buf = String::from("data: {\"type\":\"a\"}\n\ndata: {\"type\":\"b\"}\n\ndata: {\"ty");
+        let got = take_sse_events(&mut buf);
+        assert_eq!(got.len(), 2);
+        assert_eq!(got[1]["type"], "b");
+        assert_eq!(buf, "data: {\"ty");
+        buf.push_str("pe\":\"c\"}\n\n");
+        assert_eq!(take_sse_events(&mut buf)[0]["type"], "c");
+        assert!(buf.is_empty());
     }
 
     #[test]
