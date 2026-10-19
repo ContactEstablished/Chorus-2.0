@@ -49,9 +49,11 @@ fn toml_string(s: &str) -> String {
 
 /// Codex's arguments: a command hook per event running `"<relay>" <url>` (Codex runs it under
 /// `cmd`, so the path is quoted for spaces), and the switch that runs hooks it hasn't been asked to
-/// trust (LESSONS L25). They go before any `resume` subcommand.
+/// trust (LESSONS L25). They go before any `resume` subcommand. The path uses forward slashes:
+/// Codex 0.162.1 unescapes a `-c` value's backslashes twice, which turned
+/// `C:\Projects\x.exe` into `C:Projectsx.exe` (seen in the real app; LESSONS L37).
 pub fn codex_hook_args(relay: &str, url: &str) -> Vec<String> {
-    let command = toml_string(&format!("\"{relay}\" {url}"));
+    let command = toml_string(&format!("\"{}\" {url}", relay.replace('\\', "/")));
     let mut args: Vec<String> = CODEX_HOOK_EVENTS
         .iter()
         .flat_map(|(event, timeout)| ["-c".to_owned(), format!("hooks.{event}=[{{hooks=[{{type=\"command\",command={command},timeout={timeout}}}]}}]")])
@@ -82,7 +84,7 @@ mod tests {
         assert_eq!(args[0], "-c");
         assert_eq!(
             args[1],
-            r#"hooks.UserPromptSubmit=[{hooks=[{type="command",command="\"C:\\Program Files\\Chorus\\chorus-hook.exe\" http://127.0.0.1:4100/hook/7",timeout=5}]}]"#
+            r#"hooks.UserPromptSubmit=[{hooks=[{type="command",command="\"C:/Program Files/Chorus/chorus-hook.exe\" http://127.0.0.1:4100/hook/7",timeout=5}]}]"#
         );
         assert!(args.iter().any(|a| a.starts_with("hooks.Interrupt=") && a.ends_with("timeout=3}]}]")));
         assert_eq!(args.len(), CODEX_HOOK_EVENTS.len() * 2 + 1);
