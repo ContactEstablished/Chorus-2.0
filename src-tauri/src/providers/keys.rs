@@ -109,6 +109,12 @@ pub fn sweep(store: &Store, up_to: u32) {
             let Some(ledger) = p::capped_key_ledger(&name).filter(|l| *l <= up_to) else { continue };
             if super::revoke(&management, &hash).is_ok() {
                 let _ = rows::close_capped_key(store, ledger, Some("Revoked at start-up: the run that used it had ended."));
+                // Its run ended a while ago, so analytics have usually caught up: one read.
+                if let Ok(Some(row)) = rows::capped_key(store, ledger)
+                    && let Ok(Some(cost)) = super::key_cost(&management, &hash, row.minted_at - 60_000, crate::store::now_ms() + 60_000)
+                {
+                    let _ = rows::set_capped_cost(store, ledger, Some(cost), "Revoked at start-up; cost from OpenRouter's analytics.");
+                }
             } else {
                 still_live.push(ledger);
             }

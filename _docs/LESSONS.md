@@ -191,6 +191,21 @@ and effort (P2, opencode 1.19.3).** Measured with the TUI attached in Chorus's P
   `external_directory`…). With `edit: "ask"` the TUI showed "Permission required" and wrote nothing.
   `default_agent: "plan"` starts the TUI in its plan agent.
 
+**L36 — Agents on OpenRouter, measured in the real app (P2, 2026-10-19).**
+- Codex 0.162.1 runs a provider model through `-c model_providers.<id>.*` with the Responses wire API.
+  For a model it has no metadata for, it warns after the first turn, "Model metadata for `<model>` not
+  found. Defaulting to fallback metadata". Passing `-c model_context_window=<n>` from the catalog
+  stops the warning.
+- opencode 1.19.3 knows 385 OpenRouter models from its own list, but not the newest
+  (`minimax/minimax-m3.1-flash:free` was missing). A `provider.openrouter.models.<id>` block in the
+  configuration makes it run one, and variants declared there (`{"<e>":{"reasoning":{"effort":"<e>"}}}`)
+  apply: the read-back showed `medium`.
+- OpenRouter's `POST /keys` returns the plaintext `key` only in that answer, with `data.hash` naming it
+  afterwards. `expires_at` must include seconds. A management key answers `GET /keys`, but can't run
+  models. Free models cost $0 in analytics shortly after a run.
+- `tauri dev` kills the app on a rebuild, without a clean quit, so a run's key isn't revoked then. The
+  start-up sweep revoked it.
+
 ## Money and models
 
 **L16 — Read-then-revoke under-reports OpenRouter spend.** Reading a capped key's usage right after the
