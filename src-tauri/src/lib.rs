@@ -5,6 +5,7 @@ mod app;
 mod fleet;
 mod ipc;
 mod sessions;
+mod splash;
 mod vault;
 
 use tauri::Manager;

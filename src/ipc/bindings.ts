@@ -30,6 +30,11 @@ export const commands = {
 	 */
 	spikeFleetOpen: () => typedError<FleetProbe, string>(__TAURI_INVOKE("spike_fleet_open")),
 	spikeFleetProbe: () => typedError<FleetProbe, string>(__TAURI_INVOKE("spike_fleet_probe")),
+	/**
+	 *  Opens the splash for `sessions` restoring sessions. `reduce_motion` forces the static version.
+	 *  Async: building a window inside a synchronous command deadlocks on Windows.
+	 */
+	spikeSplashOpen: (sessions: number, reduceMotion: boolean) => typedError<null, string>(__TAURI_INVOKE("spike_splash_open", { sessions, reduceMotion })),
 };
 
 /** Events */

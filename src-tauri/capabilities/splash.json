@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "splash",
+  "description": "The startup splash: core IPC, and closing itself.",
+  "windows": ["splash"],
+  "permissions": ["core:default", "core:window:allow-close"]
+}

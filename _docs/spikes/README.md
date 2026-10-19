@@ -11,7 +11,7 @@ and written up in `S<n>.md`; raw evidence stays in `_verify/`, which is never co
 | S4 | DPAPI vault and env-only key injection | [Pass](S4.md): key reaches the child (length and hash match), never in argv, redacted on screen even when split |
 | S5 | Agent channels per CLI | [Pass, Grok changed approach](S5.md): Claude Code, Codex and opencode approvals, questions and queueing answered from Chorus; Grok unverifiable (not signed in) |
 | S6 | ~~Local transcription~~ | Removed (D22) |
-| S7 | 3D splash | pending |
+| S7 | 3D splash | [Pass, awaiting Matthew's look](S7.md): first frame 155–161 ms, done 2.86 s, skippable, reduced-motion version, main window unaffected |
 | S8 | Per-user installer beside Chorus 1 | pending |
 
 ## Toolchain (verified 2026-10-18)

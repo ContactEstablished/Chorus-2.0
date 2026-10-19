@@ -8,7 +8,7 @@ use specta_typescript::Typescript;
 use std::path::Path;
 use tauri_specta::{Builder, collect_commands, collect_events};
 
-use crate::{app, fleet, sessions};
+use crate::{app, fleet, sessions, splash};
 
 /// Where the generated bindings live, relative to this crate.
 pub const BINDINGS_FILE: &str = "../src/ipc/bindings.ts";
@@ -26,6 +26,7 @@ pub fn builder() -> Builder<tauri::Wry> {
             sessions::spike_vault_import_file,
             fleet::spike_fleet_open,
             fleet::spike_fleet_probe,
+            splash::spike_splash_open,
         ])
         .events(collect_events![app::BackendPulse, sessions::PtyExited, fleet::FleetClick])
 }

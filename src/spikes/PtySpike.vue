@@ -188,7 +188,61 @@ async function probeFleet() {
   return res.data
 }
 
+async function openSplash(sessions = 6, reduceMotion = false) {
+  const res = await commands.spikeSplashOpen(sessions, reduceMotion)
+  if (res.status === 'error') throw new Error(res.error)
+}
+
+function splashReport() {
+  try {
+    return JSON.parse(localStorage.getItem('chorus.spike.splash') ?? 'null')
+  } catch {
+    return null
+  }
+}
+
+/** Main-window responsiveness for `ms`: frame times and IPC round trips, optionally while the splash plays. */
+async function responsiveness(ms = 3000, withSplash = false) {
+  const frames: number[] = []
+  const ipc: number[] = []
+  let prev = performance.now()
+  let running = true
+  const tick = (t: number) => {
+    frames.push(t - prev)
+    prev = t
+    if (running) requestAnimationFrame(tick)
+  }
+  requestAnimationFrame(tick)
+  const openedAt = Date.now()
+  if (withSplash) {
+    localStorage.removeItem('chorus.spike.splash')
+    await openSplash(6, false)
+  }
+  const end = performance.now() + ms
+  while (performance.now() < end) {
+    const t = performance.now()
+    await commands.appInfo()
+    ipc.push(performance.now() - t)
+    await new Promise((r) => setTimeout(r, 50))
+  }
+  running = false
+  const stat = (a: number[]) => {
+    const s = [...a].sort((x, y) => x - y)
+    return { n: s.length, p50: +(s[Math.floor(s.length / 2)] ?? 0).toFixed(1), p95: +(s[Math.floor(s.length * 0.95)] ?? 0).toFixed(1), max: +(s[s.length - 1] ?? 0).toFixed(1) }
+  }
+  const rep = withSplash ? splashReport() : null
+  return {
+    frames: stat(frames),
+    ipcMs: stat(ipc),
+    openToFirstFrameMs: rep && rep.metrics ? Math.round(rep.timeOrigin + rep.metrics.firstFrameMs - openedAt) : null,
+    splash: rep ? rep.metrics : null,
+  }
+}
+
 const api = {
+  responsiveness,
+  openSplash,
+  splashReport,
   openFleet,
   probeFleet,
   spawn,
@@ -221,6 +275,10 @@ const agents: AgentKind[] = ['shell', 'claude', 'codex', 'opencode', 'grok']
     <div class="row">
       <button v-for="a in agents" :key="a" :disabled="!!session" @click="spawn(a)">{{ a }}</button>
       <button :disabled="!session" @click="close()">Close</button>
+      <span class="sep" />
+      <button @click="openSplash(6, false)">Splash</button>
+      <button @click="openSplash(6, true)">Splash (reduced motion)</button>
+      <button @click="openFleet()">Fleet strip</button>
     </div>
     <p v-if="session" class="muted mono">
       pid {{ session.pid }} · {{ session.program }} {{ session.args.join(' ') }} · env: {{ session.envNames.join(', ') }}
@@ -266,6 +324,11 @@ button {
 button:disabled {
   opacity: 0.4;
   cursor: default;
+}
+.sep {
+  width: 1px;
+  background: var(--border-strong);
+  margin: 0 4px;
 }
 .muted {
   color: var(--text-muted);
