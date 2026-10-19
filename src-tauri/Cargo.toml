@@ -24,6 +24,10 @@ specta-typescript = { workspace = true }
 tauri-specta = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+portable-pty = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true }
 
 [lints]
 workspace = true

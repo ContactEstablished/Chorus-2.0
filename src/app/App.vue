@@ -3,6 +3,7 @@
 // The real shell (rail, title bar, Overview) is P4.
 import { computed, onMounted, onUnmounted } from 'vue'
 import ChorusMark from '../components/ChorusMark.vue'
+import PtySpike from '../spikes/PtySpike.vue'
 import { useAppStore } from '../stores/app'
 
 const app = useAppStore()
@@ -43,14 +44,16 @@ const uptime = computed(() => (app.pulse ? `${app.pulse.uptimeSecs} s` : '…'))
       <dd>{{ app.info.tauriVersion }}</dd>
     </dl>
     <p v-else-if="!app.error" class="sub">Connecting to the back end…</p>
+
+    <PtySpike v-if="app.info?.flavor === 'dev'" />
   </main>
 </template>
 
 <style scoped>
 .p0 {
-  max-width: 760px;
+  max-width: 1100px;
   margin: 0 auto;
-  padding: 56px 32px;
+  padding: 40px 32px;
 }
 .brand {
   display: flex;

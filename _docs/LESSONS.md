@@ -85,6 +85,16 @@ Chorus 1's `Chorus.exe` (five processes on this machine, 2026-10-18). Never kill
 name: filter by `ExecutablePath` or by a PID recorded at launch, and refuse any tree that contains a
 process under Chorus 1's install folder.
 
+**L22 — A Job Object also holds any browser an agent opens.** When an agent opens a URL (a sign-in
+flow, "open in browser") and the browser isn't already running, the new browser is the agent's child
+and joins the session's job; terminating the job closes the user's browser (seen with Grok's sign-in
+and Brave, S1). Close must spare GUI processes with visible windows; only a crash of Chorus may take
+everything down.
+
+**L23 — Codex `-c` overrides switch off its shared background server.** codex-cli 0.162.1 warns that
+any `-c`, `--enable`, `--disable` or `--search` on the command line forces "embedded mode". The
+update-check switch Chorus needs (L7) is a `-c`, so Chorus-launched Codex always runs embedded.
+
 ## Money and models
 
 **L16 — Read-then-revoke under-reports OpenRouter spend.** Reading a capped key's usage right after the

@@ -1,7 +1,9 @@
 //! Chorus 2.0 back end: Tauri setup, commands and IO. Pure logic lives in `chorus-core` (D11).
 
+mod agents;
 mod app;
 mod ipc;
+mod sessions;
 
 use tauri::Manager;
 
@@ -35,6 +37,7 @@ pub fn run() {
                     tauri_version: tauri::VERSION.to_string(),
                 },
             });
+            app.manage(sessions::SessionManager::new(data_dir.join("spike-scratch")));
             app::start_pulse(app.handle().clone());
             Ok(())
         })

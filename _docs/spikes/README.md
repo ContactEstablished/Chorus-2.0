@@ -5,7 +5,7 @@ and written up in `S<n>.md`; raw evidence stays in `_verify/`, which is never co
 
 | Spike | Question | Result |
 |---|---|---|
-| S1 | PTY host: ConPTY to xterm.js over a Tauri channel, Job Object cleanup | pending |
+| S1 | PTY host: ConPTY to xterm.js over a Tauri channel, Job Object cleanup | [Pass](S1.md): 10 MB burst with no frame over 9 ms; Close and crash kill whole trees; Close must spare browsers |
 | S2 | ~~Push-to-talk hotkey~~ | Removed (D22) |
 | S3 | Fleet strip: on top, never activated, draggable | pending |
 | S4 | DPAPI vault and env-only key injection | pending |

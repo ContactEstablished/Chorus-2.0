@@ -5,4 +5,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod batch;
 pub mod build;
+pub mod env;
+pub mod shim;

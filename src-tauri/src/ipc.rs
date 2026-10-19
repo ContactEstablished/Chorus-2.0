@@ -8,15 +8,21 @@ use specta_typescript::Typescript;
 use std::path::Path;
 use tauri_specta::{Builder, collect_commands, collect_events};
 
-use crate::app;
+use crate::{app, sessions};
 
 /// Where the generated bindings live, relative to this crate.
 pub const BINDINGS_FILE: &str = "../src/ipc/bindings.ts";
 
 pub fn builder() -> Builder<tauri::Wry> {
     Builder::<tauri::Wry>::new()
-        .commands(collect_commands![app::app_info])
-        .events(collect_events![app::BackendPulse])
+        .commands(collect_commands![
+            app::app_info,
+            sessions::pty_spawn,
+            sessions::pty_write,
+            sessions::pty_resize,
+            sessions::pty_close,
+        ])
+        .events(collect_events![app::BackendPulse, sessions::PtyExited])
 }
 
 pub fn export_bindings(builder: &Builder<tauri::Wry>, path: &Path) -> Result<(), specta_typescript::Error> {
