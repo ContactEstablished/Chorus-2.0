@@ -130,6 +130,26 @@ async commands; building one inside a synchronous command deadlocks on Windows.
 running?" check uses the Restart Manager on the full exe path, so it cannot hit Chorus 1. `/NS` installs
 with no shortcuts; uninstall keeps app data and leaves `HKCU\Software\<manufacturer>\<product>` behind.
 
+**L30 — Claude Code's PowerShell permission parser fails with the Microsoft Store `pwsh`.** Claude Code
+2.1.300 finds `pwsh` on `PATH` and passes it a ~10,300-character `-EncodedCommand` to parse every
+PowerShell command. When the first `pwsh.exe` on `PATH` is the Store app alias
+(`%LOCALAPPDATA%\Microsoft\WindowsApps\…`), every parse fails with "The command line is too long."
+That error is cmd.exe's, and so is its 8,191-character limit; the launch evidently goes through
+cmd.exe, inferred, not traced. Every command is then reported as "malformed syntax", so allow rules
+never match and every command asks. With a real `pwsh.exe` first on `PATH`, the same allow rule
+matched and the command ran (2026-10-19). The Store `pwsh` also puts its own alias folder at the front
+of `PATH` for everything launched from it. Chorus should warn when `pwsh` resolves to an app alias.
+
+**L31 — Codex's legacy Windows sandbox fails while a file it must ACL is running.** Codex 0.162.1 with
+`[windows] sandbox = "elevated"` runs a setup helper before each sandboxed command. The helper updates
+ACLs on the desktop app's runtime, including `cua_node\…\node_repl.exe`, which the shared
+`config.toml` also starts as an MCP server. While that file is running the update fails with "os error
+32" and every command fails with "helper_unknown_error: setup refresh had errors". The cause is not the
+shell. `[features] prefer_mxc = true` (MXC, which the desktop app already uses) fixes it with the
+elevated setting kept as fallback. Under MXC, `read-only` blocked writes, and `workspace` allowed
+writes inside the workspace and blocked them outside. `codex sandbox -P :read-only -C <dir> -- <cmd>`
+tests the sandbox without a model turn.
+
 ## Money and models
 
 **L16 — Read-then-revoke under-reports OpenRouter spend.** Reading a capped key's usage right after the
