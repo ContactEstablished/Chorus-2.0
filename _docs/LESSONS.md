@@ -125,6 +125,11 @@ top-level ancestor whatever that window's styles say. A never-activated web wind
 window over the content that answers `MA_NOACTIVATE` and forwards input (D38). Also: build windows in
 async commands; building one inside a synchronous command deadlocks on Windows.
 
+**L29 — Tauri's installer names shortcuts after the product name (S8).** With "Chorus" it writes
+`Chorus.lnk` to the Start menu and desktop, the same paths as Chorus 1's shortcuts. Its "is the app
+running?" check uses the Restart Manager on the full exe path, so it cannot hit Chorus 1. `/NS` installs
+with no shortcuts; uninstall keeps app data and leaves `HKCU\Software\<manufacturer>\<product>` behind.
+
 ## Money and models
 
 **L16 — Read-then-revoke under-reports OpenRouter spend.** Reading a capped key's usage right after the

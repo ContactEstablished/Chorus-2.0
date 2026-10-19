@@ -25,6 +25,15 @@ and its TUI can attach with `--remote`, the same shape as opencode's serve + att
 app-server + `--remote` behind a capability flag; until then Friendly says "plan not available for
 Codex".* Blocks: P6.
 
+**Q20 — What should 2.0 be called in the Start menu, on the desktop and in Apps while Chorus 1 is
+installed?** (From spike S8.) With the product name "Chorus", 2.0's installer creates `Chorus.lnk` at the
+exact paths of Chorus 1's Start-menu and desktop shortcuts and would overwrite them; Apps would also list
+two "Chorus" entries. Options: (a) install 2.0 as **"Chorus 2"** (folder, shortcuts and Apps entry) while
+the window still says Chorus, and drop the "2" when Chorus 1 is retired (that rename needs a migration
+step in P14); (b) keep "Chorus" and write a custom installer template that puts the shortcut in a folder
+and skips the desktop one; (c) keep "Chorus" and uninstall Chorus 1 before installing 2.0. *Default: (a).*
+Until then, test installs use `/NS` (no shortcuts). Blocks: the first real install.
+
 ## Resolved 2026-10-18
 
 Matthew kept the name Chorus, accepted every recommended default, and moved voice to a separate
