@@ -130,7 +130,7 @@ fn gateway(base_url: &str, key: &str) -> Result<String, String> {
     if r.status != 200 {
         return Err(p::test_failure("The gateway", r.status));
     }
-    match p::parse_gateway_catalog(&r.body) {
+    match p::parse_catalog(&r.body) {
         Some(m) => Ok(format!("The gateway answered and lists {} models.", m.len())),
         None => Ok("The gateway answered, but its model list isn't the OpenAI shape.".into()),
     }
@@ -148,14 +148,11 @@ fn jev(key: &str) -> Result<String, String> {
     }
 }
 
-/// Reads a model list answer.
-type CatalogParser = fn(&str) -> Option<Vec<CatalogModel>>;
-
 /// The provider's model list. OpenRouter's is public; a gateway's needs its key.
 pub fn fetch_catalog(kind: ProviderKind, base_url: Option<&str>, key: Option<&str>) -> Result<Vec<CatalogModel>, String> {
-    let (url, parse): (String, CatalogParser) = match (kind, base_url) {
-        (ProviderKind::Openrouter, _) => (format!("{}/models", p::OPENROUTER_API), p::parse_openrouter_catalog),
-        (ProviderKind::Gateway, Some(u)) => (format!("{u}/models"), p::parse_gateway_catalog),
+    let url = match (kind, base_url) {
+        (ProviderKind::Openrouter, _) => format!("{}/models", p::OPENROUTER_API),
+        (ProviderKind::Gateway, Some(u)) => format!("{u}/models"),
         (ProviderKind::Gateway, None) => return Err("No address is set.".into()),
         (ProviderKind::Jev, _) => return Err("Jev has no model list to choose from.".into()),
     };
@@ -164,7 +161,7 @@ pub fn fetch_catalog(kind: ProviderKind, base_url: Option<&str>, key: Option<&st
     if r.status != 200 {
         return Err(p::test_failure("The model list", r.status));
     }
-    parse(&r.body).ok_or_else(|| "The model list isn't in the shape Chorus reads.".into())
+    p::parse_catalog(&r.body).ok_or_else(|| "The model list isn't in the shape Chorus reads.".into())
 }
 
 /// Mints a key that stops at `limit_usd` and expires within a day.

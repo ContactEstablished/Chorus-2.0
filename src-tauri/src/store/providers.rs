@@ -296,7 +296,7 @@ mod tests {
             context_length: None,
             max_output: None,
             efforts: vec![],
-            tools: true,
+            tools: Some(true),
             free: true,
         }
     }

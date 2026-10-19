@@ -149,7 +149,8 @@ export type CatalogModel = {
 	maxOutput: number | null,
 	/**  The reasoning efforts the model takes, lowest first; empty when it takes none. */
 	efforts: string[],
-	tools: boolean,
+	/**  Whether it takes tools (agents need them); `None` when the list doesn't say. */
+	tools: boolean | null,
 	free: boolean,
 };
 

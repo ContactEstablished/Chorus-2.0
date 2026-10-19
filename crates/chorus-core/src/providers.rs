@@ -217,7 +217,8 @@ pub struct CatalogModel {
     pub max_output: Option<u32>,
     /// The reasoning efforts the model takes, lowest first; empty when it takes none.
     pub efforts: Vec<String>,
-    pub tools: bool,
+    /// Whether it takes tools (agents need them); `None` when the list doesn't say.
+    pub tools: Option<bool>,
     pub free: bool,
 }
 
@@ -230,9 +231,10 @@ fn per_mtok(v: Option<&Value>) -> Option<f64> {
     (p.is_finite() && p >= 0.0).then(|| (p * 1_000_000.0 * 1e6).round() / 1e6)
 }
 
-/// OpenRouter's `GET /models` answer as catalog entries. Entries without an id are skipped;
-/// `None` when the answer isn't a model list at all.
-pub fn parse_openrouter_catalog(body: &str) -> Option<Vec<CatalogModel>> {
+/// A `GET /models` answer as catalog entries: OpenRouter's, or an OpenAI-compatible gateway's,
+/// which may have ids and little else. Fields a list leaves out stay unknown. Entries without an id
+/// are skipped; `None` when the answer isn't a model list at all.
+pub fn parse_catalog(body: &str) -> Option<Vec<CatalogModel>> {
     let v: Value = serde_json::from_str(body).ok()?;
     let list = v.get("data")?.as_array()?;
     let num = |x: Option<&Value>| x.and_then(Value::as_u64).and_then(|n| u32::try_from(n).ok());
@@ -250,7 +252,7 @@ pub fn parse_openrouter_catalog(body: &str) -> Option<Vec<CatalogModel>> {
                 let tools = m
                     .get("supported_parameters")
                     .and_then(Value::as_array)
-                    .is_some_and(|a| a.iter().any(|p| p.as_str() == Some("tools")));
+                    .map(|a| a.iter().any(|p| p.as_str() == Some("tools")));
                 let prompt = per_mtok(pricing.and_then(|p| p.get("prompt")));
                 let completion = per_mtok(pricing.and_then(|p| p.get("completion")));
                 Some(CatalogModel {
@@ -264,29 +266,6 @@ pub fn parse_openrouter_catalog(body: &str) -> Option<Vec<CatalogModel>> {
                     efforts,
                     tools,
                 })
-            })
-            .collect(),
-    )
-}
-
-/// An OpenAI-compatible gateway's `GET /models` answer (`{"data":[{"id":…}]}`): ids only, as such
-/// gateways rarely publish prices.
-pub fn parse_gateway_catalog(body: &str) -> Option<Vec<CatalogModel>> {
-    let v: Value = serde_json::from_str(body).ok()?;
-    let list = v.get("data")?.as_array()?;
-    Some(
-        list.iter()
-            .filter_map(|m| m.get("id")?.as_str())
-            .map(|id| CatalogModel {
-                id: id.to_owned(),
-                name: id.to_owned(),
-                prompt_per_mtok: None,
-                completion_per_mtok: None,
-                context_length: None,
-                max_output: None,
-                efforts: Vec::new(),
-                tools: false,
-                free: false,
             })
             .collect(),
     )
@@ -413,22 +392,25 @@ mod tests {
 
     #[test]
     fn reads_the_openrouter_catalog() {
-        let models = parse_openrouter_catalog(CATALOG).unwrap();
+        let models = parse_catalog(CATALOG).unwrap();
         assert_eq!(models.len(), 2);
         let free = &models[0];
-        assert!(free.free && free.tools);
+        assert!(free.free && free.tools == Some(true));
         assert_eq!(free.efforts, ["low", "medium", "high", "xhigh", "max"]);
         assert_eq!((free.context_length, free.max_output), (Some(1_000_000), Some(524_288)));
         let opus = &models[1];
         assert_eq!((opus.prompt_per_mtok, opus.completion_per_mtok), (Some(5.0), Some(25.0)));
         assert!(!opus.free && opus.efforts.is_empty() && opus.max_output.is_none());
-        assert!(parse_openrouter_catalog("[]").is_none());
+        assert!(parse_catalog("[]").is_none());
     }
 
     #[test]
     fn reads_a_gateway_catalog() {
-        let models = parse_gateway_catalog(r#"{"object":"list","data":[{"id":"gpt-5.5"},{"id":"llama-4"},{"x":1}]}"#).unwrap();
+        let models = parse_catalog(r#"{"object":"list","data":[{"id":"gpt-5.5"},{"id":"llama-4","context_length":131072},{"x":1}]}"#).unwrap();
         assert_eq!(models.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), ["gpt-5.5", "llama-4"]);
+        // Unknown stays unknown, and what a gateway does publish is kept.
+        assert_eq!((models[0].tools, models[0].prompt_per_mtok, models[0].free), (None, None, false));
+        assert_eq!(models[1].context_length, Some(131_072));
     }
 
     #[test]
@@ -491,7 +473,7 @@ mod tests {
             ]
         );
         // With the catalog's context window.
-        let models = parse_openrouter_catalog(CATALOG).unwrap();
+        let models = parse_catalog(CATALOG).unwrap();
         let known = route(AgentKind::Codex, ProviderKind::Openrouter, "OpenRouter", "", &models[0].id, Some(&models[0])).unwrap();
         assert_eq!(known.args[known.args.len() - 2..], ["-c", "model_context_window=1000000"]);
         let g = route(AgentKind::Codex, ProviderKind::Gateway, "Work gateway", "https://llm.example.com/v1/", "gpt-5.5", None).unwrap();
@@ -503,7 +485,7 @@ mod tests {
 
     #[test]
     fn opencode_gets_the_model_with_its_catalog_efforts() {
-        let models = parse_openrouter_catalog(CATALOG).unwrap();
+        let models = parse_catalog(CATALOG).unwrap();
         let r = route(AgentKind::Opencode, ProviderKind::Openrouter, "OpenRouter", "", &models[0].id, Some(&models[0])).unwrap();
         assert_eq!(r.model, "openrouter/minimax/minimax-m3.1-flash:free");
         let entry = &r.opencode_provider.unwrap()["openrouter"]["models"]["minimax/minimax-m3.1-flash:free"];

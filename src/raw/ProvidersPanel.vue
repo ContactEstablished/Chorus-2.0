@@ -92,7 +92,7 @@ const matches = computed(() => {
   return entries.value.filter(
     (e) =>
       (!freeOnly.value || e.model.free) &&
-      (!toolsOnly.value || e.model.tools) &&
+      (!toolsOnly.value || e.model.tools !== false) &&
       words.every((w) => e.model.id.toLowerCase().includes(w) || e.model.name.toLowerCase().includes(w)),
   )
 })
