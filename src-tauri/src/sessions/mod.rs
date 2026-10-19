@@ -1,31 +1,47 @@
-//! The PTY host (spike S1; the full SessionManager is P1).
+//! The session engine (P1, ARCHITECTURE §4). The back end owns every agent process; windows only
+//! attach to a session id and can come and go.
 //!
-//! The back end owns every agent process. A session is a ConPTY with one child in a Job Object;
-//! output is read on a thread, coalesced by `chorus_core::batch`, and streamed to the attached view
-//! over a `tauri::ipc::Channel` as raw bytes (no JSON). The front end only asks; it never spawns.
+//! ```text
+//! child ─► ConPTY ─► reader thread ─► scrubber + batcher ─► Hub ─┬─► scrollback mirror (disk)
+//!                                                                └─► attached views (channels)
+//! ```
+//!
+//! A session is a database row that outlives its processes; each launch is a run in its own Job
+//! Object. Output goes through one emit path (the Hub), so the mirror and every view get the same
+//! scrubbed bytes, and a view that attaches is sent the mirror first, then live output, with nothing
+//! lost or repeated in between. The lifecycle rules (why a run ended, what to relaunch at boot)
+//! are in `chorus_core::session`.
 
+pub mod commands;
 pub mod job;
+pub mod mirror;
 
 use std::collections::HashMap;
 use std::io::{Read, Write};
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 use chorus_core::batch::{PTY_BATCH, SCRUB_CARRY_RELEASE_MS};
+use chorus_core::conpty::{Handshake, cursor_report};
 use chorus_core::env::{ChildEnvInput, compose_child_env, valid_secret_var};
+use chorus_core::scrollback::{ROW_AFTER_RESTART_SCREEN, boundary, exit_line, restart_screen};
 use chorus_core::scrub::{StreamScrubber, builtin_patterns};
-use portable_pty::{ChildKiller, CommandBuilder, MasterPty, PtySize, native_pty_system};
+use chorus_core::session::{ExitCause, SessionState, after_exit, classify_exit, clean_name, plan_boot};
+use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system};
 use serde::{Deserialize, Serialize};
 use specta::Type;
-use tauri::ipc::{Channel, InvokeResponseBody, IpcResponse};
-use tauri::{AppHandle, State};
+use tauri::ipc::{InvokeResponseBody, IpcResponse};
 use tauri_specta::Event;
 
 use crate::agents::{self, AgentKind};
+use crate::store::sessions::{self as rows, NewSession, SessionRow};
+use crate::store::{Store, credentials};
+use crate::vault;
 use job::Job;
+use mirror::Mirror;
 
 /// Raw PTY output for an attached view. Sent as bytes, so the webview gets an `ArrayBuffer`.
 pub struct PtyBytes(pub Vec<u8>);
@@ -42,74 +58,90 @@ impl Type for PtyBytes {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Type)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "lowercase")]
+pub enum SessionStatus {
+    Running,
+    Exited,
+    Closed,
+}
+
+impl From<SessionState> for SessionStatus {
+    fn from(s: SessionState) -> Self {
+        match s {
+            SessionState::Running => Self::Running,
+            SessionState::Exited => Self::Exited,
+            SessionState::Closed => Self::Closed,
+        }
+    }
+}
+
+/// Everything the UI shows about a session.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
-pub struct SpawnRequest {
+pub struct SessionSummary {
+    pub id: u32,
+    pub name: String,
     pub agent: AgentKind,
-    pub cols: u16,
-    pub rows: u16,
-    /// A vault key to inject into the child's environment, decrypted only now.
-    pub credential: Option<CredentialRef>,
-    /// opencode only: attach the TUI to a running server (spike S5).
-    pub opencode_attach: Option<agents::OpencodeAttach>,
-    /// Extra arguments appended for spike S5 (for example `--settings <file>`). Removed with the
-    /// harness; P2 adapters build arguments from declared options instead.
-    pub spike_args: Option<Vec<String>>,
-    /// Extra non-secret environment for spike S5 (for example a feature switch). Names are checked
-    /// like secret variables; values are not scrubbed, so never pass a key here.
-    pub spike_env: Option<Vec<(String, String)>>,
+    pub cwd: String,
+    pub status: SessionStatus,
+    /// A process is running now. `status` can be `running` without one for a moment while a
+    /// Restart or a relaunch is under way.
+    pub live: bool,
+    pub pid: Option<u32>,
+    pub locked: bool,
+    /// Why the session isn't running, or what went wrong, in words to show as is.
+    pub note: Option<String>,
+    pub credential_label: Option<String>,
+    pub credential_env: Option<String>,
+    pub last_exit_code: Option<u32>,
+    /// How the last run ended (`exited`, `closed`, `restarted`, `chorus-closed`,
+    /// `chorus-crashed`, `system-shutdown`), or none while it runs.
+    pub last_end: Option<String>,
+    pub created_at_secs: u32,
+    pub run_started_at_secs: Option<u32>,
+    pub scrollback_error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionUpdated {
+    pub session: SessionSummary,
 }
 
 #[derive(Debug, Clone, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
-pub struct CredentialRef {
-    pub label: String,
+pub struct CreateSession {
+    pub agent: AgentKind,
+    pub cwd: String,
+    pub name: Option<String>,
+    /// A stored key to inject as an environment variable, decrypted only at launch.
+    pub credential: Option<CredentialUse>,
+    pub cols: u16,
+    pub rows: u16,
+}
+
+#[derive(Debug, Clone, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct CredentialUse {
+    pub id: u32,
     pub env_var: String,
 }
 
 #[derive(Debug, Clone, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
-pub struct SpawnResult {
-    pub session_id: u32,
-    pub pid: u32,
-    pub program: String,
-    pub args: Vec<String>,
-    pub cwd: String,
-    /// Names only, so the UI can show what the child received without showing values.
-    pub env_names: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Type)]
-#[serde(rename_all = "camelCase")]
 pub struct CloseReport {
-    /// Every process that was in the session's job when Close was pressed.
-    pub job_pids: Vec<u32>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
-#[serde(rename_all = "camelCase")]
-pub struct PtyExited {
-    pub session_id: u32,
-    pub exit_code: u32,
-}
-
-struct Session {
-    writer: Mutex<Box<dyn Write + Send>>,
-    master: Mutex<Option<Box<dyn MasterPty + Send>>>,
-    killer: Mutex<Box<dyn ChildKiller + Send + Sync>>,
-    job: Job,
-}
-
-pub struct SessionManager {
-    sessions: Mutex<HashMap<u32, Arc<Session>>>,
-    next_id: AtomicU32,
-    /// Agents run here during the spikes: inside 2.0's data folder, outside any repo.
-    scratch_root: PathBuf,
-    /// DPAPI blobs by label. In memory for the S4 spike; SQLite in P1.
-    vault: Mutex<HashMap<String, Vec<u8>>>,
+    pub killed: u32,
+    /// Windowed processes (a browser the agent opened) left running.
+    pub spared: u32,
 }
 
 const MAX_WRITE_BYTES: usize = 1 << 20;
+const MAX_CWD_BYTES: usize = 1024;
+/// How long Close and Restart wait for a run's output to drain before moving on.
+const FINISH_TIMEOUT: Duration = Duration::from_secs(5);
+const BOUNDARY_RESTARTED: &str = "── Restarted ──";
+const BOUNDARY_RELAUNCHED: &str = "── Chorus restarted: session relaunched ──";
 
 fn check_size(cols: u16, rows: u16) -> Result<PtySize, String> {
     if !(2..=1000).contains(&cols) || !(2..=1000).contains(&rows) {
@@ -118,294 +150,607 @@ fn check_size(cols: u16, rows: u16) -> Result<PtySize, String> {
     Ok(PtySize { cols, rows, pixel_width: 0, pixel_height: 0 })
 }
 
+/// A folder for a new session: a full path to a folder that exists.
+fn check_cwd(input: &str) -> Result<String, String> {
+    let s = input.trim().trim_matches('"').trim();
+    if s.is_empty() || s.len() > MAX_CWD_BYTES {
+        return Err("Choose a folder for the session.".into());
+    }
+    let path = Path::new(s);
+    if !path.is_absolute() {
+        return Err(format!("{s} is not a full path (for example C:\\Projects\\app)."));
+    }
+    if !path.is_dir() {
+        return Err(format!("{s} is not a folder that exists."));
+    }
+    Ok(s.to_owned())
+}
+
+fn system_shutting_down() -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_SHUTTINGDOWN};
+    // SAFETY: a plain query with no pointers.
+    unsafe { GetSystemMetrics(SM_SHUTTINGDOWN) != 0 }
+}
+
+/// Where a view receives bytes. Returns false once the view is gone.
+pub type Sink = Box<dyn Fn(&[u8]) -> bool + Send>;
+
+/// One session's single emit path: the mirror and the attached views.
+struct Hub {
+    inner: Mutex<HubInner>,
+}
+
+struct HubInner {
+    mirror: Option<Mirror>,
+    views: Vec<(u32, Sink)>,
+    next_view: u32,
+}
+
+impl Hub {
+    fn new(mirror: Mirror) -> Self {
+        Self { inner: Mutex::new(HubInner { mirror: Some(mirror), views: Vec::new(), next_view: 0 }) }
+    }
+
+    fn emit(&self, bytes: &[u8]) {
+        if bytes.is_empty() {
+            return;
+        }
+        let mut g = self.inner.lock().expect("hub lock");
+        // Persist before broadcasting: a failing view must never cost the history.
+        if let Some(m) = g.mirror.as_mut() {
+            m.append(bytes);
+        }
+        g.views.retain(|(_, sink)| sink(bytes));
+    }
+
+    /// Sends the history, then registers the view, under one lock, so live output can't slip in
+    /// between or arrive twice.
+    fn attach(&self, sink: Sink) -> u32 {
+        let mut g = self.inner.lock().expect("hub lock");
+        let history = g.mirror.as_mut().map(Mirror::read_all).unwrap_or_default();
+        if !history.is_empty() {
+            sink(&history);
+        }
+        g.next_view += 1;
+        let id = g.next_view;
+        g.views.push((id, sink));
+        id
+    }
+
+    fn detach(&self, view: u32) {
+        self.inner.lock().expect("hub lock").views.retain(|(id, _)| *id != view);
+    }
+
+    /// Marks the start of a new run: rewrites the mirror's history and shows attached views the
+    /// same cleared screen with the dividing line on top.
+    fn new_run(&self, boundary_text: &str, rows: u16) {
+        let mut g = self.inner.lock().expect("hub lock");
+        if let Some(m) = g.mirror.as_mut() {
+            m.begin_new_run(boundary_text, rows);
+        }
+        let shown = restart_screen(boundary_text, rows);
+        g.views.retain(|(_, sink)| sink(&shown));
+    }
+
+    fn scrollback_error(&self) -> Option<String> {
+        self.inner.lock().expect("hub lock").mirror.as_ref().and_then(|m| m.error.clone())
+    }
+
+    fn remove(&self) {
+        let mut g = self.inner.lock().expect("hub lock");
+        g.views.clear();
+        if let Some(m) = g.mirror.take() {
+            m.remove();
+        }
+    }
+}
+
+/// One launch of a session's process.
+struct Run {
+    id: u32,
+    pid: u32,
+    /// The screen row the cursor is on when the run starts, for ConPTY's opening handshake.
+    start_row: u16,
+    writer: Mutex<Box<dyn Write + Send>>,
+    master: Mutex<Option<Box<dyn MasterPty + Send>>>,
+    job: Job,
+    /// Set before Chorus itself ends the process (Close, Restart), so the exit isn't taken for the
+    /// agent quitting.
+    requested: Mutex<Option<ExitCause>>,
+    /// Filled by the exit watcher for the output thread, which writes the exit line last.
+    exit: Mutex<Option<(ExitCause, u32)>>,
+    finished: (Mutex<bool>, Condvar),
+}
+
+impl Run {
+    fn end_processes(&self) -> job::CloseOutcome {
+        match self.job.close_sparing_windows(self.pid, 1) {
+            Ok(outcome) => outcome,
+            Err(_) => {
+                let killed = self.job.process_ids().unwrap_or_default();
+                let _ = self.job.terminate(1);
+                job::CloseOutcome { killed, spared: Vec::new() }
+            }
+        }
+    }
+
+    fn mark_finished(&self) {
+        let (done, cv) = &self.finished;
+        *done.lock().expect("finished lock") = true;
+        cv.notify_all();
+    }
+
+    fn wait_finished(&self, timeout: Duration) -> bool {
+        let (done, cv) = &self.finished;
+        let guard = done.lock().expect("finished lock");
+        let (guard, _) = cv.wait_timeout_while(guard, timeout, |d| !*d).expect("finished wait");
+        *guard
+    }
+}
+
+/// A session that is open in this app run (not closed).
+struct Live {
+    id: u32,
+    hub: Hub,
+    run: Mutex<Option<Arc<Run>>>,
+}
+
+impl Live {
+    fn current_run(&self) -> Option<Arc<Run>> {
+        self.run.lock().expect("run lock").clone()
+    }
+}
+
+pub type Notify = Box<dyn Fn(SessionSummary) + Send + Sync>;
+
+pub struct SessionManager {
+    store: Store,
+    data_dir: PathBuf,
+    live: Mutex<HashMap<u32, Arc<Live>>>,
+    quitting: AtomicBool,
+    notify: Notify,
+}
+
 impl SessionManager {
-    pub fn new(scratch_root: PathBuf) -> Self {
-        Self { sessions: Mutex::new(HashMap::new()), next_id: AtomicU32::new(1), scratch_root, vault: Mutex::default() }
+    pub fn new(store: Store, data_dir: PathBuf, notify: Notify) -> Arc<Self> {
+        Arc::new(Self { store, data_dir, live: Mutex::new(HashMap::new()), quitting: AtomicBool::new(false), notify })
     }
 
-    /// Decrypts a stored key for a launch. The plaintext lives only as long as the launch needs it.
-    fn decrypt(&self, label: &str) -> Result<Vec<u8>, String> {
-        let vault = self.vault.lock().expect("vault lock");
-        let sealed = vault.get(label).ok_or_else(|| format!("no key labelled {label:?}"))?;
-        crate::vault::unprotect(sealed).map_err(|e| format!("decrypting {label:?}: {e}"))
+    pub fn store(&self) -> &Store {
+        &self.store
     }
 
-    fn get(&self, id: u32) -> Result<Arc<Session>, String> {
-        self.sessions.lock().expect("sessions lock").get(&id).cloned().ok_or_else(|| format!("no session {id}"))
+    pub fn data_dir(&self) -> &Path {
+        &self.data_dir
     }
 
-    fn spawn(&self, app: AppHandle, req: SpawnRequest, output: Channel<PtyBytes>) -> Result<SpawnResult, String> {
-        let size = check_size(req.cols, req.rows)?;
-        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        let cwd = self.scratch_root.join(format!("{:?}", req.agent).to_lowercase());
-        let state_dir = self.scratch_root.join("state").join(format!("session-{id}"));
-        std::fs::create_dir_all(&cwd).map_err(|e| e.to_string())?;
-        std::fs::create_dir_all(&state_dir).map_err(|e| e.to_string())?;
+    fn scrollback_dir(&self) -> PathBuf {
+        self.data_dir.join("scrollback")
+    }
+
+    /// Per-session folder for agent state that must be isolated (opencode, LESSONS L5).
+    fn state_dir(&self, id: u32) -> PathBuf {
+        self.data_dir.join("state").join(id.to_string())
+    }
+
+    fn live_for(&self, id: u32) -> Arc<Live> {
+        let mut live = self.live.lock().expect("live lock");
+        live.entry(id)
+            .or_insert_with(|| {
+                Arc::new(Live { id, hub: Hub::new(Mirror::open(&self.scrollback_dir(), id)), run: Mutex::new(None) })
+            })
+            .clone()
+    }
+
+    fn open_live(&self, id: u32) -> Result<Arc<Live>, String> {
+        self.live.lock().expect("live lock").get(&id).cloned().ok_or_else(|| format!("session {id} is not open"))
+    }
+
+    fn running(&self, id: u32) -> Result<Arc<Run>, String> {
+        self.open_live(id)?.current_run().ok_or_else(|| "the session isn't running".into())
+    }
+
+    fn row(&self, id: u32) -> Result<SessionRow, String> {
+        rows::get(&self.store, id)?.ok_or_else(|| format!("no session {id}"))
+    }
+
+    fn summary_of(&self, row: &SessionRow) -> SessionSummary {
+        let live = self.live.lock().expect("live lock").get(&row.id).cloned();
+        let run = live.as_ref().and_then(|l| l.current_run());
+        let last = rows::last_run(&self.store, row.id).ok().flatten();
+        let credential_label =
+            row.credential_id.and_then(|id| credentials::get(&self.store, id).ok().flatten()).map(|c| c.label);
+        SessionSummary {
+            id: row.id,
+            name: row.name.clone(),
+            agent: row.agent,
+            cwd: row.cwd.clone(),
+            status: row.state.into(),
+            live: run.is_some(),
+            pid: run.as_ref().map(|r| r.pid),
+            locked: row.locked,
+            note: row.note.clone(),
+            credential_label,
+            credential_env: row.credential_env.clone(),
+            last_exit_code: last.as_ref().and_then(|r| r.exit_code),
+            last_end: last.as_ref().and_then(|r| r.end_reason).map(|e| e.as_str().to_owned()),
+            created_at_secs: vault::commands::secs(row.created_at),
+            run_started_at_secs: last.as_ref().filter(|r| r.ended_at.is_none()).map(|r| vault::commands::secs(r.started_at)),
+            scrollback_error: live.as_ref().and_then(|l| l.hub.scrollback_error()),
+        }
+    }
+
+    pub fn summary(&self, id: u32) -> Result<SessionSummary, String> {
+        Ok(self.summary_of(&self.row(id)?))
+    }
+
+    fn notify_id(&self, id: u32) {
+        if let Ok(s) = self.summary(id) {
+            (self.notify)(s);
+        }
+    }
+
+    pub fn list(&self) -> Result<Vec<SessionSummary>, String> {
+        Ok(rows::list_open(&self.store)?.iter().map(|r| self.summary_of(r)).collect())
+    }
+
+    /// At start-up: close out runs a previous Chorus left open, then relaunch every session that
+    /// should be running.
+    pub fn restore(self: &Arc<Self>) -> Result<(), String> {
+        let open = rows::list_open(&self.store)?;
+        let plan = plan_boot(&open.iter().map(|r| (r.id, r.state)).collect::<Vec<_>>(), &rows::open_runs(&self.store)?);
+        for run in plan.heal {
+            rows::end_run(&self.store, run, chorus_core::session::RunEnd::ChorusCrashed, None)?;
+        }
+        mirror::prune(&self.scrollback_dir(), &open.iter().map(|r| r.id).collect::<Vec<_>>());
+        for row in &open {
+            self.live_for(row.id);
+        }
+        for row in open.iter().filter(|r| plan.relaunch.contains(&r.id)) {
+            let live = self.live_for(row.id);
+            live.hub.new_run(BOUNDARY_RELAUNCHED, row.rows);
+            if let Err(e) = self.start_run(&live, true) {
+                self.record_failure(&live, &e);
+            }
+        }
+        Ok(())
+    }
+
+    pub fn create(self: &Arc<Self>, req: CreateSession) -> Result<SessionSummary, String> {
+        check_size(req.cols, req.rows)?;
+        let cwd = check_cwd(&req.cwd)?;
+        if let Some(c) = &req.credential {
+            if !valid_secret_var(&c.env_var) {
+                return Err(format!("{:?} can't be used as the key's variable name.", c.env_var));
+            }
+            credentials::get(&self.store, c.id)?.ok_or("That key no longer exists.")?;
+        }
+        let fallback = format!("{} {}", req.agent.display_name(), rows::count_by_agent(&self.store, req.agent)? + 1);
+        let name = clean_name(req.name.as_deref(), &fallback)?;
+        let id = rows::insert(
+            &self.store,
+            &NewSession {
+                name: &name,
+                agent: req.agent,
+                cwd: &cwd,
+                credential_id: req.credential.as_ref().map(|c| c.id),
+                credential_env: req.credential.as_ref().map(|c| c.env_var.as_str()),
+                cols: req.cols,
+                rows: req.rows,
+            },
+        )?;
+        let live = self.live_for(id);
+        if let Err(e) = self.start_run(&live, false) {
+            self.record_failure(&live, &e);
+        }
+        let summary = self.summary(id)?;
+        (self.notify)(summary.clone());
+        Ok(summary)
+    }
+
+    /// A launch that failed is shown, not hidden: the session stays, exited, with the reason in its
+    /// note and in its terminal.
+    fn record_failure(&self, live: &Live, error: &str) {
+        let _ = rows::set_state(&self.store, live.id, SessionState::Exited, Some(&format!("Couldn't start: {error}")));
+        live.hub.emit(&boundary(&format!("── Couldn't start: {error} ──")));
+        self.notify_id(live.id);
+    }
+
+    /// Launches a run. `after_restart_screen` says the views were just shown `restart_screen`, which
+    /// decides where ConPTY is told the cursor is.
+    fn start_run(self: &Arc<Self>, live: &Arc<Live>, after_restart_screen: bool) -> Result<(), String> {
+        let row = self.row(live.id)?;
+        let size = check_size(row.cols, row.rows)?;
+        if !Path::new(&row.cwd).is_dir() {
+            return Err(format!("the folder {} no longer exists", row.cwd));
+        }
+        let state_dir = self.state_dir(row.id);
+        std::fs::create_dir_all(&state_dir).map_err(|e| format!("creating {}: {e}", state_dir.display()))?;
 
         let parent: Vec<(String, String)> = std::env::vars().collect();
-        let launch = agents::resolve(req.agent, &parent, &state_dir, req.opencode_attach.as_ref())?;
-        let mut additions: Vec<(&str, &str)> = launch.additions.iter().map(|(k, v)| (*k, v.as_str())).collect();
-        for (k, v) in req.spike_env.iter().flatten() {
-            if !valid_secret_var(k) || v.len() > 256 {
-                return Err(format!("{k:?} cannot be set"));
-            }
-            additions.push((k.as_str(), v.as_str()));
-        }
+        let launch = agents::resolve(row.agent, &parent, &state_dir)?;
         let mut secrets: Vec<(String, String)> = Vec::new();
-        if let Some(cred) = &req.credential {
-            if !valid_secret_var(&cred.env_var) {
-                return Err(format!("{:?} is not a usable variable name for a key", cred.env_var));
-            }
-            let key = String::from_utf8(self.decrypt(&cred.label)?).map_err(|_| "stored key is not text")?;
-            secrets.push((cred.env_var.clone(), key));
+        match (row.credential_id, &row.credential_env) {
+            (Some(cid), Some(var)) => secrets.push((var.clone(), vault::decrypt(&self.store, cid)?)),
+            (None, Some(_)) => return Err("the key this session uses has been deleted".into()),
+            _ => {}
         }
+        let (mut redact, unreadable) = vault::all_for_scrubbing(&self.store);
+        redact.extend(secrets.iter().map(|(_, v)| v.clone().into_bytes()));
+        let additions: Vec<(&str, &str)> = launch.additions.iter().map(|(k, v)| (*k, v.as_str())).collect();
         let env = compose_child_env(&ChildEnvInput { parent: &parent, required: &[], additions: &additions, secrets: &secrets });
-        let scrubber = StreamScrubber::new(secrets.iter().map(|(_, v)| v.clone().into_bytes()), builtin_patterns());
 
-        let mut args = launch.args.clone();
-        if let Some(extra) = &req.spike_args {
-            if extra.len() > 16 || extra.iter().any(|a| a.len() > 1024 || a.contains('\0')) {
-                return Err("too many or too long extra arguments".into());
-            }
-            args.extend(extra.iter().cloned());
-        }
         let mut cmd = CommandBuilder::new(&launch.program);
-        cmd.args(&args);
-        cmd.cwd(&cwd);
+        cmd.args(&launch.args);
+        cmd.cwd(&row.cwd);
         cmd.env_clear();
         for (k, v) in &env {
             cmd.env(k, v);
         }
 
+        let job = Job::new().map_err(|e| format!("creating the job object: {e}"))?;
         let pair = native_pty_system().openpty(size).map_err(|e| e.to_string())?;
-        let mut child = pair.slave.spawn_command(cmd).map_err(|e| format!("spawning {}: {e}", launch.program.display()))?;
+        let mut child = pair.slave.spawn_command(cmd).map_err(|e| format!("starting {}: {e}", launch.program.display()))?;
         drop(pair.slave);
-
-        let job = Job::new().map_err(|e| e.to_string())?;
-        if let Some(handle) = child.as_raw_handle() {
-            job.assign(windows::Win32::Foundation::HANDLE(handle)).map_err(|e| e.to_string())?;
+        if let Some(handle) = child.as_raw_handle()
+            && let Err(e) = job.assign(windows::Win32::Foundation::HANDLE(handle))
+        {
+            let _ = child.kill();
+            return Err(format!("putting the process in its job: {e}"));
         }
         let pid = child.process_id().unwrap_or(0);
+        job.adopt_strays(pid);
         let reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
         let writer = pair.master.take_writer().map_err(|e| e.to_string())?;
-        let session = Arc::new(Session {
+
+        let run_id = rows::start_run(&self.store, row.id, Some(pid), &launch.program.display().to_string(), &launch.args)?;
+        if let Some(cid) = row.credential_id {
+            let _ = credentials::touch(&self.store, cid);
+        }
+        let note = (unreadable > 0).then(|| {
+            format!("{unreadable} stored key(s) couldn't be decrypted, so they aren't redacted in this session.")
+        });
+        rows::set_note(&self.store, row.id, note.as_deref())?;
+
+        let run = Arc::new(Run {
+            id: run_id,
+            pid,
+            start_row: if after_restart_screen { ROW_AFTER_RESTART_SCREEN } else { 1 },
             writer: Mutex::new(writer),
             master: Mutex::new(Some(pair.master)),
-            killer: Mutex::new(child.clone_killer()),
             job,
+            requested: Mutex::new(None),
+            exit: Mutex::new(None),
+            finished: (Mutex::new(false), Condvar::new()),
         });
-        self.sessions.lock().expect("sessions lock").insert(id, session.clone());
-
-        stream_output(reader, scrubber, output);
-
-        // Exit watcher: report the exit, then close the pseudoconsole so the reader sees EOF
-        // (ConPTY keeps the pipe open until it is closed).
-        std::thread::spawn(move || {
-            let exit_code = child.wait().map(|s| s.exit_code()).unwrap_or(u32::MAX);
-            std::thread::sleep(Duration::from_millis(250));
-            let _ = PtyExited { session_id: id, exit_code }.emit(&app);
-            session.master.lock().expect("master lock").take();
-        });
-
-        Ok(SpawnResult {
-            session_id: id,
-            pid,
-            program: launch.program.display().to_string(),
-            args,
-            cwd: cwd.display().to_string(),
-            env_names: env.keys().cloned().collect(),
-        })
+        *live.run.lock().expect("run lock") = Some(run.clone());
+        self.spawn_threads(live.clone(), run, child, reader, StreamScrubber::new(redact, builtin_patterns()));
+        self.notify_id(row.id);
+        Ok(())
     }
 
-    fn close(&self, id: u32) -> Result<CloseReport, String> {
-        let session = self.sessions.lock().expect("sessions lock").remove(&id).ok_or_else(|| format!("no session {id}"))?;
-        let job_pids = session.job.process_ids().unwrap_or_default();
-        session.job.terminate(1).map_err(|e| e.to_string())?;
-        let _ = session.killer.lock().expect("killer lock").kill();
-        Ok(CloseReport { job_pids })
-    }
-}
-
-/// Reader thread → scrubber → batching thread → channel. Nothing reaches the view unscrubbed, and
-/// the reader never blocks on the webview.
-fn stream_output(mut reader: Box<dyn Read + Send>, mut scrubber: StreamScrubber, output: Channel<PtyBytes>) {
-    let (tx, rx) = mpsc::channel::<Vec<u8>>();
-    std::thread::spawn(move || {
-        let mut buf = vec![0u8; 64 * 1024];
-        loop {
-            match reader.read(&mut buf) {
-                Ok(0) | Err(_) => break,
-                Ok(n) => {
-                    if tx.send(buf[..n].to_vec()).is_err() {
-                        break;
-                    }
-                }
-            }
-        }
-    });
-    std::thread::spawn(move || {
-        let mut pending: Vec<u8> = Vec::new();
-        let mut oldest: Option<Instant> = None;
-        let mut last_input = Instant::now();
-        loop {
-            let waited = oldest.map_or(0, |t| t.elapsed().as_millis() as u64);
-            let next = if !pending.is_empty() {
-                rx.recv_timeout(Duration::from_millis(PTY_BATCH.wait_ms(waited)))
-            } else if scrubber.pending() > 0 {
-                rx.recv_timeout(Duration::from_millis(SCRUB_CARRY_RELEASE_MS))
-            } else {
-                rx.recv().map_err(|_| RecvTimeoutError::Disconnected)
-            };
-            match next {
-                Ok(chunk) => {
-                    last_input = Instant::now();
-                    let safe = scrubber.push(&chunk);
-                    if !safe.is_empty() {
-                        oldest.get_or_insert_with(Instant::now);
-                        pending.extend_from_slice(&safe);
-                    }
-                }
-                Err(RecvTimeoutError::Timeout) => {
-                    // Output went quiet with a possible key start held back: release it.
-                    if scrubber.pending() > 0 && last_input.elapsed() >= Duration::from_millis(SCRUB_CARRY_RELEASE_MS) {
-                        let safe = scrubber.flush();
-                        if !safe.is_empty() {
-                            oldest.get_or_insert_with(Instant::now);
-                            pending.extend_from_slice(&safe);
+    fn spawn_threads(
+        self: &Arc<Self>,
+        live: Arc<Live>,
+        run: Arc<Run>,
+        mut child: Box<dyn Child + Send + Sync>,
+        mut reader: Box<dyn Read + Send>,
+        mut scrubber: StreamScrubber,
+    ) {
+        let (tx, rx) = mpsc::channel::<Vec<u8>>();
+        std::thread::Builder::new()
+            .name(format!("pty-read-{}", run.id))
+            .spawn(move || {
+                let mut buf = vec![0u8; 64 * 1024];
+                loop {
+                    match reader.read(&mut buf) {
+                        Ok(0) | Err(_) => break,
+                        Ok(n) => {
+                            if tx.send(buf[..n].to_vec()).is_err() {
+                                break;
+                            }
                         }
                     }
                 }
-                Err(RecvTimeoutError::Disconnected) => {
-                    pending.extend(scrubber.flush());
-                    if !pending.is_empty() {
-                        let _ = output.send(PtyBytes(std::mem::take(&mut pending)));
+            })
+            .expect("spawn reader thread");
+
+        // Scrub, batch and emit. Nothing reaches the mirror or a view unscrubbed, and the reader
+        // never waits on either.
+        let (m, l, r) = (self.clone(), live.clone(), run.clone());
+        std::thread::Builder::new()
+            .name(format!("pty-out-{}", run.id))
+            .spawn(move || {
+                let mut pending: Vec<u8> = Vec::new();
+                let mut oldest: Option<Instant> = None;
+                let mut last_input = Instant::now();
+                let mut handshake = Handshake::new();
+                loop {
+                    let waited = oldest.map_or(0, |t| t.elapsed().as_millis() as u64);
+                    let next = if !pending.is_empty() {
+                        rx.recv_timeout(Duration::from_millis(PTY_BATCH.wait_ms(waited)))
+                    } else if scrubber.pending() > 0 {
+                        rx.recv_timeout(Duration::from_millis(SCRUB_CARRY_RELEASE_MS))
+                    } else {
+                        rx.recv().map_err(|_| RecvTimeoutError::Disconnected)
+                    };
+                    match next {
+                        Ok(chunk) => {
+                            last_input = Instant::now();
+                            // ConPTY waits for this answer before it draws anything.
+                            let (chunk, answer) = handshake.push(&chunk);
+                            if answer {
+                                let mut w = r.writer.lock().expect("writer lock");
+                                let _ = w.write_all(&cursor_report(r.start_row)).and_then(|()| w.flush());
+                            }
+                            let safe = scrubber.push(&chunk);
+                            if !safe.is_empty() {
+                                oldest.get_or_insert_with(Instant::now);
+                                pending.extend_from_slice(&safe);
+                            }
+                        }
+                        Err(RecvTimeoutError::Timeout) => {
+                            // Output went quiet with a possible key start held back: release it.
+                            if scrubber.pending() > 0
+                                && last_input.elapsed() >= Duration::from_millis(SCRUB_CARRY_RELEASE_MS)
+                            {
+                                let safe = scrubber.flush();
+                                if !safe.is_empty() {
+                                    oldest.get_or_insert_with(Instant::now);
+                                    pending.extend_from_slice(&safe);
+                                }
+                            }
+                        }
+                        Err(RecvTimeoutError::Disconnected) => {
+                            let held = handshake.flush();
+                            pending.extend(scrubber.push(&held));
+                            pending.extend(scrubber.flush());
+                            l.hub.emit(&std::mem::take(&mut pending));
+                            break;
+                        }
                     }
-                    break;
+                    let waited = oldest.map_or(0, |t| t.elapsed().as_millis() as u64);
+                    if PTY_BATCH.should_flush(pending.len(), waited) {
+                        l.hub.emit(&std::mem::take(&mut pending));
+                        oldest = None;
+                    }
                 }
-            }
-            let waited = oldest.map_or(0, |t| t.elapsed().as_millis() as u64);
-            if PTY_BATCH.should_flush(pending.len(), waited) {
-                // A closed view is not an error for the session; keep draining the PTY.
-                let _ = output.send(PtyBytes(std::mem::take(&mut pending)));
-                oldest = None;
+                if let Some((ExitCause::ByItself, code)) = *r.exit.lock().expect("exit lock") {
+                    l.hub.emit(&exit_line(code));
+                }
+                {
+                    let mut slot = l.run.lock().expect("run lock");
+                    if slot.as_ref().is_some_and(|cur| cur.id == r.id) {
+                        *slot = None;
+                    }
+                }
+                r.mark_finished();
+                m.notify_id(l.id);
+            })
+            .expect("spawn output thread");
+
+        // Exit watcher: record why the run ended, then close the pseudoconsole so the reader sees
+        // EOF (ConPTY keeps the pipe open until it is closed).
+        let m = self.clone();
+        std::thread::Builder::new()
+            .name(format!("pty-wait-{}", run.id))
+            .spawn(move || {
+                let code = child.wait().map(|s| s.exit_code()).unwrap_or(u32::MAX);
+                let requested = run.requested.lock().expect("requested lock").take();
+                let cause = classify_exit(requested, m.quitting.load(Ordering::SeqCst), system_shutting_down());
+                let (end, state) = after_exit(cause);
+                let _ = rows::end_run(&m.store, run.id, end, Some(code));
+                if state == Some(SessionState::Exited) {
+                    let _ = rows::set_state(&m.store, live.id, SessionState::Exited, Some(&format!("Exited with code {code}.")));
+                }
+                *run.exit.lock().expect("exit lock") = Some((cause, code));
+                std::thread::sleep(Duration::from_millis(250));
+                run.master.lock().expect("master lock").take();
+                m.notify_id(live.id);
+            })
+            .expect("spawn exit watcher");
+    }
+
+    pub fn attach(&self, id: u32, sink: Sink) -> Result<u32, String> {
+        Ok(self.open_live(id)?.hub.attach(sink))
+    }
+
+    pub fn detach(&self, id: u32, view: u32) {
+        if let Ok(live) = self.open_live(id) {
+            live.hub.detach(view);
+        }
+    }
+
+    pub fn write(&self, id: u32, data: &str) -> Result<(), String> {
+        if data.len() > MAX_WRITE_BYTES {
+            return Err("write too large".into());
+        }
+        let run = self.running(id)?;
+        let mut writer = run.writer.lock().expect("writer lock");
+        writer.write_all(data.as_bytes()).and_then(|()| writer.flush()).map_err(|e| e.to_string())
+    }
+
+    /// Resizes the live process and remembers the size for the next launch.
+    pub fn resize(&self, id: u32, cols: u16, rows_: u16) -> Result<(), String> {
+        let size = check_size(cols, rows_)?;
+        rows::set_size(&self.store, id, cols, rows_)?;
+        if let Ok(run) = self.running(id)
+            && let Some(master) = run.master.lock().expect("master lock").as_ref()
+        {
+            master.resize(size).map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    }
+
+    fn refuse_if_locked(&self, row: &SessionRow, verb: &str) -> Result<(), String> {
+        if row.locked {
+            return Err(format!("{} is locked. Unlock it before you {verb} it.", row.name));
+        }
+        Ok(())
+    }
+
+    /// Ends a live run on Chorus's request and waits for its output to drain.
+    fn end_run_for(&self, live: &Live, cause: ExitCause) -> job::CloseOutcome {
+        let Some(run) = live.current_run() else { return job::CloseOutcome::default() };
+        *run.requested.lock().expect("requested lock") = Some(cause);
+        let outcome = run.end_processes();
+        run.wait_finished(FINISH_TIMEOUT);
+        outcome
+    }
+
+    pub fn close(&self, id: u32) -> Result<CloseReport, String> {
+        let row = self.row(id)?;
+        self.refuse_if_locked(&row, "close")?;
+        let outcome = self.open_live(id).map(|live| self.end_run_for(&live, ExitCause::UserClose)).unwrap_or_default();
+        rows::set_state(&self.store, id, SessionState::Closed, None)?;
+        if let Some(live) = self.live.lock().expect("live lock").remove(&id) {
+            live.hub.remove();
+        }
+        let _ = std::fs::remove_dir_all(self.state_dir(id));
+        self.notify_id(id);
+        Ok(CloseReport { killed: outcome.killed.len() as u32, spared: outcome.spared.len() as u32 })
+    }
+
+    pub fn restart(self: &Arc<Self>, id: u32) -> Result<SessionSummary, String> {
+        let row = self.row(id)?;
+        if row.state == SessionState::Closed {
+            return Err("a closed session can't be restarted".into());
+        }
+        self.refuse_if_locked(&row, "restart")?;
+        let live = self.live_for(id);
+        self.end_run_for(&live, ExitCause::UserRestart);
+        live.hub.new_run(BOUNDARY_RESTARTED, row.rows);
+        rows::set_state(&self.store, id, SessionState::Running, None)?;
+        if let Err(e) = self.start_run(&live, true) {
+            self.record_failure(&live, &e);
+        }
+        let summary = self.summary(id)?;
+        (self.notify)(summary.clone());
+        Ok(summary)
+    }
+
+    pub fn set_locked(&self, id: u32, locked: bool, pin: Option<&str>) -> Result<SessionSummary, String> {
+        self.row(id)?;
+        if !locked {
+            crate::lock::check_unlock(&self.store, pin)?;
+        }
+        rows::set_locked(&self.store, id, locked)?;
+        let summary = self.summary(id)?;
+        (self.notify)(summary.clone());
+        Ok(summary)
+    }
+
+    /// Chorus is quitting: record every live run as ended by that, so the next start relaunches
+    /// their sessions instead of treating them as crashed. The processes die with Chorus's jobs.
+    pub fn shutdown(&self) {
+        self.quitting.store(true, Ordering::SeqCst);
+        for live in self.live.lock().expect("live lock").values() {
+            if let Some(run) = live.current_run() {
+                let _ = rows::end_run(&self.store, run.id, chorus_core::session::RunEnd::ChorusClosed, None);
             }
         }
-    });
-}
-
-#[tauri::command]
-#[specta::specta]
-pub fn pty_spawn(
-    app: AppHandle,
-    state: State<'_, SessionManager>,
-    request: SpawnRequest,
-    output: Channel<PtyBytes>,
-) -> Result<SpawnResult, String> {
-    state.spawn(app, request, output)
-}
-
-#[tauri::command]
-#[specta::specta]
-pub fn pty_write(state: State<'_, SessionManager>, session_id: u32, data: String) -> Result<(), String> {
-    if data.len() > MAX_WRITE_BYTES {
-        return Err("write too large".into());
     }
-    let session = state.get(session_id)?;
-    let mut writer = session.writer.lock().expect("writer lock");
-    writer.write_all(data.as_bytes()).and_then(|()| writer.flush()).map_err(|e| e.to_string())
 }
 
-#[tauri::command]
-#[specta::specta]
-pub fn pty_resize(state: State<'_, SessionManager>, session_id: u32, cols: u16, rows: u16) -> Result<(), String> {
-    let size = check_size(cols, rows)?;
-    let session = state.get(session_id)?;
-    let master = session.master.lock().expect("master lock");
-    master.as_ref().ok_or("session has exited")?.resize(size).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-#[specta::specta]
-pub fn pty_close(state: State<'_, SessionManager>, session_id: u32) -> Result<CloseReport, String> {
-    state.close(session_id)
-}
-
-// ── Spike S4 helpers. The key never crosses IPC: only its length, fingerprint and yes/no answers.
-
-#[derive(Debug, Clone, Serialize, Type)]
-#[serde(rename_all = "camelCase")]
-pub struct FakeKeyInfo {
-    pub label: String,
-    pub key_len: u32,
-    pub blob_len: u32,
-    /// First 16 hex digits of the key's SHA-256.
-    pub fingerprint: String,
-    /// Where the sealed blob was written, so it can be inspected at rest.
-    pub blob_path: String,
-}
-
-/// Generates a random, OpenRouter-shaped fake key, seals it with DPAPI and stores the blob.
-#[tauri::command]
-#[specta::specta]
-pub fn spike_vault_add_fake_key(state: State<'_, SessionManager>, label: String) -> Result<FakeKeyInfo, String> {
-    if label.is_empty() || label.len() > 64 || !label.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
-        return Err("label must be 1-64 letters, digits or dashes".into());
-    }
-    let hex: String = crate::vault::random_bytes(32).iter().map(|b| format!("{b:02x}")).collect();
-    let key = format!("sk-or-v1-{hex}");
-    let sealed = crate::vault::protect(key.as_bytes()).map_err(|e| e.to_string())?;
-    let dir = state.scratch_root.join("vault");
-    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let blob_path = dir.join(format!("{label}.bin"));
-    std::fs::write(&blob_path, &sealed).map_err(|e| e.to_string())?;
-    let info = FakeKeyInfo {
-        label: label.clone(),
-        key_len: key.len() as u32,
-        blob_len: sealed.len() as u32,
-        fingerprint: crate::vault::fingerprint(key.as_bytes()),
-        blob_path: blob_path.display().to_string(),
-    };
-    state.vault.lock().expect("vault lock").insert(label, sealed);
-    Ok(info)
-}
-
-/// Seals a secret that a spike harness left in a file under the scratch folder (for example the
-/// opencode server password), so it can be injected like any vault key. The value never crosses IPC.
-#[tauri::command]
-#[specta::specta]
-pub fn spike_vault_import_file(state: State<'_, SessionManager>, label: String, file_name: String) -> Result<FakeKeyInfo, String> {
-    let ok_name =
-        !file_name.is_empty() && file_name.split(['/', '\\']).all(|p| !p.is_empty() && p != ".." && !p.contains(':'));
-    if !ok_name || label.is_empty() || label.len() > 64 {
-        return Err("bad label or file name".into());
-    }
-    let path = state.scratch_root.join(&file_name);
-    let value = std::fs::read_to_string(&path).map_err(|e| e.to_string())?.trim().to_owned();
-    let sealed = crate::vault::protect(value.as_bytes()).map_err(|e| e.to_string())?;
-    let info = FakeKeyInfo {
-        label: label.clone(),
-        key_len: value.len() as u32,
-        blob_len: sealed.len() as u32,
-        fingerprint: crate::vault::fingerprint(value.as_bytes()),
-        blob_path: String::new(),
-    };
-    state.vault.lock().expect("vault lock").insert(label, sealed);
-    Ok(info)
-}
-
-/// The length of the longest piece of the stored key that appears in `text` (0 to the key's
-/// length). Catches partial leaks; returns a number, never the key.
-#[tauri::command]
-#[specta::specta]
-pub fn spike_vault_contains(state: State<'_, SessionManager>, label: String, text: String) -> Result<u32, String> {
-    if text.len() > MAX_WRITE_BYTES {
-        return Err("text too large".into());
-    }
-    let key = state.decrypt(&label)?;
-    let hay = text.as_bytes();
-    let longest = (1..=key.len())
-        .rev()
-        .find(|&n| key.windows(n).any(|piece| hay.windows(n).any(|w| w == piece)))
-        .unwrap_or(0);
-    Ok(longest as u32)
-}
+#[cfg(test)]
+mod tests;

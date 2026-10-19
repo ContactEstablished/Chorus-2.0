@@ -1,4 +1,5 @@
-//! Where each agent CLI lives and how to start it (spike S1; the full adapters are P2).
+//! Where each agent CLI lives and how to start it (spike S1; the full adapters, with declared
+//! options and capabilities, are P2).
 //!
 //! Each CLI is launched through its real install, never through `cmd.exe /c`: `claude` and `grok`
 //! are native executables; `codex` and `opencode` are npm `.cmd` shims, resolved to their target
@@ -20,6 +21,34 @@ pub enum AgentKind {
     Grok,
 }
 
+impl AgentKind {
+    /// The stored and serialised name.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Shell => "shell",
+            Self::Claude => "claude",
+            Self::Codex => "codex",
+            Self::Opencode => "opencode",
+            Self::Grok => "grok",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        [Self::Shell, Self::Claude, Self::Codex, Self::Opencode, Self::Grok].into_iter().find(|k| k.as_str() == s)
+    }
+
+    /// How the agent is named in the UI and in default session names.
+    pub fn display_name(self) -> &'static str {
+        match self {
+            Self::Shell => "Shell",
+            Self::Claude => "Claude Code",
+            Self::Codex => "Codex",
+            Self::Opencode => "opencode",
+            Self::Grok => "Grok",
+        }
+    }
+}
+
 /// A resolved launch: what to run and what the agent needs beyond the baseline environment.
 #[derive(Debug, Clone)]
 pub struct Launch {
@@ -29,27 +58,19 @@ pub struct Launch {
     pub additions: Vec<(&'static str, String)>,
 }
 
-/// Run opencode's TUI against a server Chorus started (`opencode attach`), as ARCHITECTURE §5 plans.
-#[derive(Debug, Clone, Deserialize, Type)]
-#[serde(rename_all = "camelCase")]
-pub struct OpencodeAttach {
-    pub port: u16,
-    pub session_id: String,
-}
-
 /// Resolves `kind` against the parent's `PATH`. `scratch` is a per-session folder for agents whose
 /// state must be isolated (opencode, LESSONS L5).
-pub fn resolve(
-    kind: AgentKind,
-    parent_env: &[(String, String)],
-    scratch: &Path,
-    attach: Option<&OpencodeAttach>,
-) -> Result<Launch, String> {
+pub fn resolve(kind: AgentKind, parent_env: &[(String, String)], scratch: &Path) -> Result<Launch, String> {
     let path = env_value(parent_env, "PATH").unwrap_or_default();
     match kind {
         AgentKind::Shell => {
             let root = env_value(parent_env, "SystemRoot").unwrap_or_else(|| "C:\\Windows".into());
-            Ok(Launch { program: Path::new(&root).join("System32\\cmd.exe"), args: vec![], additions: vec![] })
+            // UTF-8 code page, or cmd shows UTF-8 output as mojibake (S1 finding 5).
+            Ok(Launch {
+                program: Path::new(&root).join("System32\\cmd.exe"),
+                args: vec!["/K".into(), "chcp 65001>nul".into()],
+                additions: vec![],
+            })
         }
         AgentKind::Claude => Ok(Launch {
             program: find_on_path(&path, "claude.exe").ok_or("claude.exe not found on PATH")?,
@@ -70,16 +91,8 @@ pub fn resolve(
             Ok(Launch { program, args, additions: vec![] })
         }
         AgentKind::Opencode => {
-            let (program, mut args) = through_shim(&path, "opencode.cmd")?;
-            if let Some(a) = attach {
-                if a.session_id.is_empty()
-                    || a.session_id.len() > 64
-                    || !a.session_id.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
-                {
-                    return Err("invalid opencode session id".into());
-                }
-                args.extend(["attach".into(), format!("http://127.0.0.1:{}", a.port), "--session".into(), a.session_id.clone()]);
-            }
+            // P3 runs opencode as `serve` + `attach` (ARCHITECTURE §5); until then, its plain TUI.
+            let (program, args) = through_shim(&path, "opencode.cmd")?;
             let state = scratch.join("xdg-state");
             let data = scratch.join("xdg-data");
             Ok(Launch {

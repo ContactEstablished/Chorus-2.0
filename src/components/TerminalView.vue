@@ -78,7 +78,16 @@ function screenText(): string {
   return lines.join('\n')
 }
 
-defineExpose({ write, size, focus, screenText, renderer })
+/** Every line in the buffer, scrollback included, for tests. */
+function bufferText(): string {
+  if (!term) return ''
+  const buf = term.buffer.active
+  const lines: string[] = []
+  for (let y = 0; y < buf.length; y++) lines.push(buf.getLine(y)?.translateToString(true) ?? '')
+  return lines.join('\n')
+}
+
+defineExpose({ write, size, focus, screenText, bufferText, renderer })
 </script>
 
 <template>

@@ -8,22 +8,33 @@ import * as __TAURI_EVENT from "@tauri-apps/api/event";
 /** Commands */
 export const commands = {
 	appInfo: () => __TAURI_INVOKE<AppInfo>("app_info"),
-	ptySpawn: (request: SpawnRequest, output: Channel<ArrayBuffer>) => typedError<SpawnResult, string>(__TAURI_INVOKE("pty_spawn", { request, output })),
-	ptyWrite: (sessionId: number, data: string) => typedError<null, string>(__TAURI_INVOKE("pty_write", { sessionId, data })),
-	ptyResize: (sessionId: number, cols: number, rows: number) => typedError<null, string>(__TAURI_INVOKE("pty_resize", { sessionId, cols, rows })),
-	ptyClose: (sessionId: number) => typedError<CloseReport, string>(__TAURI_INVOKE("pty_close", { sessionId })),
-	/**  Generates a random, OpenRouter-shaped fake key, seals it with DPAPI and stores the blob. */
-	spikeVaultAddFakeKey: (label: string) => typedError<FakeKeyInfo, string>(__TAURI_INVOKE("spike_vault_add_fake_key", { label })),
+	sessionsList: () => typedError<SessionSummary[], string>(__TAURI_INVOKE("sessions_list")),
+	sessionCreate: (request: CreateSession) => typedError<SessionSummary, string>(__TAURI_INVOKE("session_create", { request })),
 	/**
-	 *  The length of the longest piece of the stored key that appears in `text` (0 to the key's
-	 *  length). Catches partial leaks; returns a number, never the key.
+	 *  Starts sending a session's output to `output`: its saved scrollback first, then live bytes.
+	 *  Returns a view id for `session_detach`.
 	 */
-	spikeVaultContains: (label: string, text: string) => typedError<number, string>(__TAURI_INVOKE("spike_vault_contains", { label, text })),
+	sessionAttach: (sessionId: number, output: Channel<ArrayBuffer>) => typedError<number, string>(__TAURI_INVOKE("session_attach", { sessionId, output })),
+	sessionDetach: (sessionId: number, viewId: number) => __TAURI_INVOKE<void>("session_detach", { sessionId, viewId }),
+	sessionWrite: (sessionId: number, data: string) => typedError<null, string>(__TAURI_INVOKE("session_write", { sessionId, data })),
+	sessionResize: (sessionId: number, cols: number, rows: number) => typedError<null, string>(__TAURI_INVOKE("session_resize", { sessionId, cols, rows })),
+	sessionRestart: (sessionId: number) => typedError<SessionSummary, string>(__TAURI_INVOKE("session_restart", { sessionId })),
+	sessionClose: (sessionId: number) => typedError<CloseReport, string>(__TAURI_INVOKE("session_close", { sessionId })),
+	/**  Locking never asks for the PIN; unlocking does when one is set. */
+	sessionSetLocked: (sessionId: number, locked: boolean, pin: string | null) => typedError<SessionSummary, string>(__TAURI_INVOKE("session_set_locked", { sessionId, locked, pin })),
+	lockPinStatus: () => typedError<boolean, string>(__TAURI_INVOKE("lock_pin_status")),
+	lockPinSet: (pin: string) => typedError<null, string>(__TAURI_INVOKE("lock_pin_set", { pin })),
+	lockPinClear: () => typedError<null, string>(__TAURI_INVOKE("lock_pin_clear")),
+	vaultList: () => typedError<CredentialSummary[], string>(__TAURI_INVOKE("vault_list")),
+	vaultAdd: (label: string, secret: string) => typedError<CredentialSummary, string>(__TAURI_INVOKE("vault_add", { label, secret })),
+	vaultDelete: (id: number) => typedError<boolean, string>(__TAURI_INVOKE("vault_delete", { id })),
+	/**  Generates a random OpenRouter-shaped fake key, seals and stores it. */
+	devVaultAddTestKey: (label: string) => typedError<CredentialSummary, string>(__TAURI_INVOKE("dev_vault_add_test_key", { label })),
 	/**
-	 *  Seals a secret that a spike harness left in a file under the scratch folder (for example the
-	 *  opencode server password), so it can be injected like any vault key. The value never crosses IPC.
+	 *  Looks for any run of a stored key in `text` and in every file under the data folder (database,
+	 *  its WAL, scrollback files).
 	 */
-	spikeVaultImportFile: (label: string, fileName: string) => typedError<FakeKeyInfo, string>(__TAURI_INVOKE("spike_vault_import_file", { label, fileName })),
+	devLeakCheck: (id: number, text: string) => typedError<LeakReport, string>(__TAURI_INVOKE("dev_leak_check", { id, text })),
 	/**
 	 *  Opens the strip (or returns the open one) without activating it. Async because building a window
 	 *  inside a synchronous command deadlocks on Windows.
@@ -41,7 +52,7 @@ export const commands = {
 export const events = {
 	backendPulse: makeEvent<BackendPulse>("backend-pulse"),
 	fleetClick: makeEvent<FleetClick>("fleet-click"),
-	ptyExited: makeEvent<PtyExited>("pty-exited"),
+	sessionUpdated: makeEvent<SessionUpdated>("session-updated"),
 };
 
 /* Types */
@@ -67,23 +78,38 @@ export type BackendPulse = {
 };
 
 export type CloseReport = {
-	/**  Every process that was in the session's job when Close was pressed. */
-	jobPids: number[],
+	killed: number,
+	/**  Windowed processes (a browser the agent opened) left running. */
+	spared: number,
 };
 
-export type CredentialRef = {
+export type CreateSession = {
+	agent: AgentKind,
+	cwd: string,
+	name: string | null,
+	/**  A stored key to inject as an environment variable, decrypted only at launch. */
+	credential: CredentialUse | null,
+	cols: number,
+	rows: number,
+};
+
+export type CredentialSummary = {
+	id: number,
 	label: string,
+	/**  First 16 hex digits of the key's SHA-256: enough to tell keys apart, nothing more. */
+	fingerprint: string,
+	createdAtSecs: number,
+	lastUsedAtSecs: number | null,
+};
+
+export type CredentialUse = {
+	id: number,
 	envVar: string,
 };
 
-export type FakeKeyInfo = {
-	label: string,
-	keyLen: number,
-	blobLen: number,
-	/**  First 16 hex digits of the key's SHA-256. */
-	fingerprint: string,
-	/**  Where the sealed blob was written, so it can be inspected at rest. */
-	blobPath: string,
+export type FileLeak = {
+	path: string,
+	longest: number,
 };
 
 /**  Dev or release, as the front end sees it. */
@@ -111,45 +137,47 @@ export type FleetProbe = {
 	foregroundHwnd: string,
 };
 
-/**  Run opencode's TUI against a server Chorus started (`opencode attach`), as ARCHITECTURE §5 plans. */
-export type OpencodeAttach = {
-	port: number,
-	sessionId: string,
+export type LeakReport = {
+	/**  Longest run of the key (8 bytes or more) found in the text passed in, such as a pane's screen. */
+	text: number,
+	/**  Every file under the data folder with any run of the key, and the longest run in it. */
+	files: FileLeak[],
+	filesScanned: number,
 };
 
-export type PtyExited = {
-	sessionId: number,
-	exitCode: number,
-};
+export type SessionStatus = "running" | "exited" | "closed";
 
-export type SpawnRequest = {
+/**  Everything the UI shows about a session. */
+export type SessionSummary = {
+	id: number,
+	name: string,
 	agent: AgentKind,
-	cols: number,
-	rows: number,
-	/**  A vault key to inject into the child's environment, decrypted only now. */
-	credential: CredentialRef | null,
-	/**  opencode only: attach the TUI to a running server (spike S5). */
-	opencodeAttach: OpencodeAttach | null,
+	cwd: string,
+	status: SessionStatus,
 	/**
-	 *  Extra arguments appended for spike S5 (for example `--settings <file>`). Removed with the
-	 *  harness; P2 adapters build arguments from declared options instead.
+	 *  A process is running now. `status` can be `running` without one for a moment while a
+	 *  Restart or a relaunch is under way.
 	 */
-	spikeArgs: string[] | null,
+	live: boolean,
+	pid: number | null,
+	locked: boolean,
+	/**  Why the session isn't running, or what went wrong, in words to show as is. */
+	note: string | null,
+	credentialLabel: string | null,
+	credentialEnv: string | null,
+	lastExitCode: number | null,
 	/**
-	 *  Extra non-secret environment for spike S5 (for example a feature switch). Names are checked
-	 *  like secret variables; values are not scrubbed, so never pass a key here.
+	 *  How the last run ended (`exited`, `closed`, `restarted`, `chorus-closed`,
+	 *  `chorus-crashed`, `system-shutdown`), or none while it runs.
 	 */
-	spikeEnv: ([string, string])[] | null,
+	lastEnd: string | null,
+	createdAtSecs: number,
+	runStartedAtSecs: number | null,
+	scrollbackError: string | null,
 };
 
-export type SpawnResult = {
-	sessionId: number,
-	pid: number,
-	program: string,
-	args: string[],
-	cwd: string,
-	/**  Names only, so the UI can show what the child received without showing values. */
-	envNames: string[],
+export type SessionUpdated = {
+	session: SessionSummary,
 };
 
 /* Tauri Specta runtime */

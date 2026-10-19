@@ -71,3 +71,56 @@ html.fleet body {
   background: var(--bg);
   overflow: hidden;
 }
+
+/* Base controls for the bare P1 screens. P4's components replace them with the mockup's. */
+button,
+input,
+select {
+  font: inherit;
+  color: var(--text);
+}
+button {
+  background: var(--surface-chip);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control);
+  padding: 6px 14px;
+  cursor: pointer;
+}
+button:hover:not(:disabled) {
+  border-color: var(--accent-line);
+}
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+  font-weight: 600;
+}
+button.primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+button.danger {
+  color: var(--status-failed);
+}
+button.quiet {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-2);
+}
+input,
+select {
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control);
+  padding: 7px 10px;
+  min-width: 0;
+}
+input:focus,
+select:focus,
+button:focus-visible {
+  outline: 2px solid var(--accent-line);
+  outline-offset: 1px;
+}

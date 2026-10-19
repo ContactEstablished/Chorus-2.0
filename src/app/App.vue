@@ -1,110 +1,90 @@
 <script setup lang="ts">
-// P0 placeholder window: proves the build, the typed IPC and which data directory is live.
+// P1 window: a slim bar saying which build and data are live (LESSONS L15) and the bare Raw view.
 // The real shell (rail, title bar, Overview) is P4.
-import { computed, onMounted, onUnmounted } from 'vue'
+import { onMounted, onUnmounted, ref } from 'vue'
 import ChorusMark from '../components/ChorusMark.vue'
-import PtySpike from '../spikes/PtySpike.vue'
+import RawView from '../raw/RawView.vue'
+import { commands } from '../ipc'
 import { useAppStore } from '../stores/app'
 
 const app = useAppStore()
+const devMessage = ref<string | null>(null)
 onMounted(() => void app.init())
 onUnmounted(() => app.dispose())
 
-const uptime = computed(() => (app.pulse ? `${app.pulse.uptimeSecs} s` : '…'))
+async function splash(reduceMotion: boolean): Promise<void> {
+  const res = await commands.spikeSplashOpen(3, reduceMotion)
+  devMessage.value = res.status === 'error' ? res.error : null
+}
+
+async function fleet(): Promise<void> {
+  const res = await commands.spikeFleetOpen()
+  devMessage.value = res.status === 'error' ? res.error : null
+}
 </script>
 
 <template>
-  <main class="p0">
-    <header class="brand">
-      <ChorusMark :height="44" />
-      <div>
-        <h1>Chorus 2.0</h1>
-        <p class="sub">Phase 0 scaffold. No real UI yet.</p>
-      </div>
-    </header>
-
-    <p v-if="app.error" class="error" role="alert">Back end unavailable: {{ app.error }}</p>
-
-    <dl v-if="app.info" class="facts">
-      <dt>Version</dt>
-      <dd>{{ app.info.version }}</dd>
-      <dt>Build</dt>
-      <dd>
+  <div class="shell">
+    <header class="bar">
+      <ChorusMark :height="22" />
+      <strong>Chorus 2.0</strong>
+      <template v-if="app.info">
+        <span class="muted">{{ app.info.version }}</span>
         <span class="flavor" :class="app.info.flavor">{{ app.info.flavor }}</span>
-        <code>{{ app.info.identifier }}</code>
-      </dd>
-      <dt>Data directory</dt>
-      <dd><code class="path">{{ app.info.dataDir }}</code></dd>
-      <dt>Back end</dt>
-      <dd>
-        <span class="dot" :class="{ live: app.pulse }" />
-        {{ app.pulse ? `pulse #${app.pulse.seq} · up ${uptime}` : 'waiting for first pulse…' }}
-      </dd>
-      <dt>Tauri</dt>
-      <dd>{{ app.info.tauriVersion }}</dd>
-    </dl>
-    <p v-else-if="!app.error" class="sub">Connecting to the back end…</p>
-
-    <PtySpike v-if="app.info?.flavor === 'dev'" />
-  </main>
+        <code class="path" :title="app.info.identifier">{{ app.info.dataDir }}</code>
+      </template>
+      <span v-else-if="app.error" class="error">Back end unavailable: {{ app.error }}</span>
+      <span class="spacer" />
+      <template v-if="app.info?.flavor === 'dev'">
+        <span v-if="devMessage" class="error">{{ devMessage }}</span>
+        <button class="quiet" @click="splash(false)">Splash</button>
+        <button class="quiet" @click="splash(true)">Splash (reduced motion)</button>
+        <button class="quiet" @click="fleet()">Fleet strip</button>
+      </template>
+    </header>
+    <RawView v-if="app.info" :dev="app.info.flavor === 'dev'" class="body" />
+  </div>
 </template>
 
 <style scoped>
-.p0 {
-  max-width: 1100px;
-  margin: 0 auto;
-  padding: 40px 32px;
-}
-.brand {
+.shell {
+  height: 100%;
   display: flex;
-  align-items: center;
-  gap: 18px;
-  margin-bottom: 32px;
+  flex-direction: column;
 }
-h1 {
-  font-family: var(--font-heading);
-  font-weight: 650;
-  font-size: 28px;
-  margin: 0;
-}
-.sub {
-  color: var(--text-muted);
-  margin: 4px 0 0;
-}
-.facts {
-  display: grid;
-  grid-template-columns: max-content 1fr;
-  gap: 12px 24px;
-  margin: 0;
-  padding: 24px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-card);
-}
-dt {
-  color: var(--text-muted);
-}
-dd {
-  margin: 0;
-  color: var(--text-2);
+.bar {
   display: flex;
   align-items: center;
   gap: 10px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-sidebar);
   min-width: 0;
 }
-code {
-  font-family: var(--font-mono);
-  font-size: 12.5px;
-  color: var(--text);
+.bar strong {
+  font-family: var(--font-heading);
+  font-weight: 650;
+}
+.muted {
+  color: var(--text-muted);
+}
+.spacer {
+  flex: 1;
 }
 .path {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   user-select: all;
-  overflow-wrap: anywhere;
+  min-width: 0;
 }
 .flavor {
-  padding: 2px 10px;
+  padding: 1px 8px;
   border-radius: var(--radius-pill);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -117,19 +97,15 @@ code {
   background: var(--accent-soft);
   color: var(--accent);
 }
-.dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--status-done);
-}
-.dot.live {
-  background: var(--status-ready);
-}
 .error {
   color: var(--status-failed);
-  background: rgb(255 61 90 / 0.12);
-  padding: 12px 16px;
-  border-radius: var(--radius-control);
+}
+.body {
+  flex: 1;
+  min-height: 0;
+}
+.bar button {
+  padding: 4px 10px;
+  font-size: 12.5px;
 }
 </style>

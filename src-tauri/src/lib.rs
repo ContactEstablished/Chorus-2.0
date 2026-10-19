@@ -4,11 +4,18 @@ mod agents;
 mod app;
 mod fleet;
 mod ipc;
+mod lock;
 mod sessions;
 mod splash;
+mod store;
 mod vault;
 
+use std::sync::Arc;
+
 use tauri::Manager;
+use tauri_specta::Event;
+
+use sessions::{SessionManager, SessionUpdated};
 
 pub fn run() {
     let builder = ipc::builder();
@@ -17,7 +24,15 @@ pub fn run() {
     ipc::export_bindings(&builder, &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(ipc::BINDINGS_FILE))
         .expect("export TypeScript bindings");
 
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
+        // First, so a second launch hands over before it restores (and doubles) any session.
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.unminimize();
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }))
         .invoke_handler(builder.invoke_handler())
         .setup(move |app| {
             builder.mount_events(app);
@@ -40,10 +55,29 @@ pub fn run() {
                     tauri_version: tauri::VERSION.to_string(),
                 },
             });
-            app.manage(sessions::SessionManager::new(data_dir.join("spike-scratch")));
+
+            let store = store::Store::open(&data_dir.join("chorus.db"))?;
+            let handle = app.handle().clone();
+            let manager = SessionManager::new(
+                store,
+                data_dir,
+                Box::new(move |session| {
+                    let _ = SessionUpdated { session }.emit(&handle);
+                }),
+            );
+            manager.restore()?;
+            app.manage(manager);
             app::start_pulse(app.handle().clone());
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running Chorus");
+        .build(tauri::generate_context!())
+        .expect("error while building Chorus");
+
+    app.run(|handle, event| {
+        if let tauri::RunEvent::Exit = event
+            && let Some(manager) = handle.try_state::<Arc<SessionManager>>()
+        {
+            manager.shutdown();
+        }
+    });
 }

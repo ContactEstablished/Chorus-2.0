@@ -8,27 +8,39 @@ use specta_typescript::Typescript;
 use std::path::Path;
 use tauri_specta::{Builder, collect_commands, collect_events};
 
-use crate::{app, fleet, sessions, splash};
+use crate::{app, fleet, lock, sessions, splash, vault};
 
 /// Where the generated bindings live, relative to this crate.
 pub const BINDINGS_FILE: &str = "../src/ipc/bindings.ts";
 
 pub fn builder() -> Builder<tauri::Wry> {
+    use sessions::commands as s;
+    use vault::commands as v;
     Builder::<tauri::Wry>::new()
         .commands(collect_commands![
             app::app_info,
-            sessions::pty_spawn,
-            sessions::pty_write,
-            sessions::pty_resize,
-            sessions::pty_close,
-            sessions::spike_vault_add_fake_key,
-            sessions::spike_vault_contains,
-            sessions::spike_vault_import_file,
+            s::sessions_list,
+            s::session_create,
+            s::session_attach,
+            s::session_detach,
+            s::session_write,
+            s::session_resize,
+            s::session_restart,
+            s::session_close,
+            s::session_set_locked,
+            lock::lock_pin_status,
+            lock::lock_pin_set,
+            lock::lock_pin_clear,
+            v::vault_list,
+            v::vault_add,
+            v::vault_delete,
+            v::dev_vault_add_test_key,
+            v::dev_leak_check,
             fleet::spike_fleet_open,
             fleet::spike_fleet_probe,
             splash::spike_splash_open,
         ])
-        .events(collect_events![app::BackendPulse, sessions::PtyExited, fleet::FleetClick])
+        .events(collect_events![app::BackendPulse, sessions::SessionUpdated, fleet::FleetClick])
 }
 
 pub fn export_bindings(builder: &Builder<tauri::Wry>, path: &Path) -> Result<(), specta_typescript::Error> {
