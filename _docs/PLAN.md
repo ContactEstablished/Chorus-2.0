@@ -94,6 +94,8 @@ started in that moment adopted (D41): S1 findings 1 and 2); agent lock with opti
 
 **Exit:** a shell and a Claude Code session survive closing their view, an app restart, and a reboot
 (they are relaunched); a planted fake key never appears in the pane, the scrollback file or the DB.
+*Closed 2026-10-19 on Matthew's call with the reboot not yet run: it takes the same restore path as an
+app restart, which was seen working, and only the recorded end reason differs.*
 
 ### P2 — Agents and providers
 Adapters for **Claude Code, Codex, opencode, Grok and Shell**, each declaring its capabilities (the UI
