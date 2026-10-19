@@ -53,7 +53,10 @@ fn toml_string(s: &str) -> String {
 /// Codex 0.162.1 unescapes a `-c` value's backslashes twice, which turned
 /// `C:\Projects\x.exe` into `C:Projectsx.exe` (seen in the real app; LESSONS L37).
 pub fn codex_hook_args(relay: &str, url: &str) -> Vec<String> {
-    let command = toml_string(&format!("\"{}\" {url}", relay.replace('\\', "/")));
+    let relay = relay.replace('\\', "/");
+    // Unquoted when it can be: Codex may run hooks under PowerShell, where a quoted path followed
+    // by an argument is a parse error.
+    let command = toml_string(&if relay.contains(char::is_whitespace) { format!("\"{relay}\" {url}") } else { format!("{relay} {url}") });
     let mut args: Vec<String> = CODEX_HOOK_EVENTS
         .iter()
         .flat_map(|(event, timeout)| ["-c".to_owned(), format!("hooks.{event}=[{{hooks=[{{type=\"command\",command={command},timeout={timeout}}}]}}]")])
@@ -87,6 +90,9 @@ mod tests {
             r#"hooks.UserPromptSubmit=[{hooks=[{type="command",command="\"C:/Program Files/Chorus/chorus-hook.exe\" http://127.0.0.1:4100/hook/7",timeout=5}]}]"#
         );
         assert!(args.iter().any(|a| a.starts_with("hooks.Interrupt=") && a.ends_with("timeout=3}]}]")));
+        // Without spaces, no quotes: PowerShell can't parse a quoted path followed by an argument.
+        let plain = codex_hook_args(r"C:\Chorus\chorus-hook.exe", "http://127.0.0.1:4100/hook/7");
+        assert!(plain[1].contains(r#"command="C:/Chorus/chorus-hook.exe http://127.0.0.1:4100/hook/7""#), "{}", plain[1]);
         assert_eq!(args.len(), CODEX_HOOK_EVENTS.len() * 2 + 1);
     }
 }

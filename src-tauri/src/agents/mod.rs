@@ -102,10 +102,27 @@ pub fn env_value(env: &[(String, String)], name: &str) -> Option<String> {
 }
 
 /// `chorus-hook.exe`, Codex's hook command (D37), beside Chorus's own executable. The dev command
-/// builds it there before starting the app.
+/// builds it there before starting the app. A path with spaces is given in its short (8.3) form:
+/// Codex 0.162.1 runs hooks under PowerShell here, where a quoted path followed by an argument
+/// doesn't parse (LESSONS L37).
 pub fn hook_relay() -> Option<PathBuf> {
     let relay = std::env::current_exe().ok()?.parent()?.join("chorus-hook.exe");
-    relay.is_file().then_some(relay)
+    if !relay.is_file() {
+        return None;
+    }
+    if relay.to_string_lossy().contains(' ') {
+        return short_path(&relay).filter(|p| !p.to_string_lossy().contains(' ')).or(Some(relay));
+    }
+    Some(relay)
+}
+
+fn short_path(path: &Path) -> Option<PathBuf> {
+    use windows::Win32::Storage::FileSystem::GetShortPathNameW;
+    let long = windows::core::HSTRING::from(path.as_os_str());
+    let mut buf = vec![0u16; 1024];
+    // SAFETY: `long` is a valid wide string and `buf` a writable buffer whose length is passed.
+    let n = unsafe { GetShortPathNameW(&long, Some(&mut buf)) } as usize;
+    (n > 0 && n < buf.len()).then(|| PathBuf::from(String::from_utf16_lossy(&buf[..n])))
 }
 
 /// Claude Code's config, which has grown past a megabyte on a busy machine.
