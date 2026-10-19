@@ -109,6 +109,11 @@ saved launch profiles (the seed of Bots in P8).
 **Exit:** each agent launches with each declared option, and the option is **observed to apply** (for
 example, opencode's effort read back through its server, LESSONS L5), not only passed on the command line.
 
+*Closed 2026-10-19 on Matthew's call with Grok checked only as far as launching: it accepts its options
+at launch, but it isn't signed in on this machine, so none could be seen to apply. Every option of Claude
+Code, Codex and opencode was seen to apply in the real app, on their own logins, on OpenRouter (with a
+capped key per run) and through a gateway.*
+
 ### P3 — Agent events and durable history
 A localhost listener for agent hooks (per-session capability token, delivered only through the child's
 environment: Claude Code HTTP hooks with the token in a header, D36; the `chorus-hook` relay binary for

@@ -7,10 +7,12 @@ did, and what to do next.
 Chorus 2.0 is a ground-up rebuild of Chorus on **Tauri 2 (Rust)** with a **Vue 3** web UI. Windows only
 for now. Bring your own keys: Chorus itself only talks to the providers you configure.
 
-**Status:** Phase 2 (agents and providers) is under way. Phase 1 (session engine) closed on
-2026-10-19: sessions owned by the back end, scrollback saved and replayed, restore after a restart or
-crash, Restart and Close, the key vault, the agent lock and a bare Raw view. Its reboot check is still
-to be run. Phase 0 closed on 2026-10-19; every spike has a written result in
+**Status:** Phase 3 (agent events and durable history) is under way. Phase 2 (agents and providers)
+closed on 2026-10-19: Claude Code, Codex, opencode, Grok and shells with one effort scale, permission
+modes, models and conversation resume; providers (OpenRouter, gateways, Jev) with model catalogs, a
+spend-capped key per run, and a launch dialog with presets and saved profiles. Grok is checked only as
+far as launching until it is signed in. Phase 1 (session engine) closed on 2026-10-19, with its reboot
+check still to be run. Phase 0 closed on 2026-10-19; every spike has a written result in
 [`_docs/spikes/`](_docs/spikes/README.md).
 
 ## Docs
