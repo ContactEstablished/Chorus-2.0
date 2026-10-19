@@ -23,9 +23,9 @@ portable-pty = "0.9"
 # SQLite with the library compiled in (ARCHITECTURE §7, §10).
 rusqlite = { version = "0.40", features = ["bundled"] }
 tauri-plugin-single-instance = "2"
-# Loopback calls to opencode's server now; OpenRouter later (ARCHITECTURE §10). Tauri already builds
-# 0.13 with these features, so this adds no crate.
-reqwest = { version = "0.13", default-features = false, features = ["json"] }
+# opencode's loopback server, OpenRouter, gateways and Jev (ARCHITECTURE §10). TLS is Windows'
+# own (SChannel, through native-tls), so nothing is compiled from C.
+reqwest = { version = "0.13", default-features = false, features = ["json", "native-tls"] }
 windows = { version = "0.62", features = [
   "Win32_Foundation",
   "Win32_Security",

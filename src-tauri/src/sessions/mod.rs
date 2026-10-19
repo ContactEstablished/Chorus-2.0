@@ -30,6 +30,7 @@ use chorus_core::cli::{VersionFit, fit, parse_version};
 use chorus_core::conpty::{CURSOR_REPORT, Handshake};
 use chorus_core::env::{ChildEnvInput, compose_child_env, valid_secret_var};
 use chorus_core::opencode::{self as oc, Observed};
+use chorus_core::providers::{self as prov, ProviderKind};
 use chorus_core::scrollback::{boundary, exit_line, restart_screen};
 use chorus_core::scrub::{StreamScrubber, builtin_patterns};
 use chorus_core::session::{ExitCause, SessionState, after_exit, classify_exit, clean_name, plan_boot};
@@ -42,6 +43,7 @@ use tauri_specta::Event;
 use crate::agents::detect::Detector;
 use crate::agents::opencode::{Api, Server};
 use crate::agents::{self, AgentKind};
+use crate::store::providers as provider_rows;
 use crate::store::sessions::{self as rows, NewRun, NewSession, SessionRow};
 use crate::store::{Store, credentials};
 use crate::vault;
@@ -120,6 +122,23 @@ pub struct SessionSummary {
     pub observed: Option<Observed>,
     /// How that turn differs from `options`, one phrase each; empty when it matches.
     pub observed_differs: Vec<String>,
+    /// The provider the agent runs on, if not its own login or key.
+    pub provider_id: Option<u32>,
+    pub provider_name: Option<String>,
+    /// The newest run's minted OpenRouter key, if it had one.
+    pub capped_key: Option<CappedKeyInfo>,
+}
+
+/// A key minted for one run (`providers::keys`). The key itself is never shown or kept.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct CappedKeyInfo {
+    pub limit_usd: f64,
+    /// Not revoked yet: the run is live, or revoking failed (it expires within a day).
+    pub live: bool,
+    /// What OpenRouter's analytics settled on, once known.
+    pub cost_usd: Option<f64>,
+    pub note: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
@@ -140,6 +159,10 @@ pub struct CreateSession {
     pub rows: u16,
     /// Checked against what the agent declares; anything it lacks is refused with a reason.
     pub options: LaunchOptions,
+    /// A provider to run the agent on (`providers_list`); `options.model` is then that
+    /// provider's model id.
+    #[serde(default)]
+    pub provider_id: Option<u32>,
 }
 
 #[derive(Debug, Clone, Deserialize, Type)]
@@ -162,6 +185,8 @@ const MAX_CWD_BYTES: usize = 1024;
 /// How long Close and Restart wait for a run's output to drain before moving on.
 const FINISH_TIMEOUT: Duration = Duration::from_secs(5);
 const BOUNDARY_RESTARTED: &str = "── Restarted ──";
+/// How long quitting waits for minted keys to be revoked.
+const SHUTDOWN_REVOKE_WAIT: Duration = Duration::from_secs(4);
 const BOUNDARY_RELAUNCHED: &str = "── Chorus restarted: session relaunched ──";
 
 fn check_size(cols: u16, rows: u16) -> Result<PtySize, String> {
@@ -290,6 +315,10 @@ struct Run {
     finished: (Mutex<bool>, Condvar),
     /// opencode's server, which ends with the run.
     server: Option<Server>,
+    /// The ledger row of the OpenRouter key minted for this run, revoked when it ends.
+    capped: Option<u32>,
+    /// The options as this run's agent took them (a provider's model in the agent's own form).
+    asked: LaunchOptions,
     /// What the newest turn ran with, read back from the agent.
     observed: Mutex<Option<Observed>>,
 }
@@ -442,7 +471,20 @@ impl SessionManager {
             }),
             cli_version: last.as_ref().and_then(|r| r.cli_version.clone()),
             resumed: last.as_ref().is_some_and(|r| r.resumed),
-            observed_differs: observed.as_ref().map(|o| oc::differences(row.agent.spec(), &row.options, o)).unwrap_or_default(),
+            observed_differs: match (&observed, &run) {
+                (Some(o), Some(r)) => oc::differences(row.agent.spec(), &r.asked, o),
+                _ => Vec::new(),
+            },
+            provider_id: row.provider_id,
+            provider_name: row.provider_id.map(|id| {
+                provider_rows::get(&self.store, id).ok().flatten().map_or_else(|| "(deleted provider)".to_owned(), |p| p.name)
+            }),
+            capped_key: provider_rows::last_capped_key(&self.store, row.id).ok().flatten().map(|k| CappedKeyInfo {
+                limit_usd: k.limit_usd,
+                live: k.revoked_at.is_none() && k.hash.is_some(),
+                cost_usd: k.cost_usd,
+                note: k.cost_note,
+            }),
             observed,
         }
     }
@@ -515,6 +557,13 @@ impl SessionManager {
         }
         let spec = req.agent.spec();
         let options = spec.resolve(&req.options)?;
+        if let Some(pid) = req.provider_id {
+            let provider = provider_rows::get(&self.store, pid)?.ok_or("That provider no longer exists.")?;
+            prov::route_support(req.agent, provider.kind)?;
+            if options.model.is_none() {
+                return Err(format!("Choose a model for {}.", provider.name));
+            }
+        }
         // Chorus names the conversation up front where the agent lets it, so every later run can
         // resume it.
         let conversation =
@@ -533,6 +582,7 @@ impl SessionManager {
                 rows: req.rows,
                 options: &options,
                 agent_session_id: conversation.as_deref(),
+                provider_id: req.provider_id,
             },
         )?;
         let live = self.live_for(id);
@@ -576,12 +626,50 @@ impl SessionManager {
             _ => {}
         }
         let spec = row.agent.spec();
+        let mut notes: Vec<String> = Vec::new();
+        // A provider: its key in the environment (a key minted for this run where it can be), and
+        // the model, arguments or opencode block its route needs. A minted key is revoked if the
+        // launch fails from here on.
+        let mut options = row.options.clone();
+        let mut route_args: Vec<String> = Vec::new();
+        let mut opencode_provider: Option<serde_json::Value> = None;
+        let mut capped = CappedGuard { manager: self.clone(), ledger: None };
+        if let Some(provider_id) = row.provider_id {
+            let provider = provider_rows::get(&self.store, provider_id)?.ok_or("the provider this session runs on was deleted")?;
+            let model = row.options.model.clone().ok_or("this session has a provider but no model")?;
+            let catalog = provider_rows::catalog_model(&self.store, provider_id, &model).ok().flatten();
+            let route = prov::route(row.agent, provider.kind, &provider.name, provider.base_url.as_deref().unwrap_or(""), &model, catalog.as_ref())?;
+            let own_key = || -> Result<String, String> {
+                let cid = provider.credential_id.ok_or_else(|| format!("{} has no key", provider.name))?;
+                vault::decrypt(&self.store, cid)
+            };
+            let key = if provider.kind == ProviderKind::Openrouter && provider.management_credential_id.is_some() {
+                match crate::providers::keys::mint_for_run(&self.store, &provider, row.id) {
+                    Ok(minted) => {
+                        capped.ledger = Some(minted.ledger_id);
+                        notes.push(format!("This run has its own OpenRouter key, capped at ${:.2}.", minted.limit_usd));
+                        minted.key
+                    }
+                    Err(e) => {
+                        let key = own_key().map_err(|k| format!("couldn't mint a capped key ({e}), and {k}"))?;
+                        notes.push(format!("Couldn't mint a capped key ({e}), so this run uses the {} key, without a cap.", provider.name));
+                        key
+                    }
+                }
+            } else {
+                own_key()?
+            };
+            secrets.push((route.key_var.to_owned(), key));
+            options.model = Some(route.model);
+            route_args = route.args;
+            opencode_provider = route.opencode_provider;
+        }
         // opencode: its server's password, which the server and `attach` both read from the
         // environment (and which is redacted like a key), and the options as server configuration.
         let server_password = (row.agent == AgentKind::Opencode).then(server_password);
         if let Some(p) = &server_password {
             secrets.push((oc::PASSWORD_VAR.to_owned(), p.clone()));
-            if let Some(config) = oc::config_content(spec, &row.options) {
+            if let Some(config) = oc::config_content(spec, &options, opencode_provider.as_ref()) {
                 launch.additions.push((oc::CONFIG_VAR, config));
             }
         }
@@ -591,16 +679,17 @@ impl SessionManager {
         let env = compose_child_env(&ChildEnvInput { parent: &parent, required: &[], additions: &additions, secrets: &secrets });
 
         let job = Job::new().map_err(|e| format!("creating the job object: {e}"))?;
-        let mut notes: Vec<String> = Vec::new();
         let mut args = launch.args.clone();
         let (server, resumed) = if let Some(password) = &server_password {
-            let (server, conversation, existed) = self.start_opencode(&row, &launch, &env, password, &state_dir, &job, &mut notes)?;
+            let (server, conversation, existed) =
+                self.start_opencode(&row, &options, &launch, &env, password, &state_dir, &job, &mut notes)?;
             args.extend(oc::attach_args(server.url(), &conversation));
             (Some((server, conversation)), existed)
         } else {
-            // The CLI's own arguments, then the options, then the conversation, which goes last
-            // because for Codex it is a subcommand.
-            args.extend(spec.option_args(&row.options));
+            // The CLI's own arguments, a provider's, then the options, then the conversation, which
+            // goes last because for Codex it is a subcommand.
+            args.extend(route_args);
+            args.extend(spec.option_args(&options));
             let conversation = row.agent_session_id.as_deref();
             let exists = conversation.is_some_and(|id| agents::conversation_exists(row.agent, id, &parent));
             args.extend(spec.conversation_args(conversation, exists));
@@ -646,6 +735,10 @@ impl SessionManager {
         if let Some(cid) = row.credential_id {
             let _ = credentials::touch(&self.store, cid);
         }
+        let capped = capped.disarm();
+        if let Some(ledger) = capped {
+            let _ = provider_rows::set_capped_run(&self.store, ledger, run_id);
+        }
         if unreadable > 0 {
             notes.push(format!("{unreadable} stored key(s) couldn't be decrypted, so they aren't redacted in this session."));
         }
@@ -665,6 +758,8 @@ impl SessionManager {
             exit: Mutex::new(None),
             finished: (Mutex::new(false), Condvar::new()),
             server,
+            capped,
+            asked: options,
             observed: Mutex::new(None),
         });
         *live.run.lock().expect("run lock") = Some(run.clone());
@@ -685,6 +780,7 @@ impl SessionManager {
     fn start_opencode(
         &self,
         row: &SessionRow,
+        options: &LaunchOptions,
         launch: &agents::Launch,
         env: &BTreeMap<String, String>,
         password: &str,
@@ -692,7 +788,7 @@ impl SessionManager {
         job: &Job,
         notes: &mut Vec<String>,
     ) -> Result<(Server, String, bool), String> {
-        if row.options.model.is_some() || row.options.effort.is_some() {
+        if options.model.is_some() || options.effort.is_some() {
             agents::opencode::forget_tui_choice(state_dir);
         }
         let server = Server::start(&launch.program, &launch.args, &row.cwd, env, password, job)?;
@@ -708,8 +804,8 @@ impl SessionManager {
                 (id, false)
             }
         };
-        if let Some(model) = &row.options.model {
-            let wanted = oc::wanted_variant(row.agent.spec(), &row.options);
+        if let Some(model) = &options.model {
+            let wanted = oc::wanted_variant(row.agent.spec(), options);
             match server.api.check_model(model) {
                 Ok(Some(check)) => notes.extend(oc::model_note(model, wanted.as_deref(), &check)),
                 Ok(None) => notes.push("opencode's model list isn't in the shape Chorus checked, so the model wasn't checked.".into()),
@@ -879,6 +975,9 @@ impl SessionManager {
                     let _ = rows::set_state(&m.store, live.id, SessionState::Exited, Some(&format!("Exited with code {code}.")));
                 }
                 *run.exit.lock().expect("exit lock") = Some((cause, code));
+                if let Some(ledger) = run.capped {
+                    m.settle_capped_key(ledger);
+                }
                 std::thread::sleep(Duration::from_millis(250));
                 run.master.lock().expect("master lock").take();
                 m.notify_id(live.id);
@@ -977,12 +1076,59 @@ impl SessionManager {
 
     /// Chorus is quitting: record every live run as ended by that, so the next start relaunches
     /// their sessions instead of treating them as crashed. The processes die with Chorus's jobs.
-    pub fn shutdown(&self) {
+    pub fn shutdown(self: &Arc<Self>) {
         self.quitting.store(true, Ordering::SeqCst);
+        let mut capped = Vec::new();
         for live in self.live.lock().expect("live lock").values() {
             if let Some(run) = live.current_run() {
                 let _ = rows::end_run(&self.store, run.id, chorus_core::session::RunEnd::ChorusClosed, None);
+                capped.extend(run.capped);
             }
+        }
+        // Revoke the runs' minted keys before the app goes, waiting a few seconds at most; the next
+        // start-up sweeps any this misses, and each expires within a day anyway.
+        let (tx, rx) = mpsc::channel::<()>();
+        for ledger in &capped {
+            let (m, tx, ledger) = (self.clone(), tx.clone(), *ledger);
+            let _ = std::thread::Builder::new().name(format!("revoke-{ledger}")).spawn(move || {
+                crate::providers::keys::revoke_now(m.store(), ledger);
+                let _ = tx.send(());
+            });
+        }
+        let deadline = Instant::now() + SHUTDOWN_REVOKE_WAIT;
+        for _ in &capped {
+            if rx.recv_timeout(deadline.saturating_duration_since(Instant::now())).is_err() {
+                break;
+            }
+        }
+    }
+
+    /// Revokes a run's minted key and reads its cost, on a thread of its own.
+    fn settle_capped_key(self: &Arc<Self>, ledger: u32) {
+        let m = self.clone();
+        let _ = std::thread::Builder::new().name(format!("settle-key-{ledger}")).spawn(move || {
+            crate::providers::keys::settle(m.store(), ledger);
+            m.notify_all();
+        });
+    }
+}
+
+/// Revokes a key minted for a launch that then failed, unless the run took it over.
+struct CappedGuard {
+    manager: Arc<SessionManager>,
+    ledger: Option<u32>,
+}
+
+impl CappedGuard {
+    fn disarm(&mut self) -> Option<u32> {
+        self.ledger.take()
+    }
+}
+
+impl Drop for CappedGuard {
+    fn drop(&mut self) {
+        if let Some(ledger) = self.ledger.take() {
+            self.manager.settle_capped_key(ledger);
         }
     }
 }

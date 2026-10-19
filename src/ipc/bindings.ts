@@ -13,6 +13,16 @@ export const commands = {
 	 *  two); otherwise returns what the last detection found.
 	 */
 	agentsList: (refresh: boolean) => typedError<AgentInfo[], string>(__TAURI_INVOKE("agents_list", { refresh })),
+	providersList: () => typedError<ProviderSummary[], string>(__TAURI_INVOKE("providers_list")),
+	providerSave: (input: ProviderSave) => typedError<ProviderSummary, string>(__TAURI_INVOKE("provider_save", { input })),
+	/**  Sessions on it keep their runs; their next launch says the provider is gone. */
+	providerDelete: (id: number) => typedError<boolean, string>(__TAURI_INVOKE("provider_delete", { id })),
+	/**  Tries the provider's keys (for Jev, one tiny paid question, D40) and records what it found. */
+	providerTest: (id: number) => typedError<ProviderSummary, string>(__TAURI_INVOKE("provider_test", { id })),
+	/**  Fetches the provider's model list (free for OpenRouter). */
+	providerRefreshCatalog: (id: number) => typedError<ProviderSummary, string>(__TAURI_INVOKE("provider_refresh_catalog", { id })),
+	providerCatalog: (id: number) => typedError<CatalogEntry[], string>(__TAURI_INVOKE("provider_catalog", { id })),
+	providerSetShortlist: (id: number, models: string[]) => typedError<ProviderSummary, string>(__TAURI_INVOKE("provider_set_shortlist", { id, models })),
 	sessionsList: () => typedError<SessionSummary[], string>(__TAURI_INVOKE("sessions_list")),
 	sessionCreate: (request: CreateSession) => typedError<SessionSummary, string>(__TAURI_INVOKE("session_create", { request })),
 	/**
@@ -86,6 +96,12 @@ export type AgentInfo = {
 
 export type AgentKind = "shell" | "claude" | "codex" | "opencode" | "grok";
 
+/**  Whether an agent can run on the provider; `reason` says why not. */
+export type AgentRoute = {
+	agent: AgentKind,
+	reason: string | null,
+};
+
 export type AppInfo = {
 	productName: string,
 	version: string,
@@ -105,6 +121,38 @@ export type BackendPulse = {
 	uptimeSecs: number,
 };
 
+/**  A key minted for one run (`providers::keys`). The key itself is never shown or kept. */
+export type CappedKeyInfo = {
+	limitUsd: number | null,
+	/**  Not revoked yet: the run is live, or revoking failed (it expires within a day). */
+	live: boolean,
+	/**  What OpenRouter's analytics settled on, once known. */
+	costUsd: number | null,
+	note: string | null,
+};
+
+export type CatalogEntry = {
+	model: CatalogModel,
+	/**  The last refresh no longer listed it. */
+	missing: boolean,
+	shortlisted: boolean,
+};
+
+/**  A model as the catalog lists it, with prices per million tokens. */
+export type CatalogModel = {
+	/**  `vendor/model`, with `:free` for the free variants. */
+	id: string,
+	name: string,
+	promptPerMtok: number | null,
+	completionPerMtok: number | null,
+	contextLength: number | null,
+	maxOutput: number | null,
+	/**  The reasoning efforts the model takes, lowest first; empty when it takes none. */
+	efforts: string[],
+	tools: boolean,
+	free: boolean,
+};
+
 export type CloseReport = {
 	killed: number,
 	/**  Windowed processes (a browser the agent opened) left running. */
@@ -121,6 +169,11 @@ export type CreateSession = {
 	rows: number,
 	/**  Checked against what the agent declares; anything it lacks is refused with a reason. */
 	options: LaunchOptions,
+	/**
+	 *  A provider to run the agent on (`providers_list`); `options.model` is then that
+	 *  provider's model id.
+	 */
+	providerId?: number | null,
 };
 
 export type CredentialSummary = {
@@ -236,6 +289,47 @@ export type PermissionChoice = {
 	args: string,
 };
 
+export type ProviderKind = 
+/**  OpenRouter: one key for many models, and a management key that mints capped keys. */
+"openrouter" | 
+/**  Any OpenAI-compatible endpoint (Responses API) at a base URL. */
+"gateway" | 
+/**  TypeSafe's Jev: typed decisions, not an agent model (D40). */
+"jev";
+
+export type ProviderSave = {
+	/**  `None` adds a provider. */
+	id: number | null,
+	kind: ProviderKind,
+	name: string,
+	baseUrl: string | null,
+	credentialId: number | null,
+	managementCredentialId: number | null,
+	capUsd: number | null,
+};
+
+export type ProviderSummary = {
+	id: number,
+	kind: ProviderKind,
+	name: string,
+	/**  A gateway's address, or the fixed one OpenRouter and Jev use. */
+	baseUrl: string,
+	credentialId: number | null,
+	credentialLabel: string | null,
+	managementCredentialId: number | null,
+	managementLabel: string | null,
+	/**  Each run's minted key stops at this; `None` means the default. */
+	capUsd: number | null,
+	defaultCapUsd: number | null,
+	testedAtSecs: number | null,
+	testOk: boolean | null,
+	testNote: string | null,
+	catalogRefreshedAtSecs: number | null,
+	catalogCount: number,
+	shortlist: string[],
+	agents: AgentRoute[],
+};
+
 /**  How a session's next run picks up the agent's conversation. */
 export type ResumeKind = 
 /**  Nothing to resume. */
@@ -292,6 +386,11 @@ export type SessionSummary = {
 	observed: Observed | null,
 	/**  How that turn differs from `options`, one phrase each; empty when it matches. */
 	observedDiffers: string[],
+	/**  The provider the agent runs on, if not its own login or key. */
+	providerId: number | null,
+	providerName: string | null,
+	/**  The newest run's minted OpenRouter key, if it had one. */
+	cappedKey: CappedKeyInfo | null,
 };
 
 export type SessionUpdated = {

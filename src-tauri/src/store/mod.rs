@@ -4,6 +4,7 @@
 //! `chorus_core::migrate`). Typed queries for each area live in the submodules.
 
 pub mod credentials;
+pub mod providers;
 pub mod sessions;
 pub mod settings;
 
@@ -17,6 +18,7 @@ use rusqlite::Connection;
 const MIGRATION_FILES: &[(&str, &str)] = &[
     ("0001_initial.sql", include_str!("../../migrations/0001_initial.sql")),
     ("0002_agent_options.sql", include_str!("../../migrations/0002_agent_options.sql")),
+    ("0003_providers.sql", include_str!("../../migrations/0003_providers.sql")),
 ];
 
 pub struct Store {

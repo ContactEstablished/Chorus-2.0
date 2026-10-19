@@ -5,6 +5,7 @@ mod app;
 mod fleet;
 mod ipc;
 mod lock;
+mod providers;
 mod sessions;
 mod splash;
 mod store;
@@ -68,6 +69,13 @@ pub fn run() {
             // Sessions open now, so views can attach; they relaunch off this thread, because an
             // opencode session waits for its server.
             let relaunch = manager.reopen()?;
+            // Revoke OpenRouter keys an earlier Chorus minted and couldn't revoke. Only keys from
+            // before this start are touched, so it can run beside the relaunches, which mint new ones.
+            let up_to = store::providers::max_capped_id(manager.store())?;
+            let sweeping = manager.clone();
+            std::thread::Builder::new()
+                .name("sweep-keys".into())
+                .spawn(move || providers::keys::sweep(sweeping.store(), up_to))?;
             let relaunching = manager.clone();
             std::thread::Builder::new().name("relaunch".into()).spawn(move || relaunching.relaunch(&relaunch))?;
             // Look for the agent CLIs without holding up the window. Runs relaunched before this

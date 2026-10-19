@@ -60,6 +60,9 @@ function session(id: number, over: Partial<SessionSummary> = {}): SessionSummary
     resumed: false,
     observed: null,
     observedDiffers: [],
+    providerId: null,
+    providerName: null,
+    cappedKey: null,
     ...over,
   }
 }

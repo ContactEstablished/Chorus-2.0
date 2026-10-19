@@ -1,4 +1,28 @@
-import type { AgentInfo, Effort, Permission, SessionSummary, VersionFit } from '../ipc'
+import type { AgentInfo, AgentKind, Effort, Permission, ProviderKind, SessionSummary, VersionFit } from '../ipc'
+
+export const AGENT_LABELS: Record<AgentKind, string> = {
+  shell: 'Shell',
+  claude: 'Claude Code',
+  codex: 'Codex',
+  opencode: 'opencode',
+  grok: 'Grok',
+}
+
+export const KIND_LABELS: Record<ProviderKind, string> = {
+  openrouter: 'OpenRouter',
+  gateway: 'OpenAI-compatible gateway',
+  jev: 'Jev (TypeSafe)',
+}
+
+/** Dollars: $1.00, or more places for small amounts ($0.0042). */
+export function money(usd: number | null | undefined): string {
+  if (usd === null || usd === undefined) return '?'
+  return `$${usd >= 0.1 || usd === 0 ? usd.toFixed(2) : usd.toPrecision(2)}`
+}
+
+export function when(secs: number | null): string {
+  return secs ? new Date(secs * 1000).toLocaleString() : 'never'
+}
 
 export const EFFORT_LABELS: Record<Effort, string> = {
   fast: 'Fast',

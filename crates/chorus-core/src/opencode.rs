@@ -44,9 +44,13 @@ pub fn wanted_variant(spec: &Spec, o: &LaunchOptions) -> Option<String> {
 
 /// The configuration for options already passed through [`Spec::resolve`], or `None` when nothing
 /// is set. The effort goes into an agent block beside the model, because opencode drops a variant
-/// whose model differs from the turn's.
-pub fn config_content(spec: &Spec, o: &LaunchOptions) -> Option<String> {
+/// whose model differs from the turn's. `provider` is a provider route's block
+/// (`providers::Route::opencode_provider`); `o.model` is then the model as opencode names it.
+pub fn config_content(spec: &Spec, o: &LaunchOptions, provider: Option<&Value>) -> Option<String> {
     let mut root = Map::new();
+    if let Some(p) = provider {
+        root.insert("provider".into(), p.clone());
+    }
     if let Some(model) = &o.model {
         root.insert("model".into(), json!(model));
         if let Some(variant) = wanted_variant(spec, o) {
@@ -214,7 +218,7 @@ mod tests {
     #[test]
     fn the_effort_travels_beside_its_model() {
         let o = opts(Some(Effort::Deep), Some(Permission::Plan), Some("opencode/glm-5.3-flash-free"));
-        let c: Value = serde_json::from_str(&config_content(spec(), &o).unwrap()).unwrap();
+        let c: Value = serde_json::from_str(&config_content(spec(), &o, None).unwrap()).unwrap();
         assert_eq!(c["model"], "opencode/glm-5.3-flash-free");
         for agent in ["build", "plan"] {
             assert_eq!(c["agent"][agent], json!({ "model": "opencode/glm-5.3-flash-free", "variant": "high" }));
@@ -225,15 +229,18 @@ mod tests {
 
     #[test]
     fn each_permission_becomes_its_configuration() {
-        let c = |p| serde_json::from_str::<Value>(&config_content(spec(), &opts(None, Some(p), None)).unwrap()).unwrap();
+        let c = |p| serde_json::from_str::<Value>(&config_content(spec(), &opts(None, Some(p), None), None).unwrap()).unwrap();
         assert_eq!(c(Permission::FullAccess), json!({ "permission": "allow" }));
         assert_eq!(c(Permission::Manual)["permission"]["edit"], "ask");
         assert_eq!(c(Permission::AcceptEdits)["permission"]["edit"], "allow");
         assert_eq!(c(Permission::AcceptEdits)["permission"]["bash"], "ask");
         // A model alone sets the model and no agent block.
-        let only_model = config_content(spec(), &opts(None, None, Some("opencode/big-pickle"))).unwrap();
+        let only_model = config_content(spec(), &opts(None, None, Some("opencode/big-pickle")), None).unwrap();
         assert_eq!(serde_json::from_str::<Value>(&only_model).unwrap(), json!({ "model": "opencode/big-pickle" }));
-        assert_eq!(config_content(spec(), &opts(None, None, None)), None);
+        assert_eq!(config_content(spec(), &opts(None, None, None), None), None);
+        // A route's provider block goes in as is.
+        let routed = config_content(spec(), &opts(None, None, Some("openrouter/x/y")), Some(&json!({ "openrouter": {} }))).unwrap();
+        assert_eq!(serde_json::from_str::<Value>(&routed).unwrap(), json!({ "provider": { "openrouter": {} }, "model": "openrouter/x/y" }));
     }
 
     #[test]

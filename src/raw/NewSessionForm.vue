@@ -7,13 +7,18 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import type { AgentKind, CreateSession, CredentialSummary, Effort, Permission } from '../ipc'
 import { useAgentsStore } from '../stores/agents'
-import { EFFORT_LABELS, PERMISSION_LABELS, detectionText } from './labels'
+import { useProvidersStore } from '../stores/providers'
+import { EFFORT_LABELS, PERMISSION_LABELS, detectionText, money } from './labels'
 
 const props = defineProps<{ keys: CredentialSummary[]; busy: boolean }>()
 const emit = defineEmits<{ create: [request: CreateSession]; cancel: [] }>()
 
 const agents = useAgentsStore()
-onMounted(() => agents.load(true))
+const providers = useProvidersStore()
+onMounted(() => {
+  void agents.load(true)
+  void providers.load()
+})
 
 const FOLDER_KEY = 'chorus.newSession.folder'
 function remembered(): string {
@@ -33,6 +38,8 @@ const envVar = ref('')
 const effort = ref<Effort | null>(null)
 const permission = ref<Permission | null>(null)
 const model = ref('')
+// null = the agent's own login, or a key given below.
+const providerId = ref<number | null>(null)
 
 const info = computed(() => agents.byKind.get(agent.value) ?? null)
 const kinds = computed<AgentKind[]>(() =>
@@ -44,6 +51,23 @@ watch(agent, () => {
   effort.value = null
   permission.value = null
   model.value = ''
+  providerId.value = null
+})
+
+// Every provider an agent could run on is listed; the ones this agent can't use say why.
+const routes = computed(() =>
+  providers.list
+    .filter((p) => p.kind !== 'jev')
+    .map((p) => ({ provider: p, reason: p.agents.find((a) => a.agent === agent.value)?.reason ?? null })),
+)
+const provider = computed(() => (providerId.value === null ? null : (providers.byId.get(providerId.value) ?? null)))
+const keyNote = computed(() => {
+  const p = provider.value
+  if (!p) return ''
+  if (p.kind === 'openrouter' && p.managementCredentialId !== null) {
+    return `Each run gets its own OpenRouter key, capped at ${money(p.capUsd ?? p.defaultCapUsd)}, and revoked when it ends.`
+  }
+  return `Runs use the key ${p.credentialLabel ?? '(none set)'}, without a cap.`
 })
 
 const effortArgs = computed(() => {
@@ -63,7 +87,11 @@ const effortWithoutModel = computed(
 const carrier = computed(() => (info.value?.optionsInConfig ? 'server config: ' : ''))
 
 const canSubmit = computed(
-  () => cwd.value.trim() !== '' && (keyId.value === null || envVar.value.trim() !== '') && !effortWithoutModel.value,
+  () =>
+    cwd.value.trim() !== '' &&
+    (keyId.value === null || envVar.value.trim() !== '') &&
+    !effortWithoutModel.value &&
+    (providerId.value === null || model.value.trim() !== ''),
 )
 
 function submit(): void {
@@ -81,6 +109,7 @@ function submit(): void {
     cols: 120,
     rows: 30,
     options: { effort: effort.value, permission: permission.value, model: model.value.trim() || null },
+    providerId: providerId.value,
   })
 }
 </script>
@@ -131,15 +160,34 @@ function submit(): void {
       </label>
       <p v-else class="hint">{{ info.displayName }} has no permission mode Chorus can pass at launch yet.</p>
 
+      <label v-if="routes.length">
+        <span>Provider</span>
+        <select v-model="providerId">
+          <option :value="null">None: the agent's own login, or a key below</option>
+          <option v-for="r in routes" :key="r.provider.id" :value="r.provider.id" :disabled="r.reason !== null">
+            {{ r.provider.name }}{{ r.reason ? ` (not for ${info.displayName}: ${r.reason})` : '' }}
+          </option>
+        </select>
+        <span v-if="keyNote" class="hint">{{ keyNote }}</span>
+      </label>
+
       <label v-if="info.takesModel">
-        <span>Model <em>(optional: the CLI's own default otherwise)</em></span>
+        <span>
+          Model
+          <em>{{ provider ? `(required: a ${provider.name} model id)` : "(optional: the CLI's own default otherwise)" }}</em>
+        </span>
         <input
           v-model="model"
           maxlength="200"
           spellcheck="false"
           autocomplete="off"
-          :placeholder="info.optionsInConfig ? 'provider/model, for example opencode/big-pickle' : ''"
+          list="provider-shortlist"
+          :placeholder="provider ? (provider.shortlist[0] ?? 'model id') : info.optionsInConfig ? 'provider/model, for example opencode/big-pickle' : ''"
         />
+        <datalist id="provider-shortlist">
+          <option v-for="m in provider?.shortlist ?? []" :key="m" :value="m" />
+        </datalist>
+        <span v-if="provider && !provider.shortlist.length" class="hint">Its shortlist is empty: pick models under Providers.</span>
       </label>
     </template>
 

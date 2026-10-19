@@ -8,10 +8,12 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 import SessionTerminal from './SessionTerminal.vue'
 import NewSessionForm from './NewSessionForm.vue'
 import KeysPanel from './KeysPanel.vue'
+import ProvidersPanel from './ProvidersPanel.vue'
 import { useSessionsStore } from '../stores/sessions'
 import { useKeysStore } from '../stores/keys'
-import { commands, unwrap, type AgentKind, type CreateSession, type SessionSummary } from '../ipc'
-import { observedText, optionsText, versionText } from './labels'
+import { useProvidersStore } from '../stores/providers'
+import { commands, unwrap, type CreateSession, type ProviderSave, type SessionSummary } from '../ipc'
+import { AGENT_LABELS, money, observedText, optionsText, versionText } from './labels'
 import { useAgentsStore } from '../stores/agents'
 
 const props = defineProps<{ dev: boolean }>()
@@ -19,28 +21,30 @@ const props = defineProps<{ dev: boolean }>()
 const sessions = useSessionsStore()
 const keys = useKeysStore()
 const agents = useAgentsStore()
-const mode = ref<'session' | 'new' | 'keys'>('session')
+const providers = useProvidersStore()
+const mode = ref<'session' | 'new' | 'keys' | 'providers'>('session')
 const busy = ref(false)
 const pin = ref('')
 const askingPin = ref(false)
 const notice = ref<string | null>(null)
 const terminal = ref<InstanceType<typeof SessionTerminal> | null>(null)
 
-const AGENT_NAMES: Record<AgentKind, string> = {
-  shell: 'Shell',
-  claude: 'Claude Code',
-  codex: 'Codex',
-  opencode: 'opencode',
-  grok: 'Grok',
-}
-
 onMounted(async () => {
-  await Promise.all([sessions.init(), keys.load(), agents.load(false)])
+  await Promise.all([sessions.init(), keys.load(), agents.load(false), providers.load()])
   if (sessions.list.length === 0) mode.value = 'new'
 })
 onUnmounted(() => sessions.dispose())
 
 const current = computed(() => (mode.value === 'session' ? sessions.selected : null))
+
+/** The run's own OpenRouter key: its cap, whether it is still live, and what it cost. */
+function cappedText(s: SessionSummary): string | null {
+  const k = s.cappedKey
+  if (!k) return null
+  const state = k.live ? (s.live ? 'live' : 'not revoked yet') : 'revoked'
+  const cost = k.costUsd === null ? '' : ` · cost ${money(k.costUsd)}`
+  return `Run key capped at ${money(k.limitUsd)}, ${state}${cost}${k.note ? ` (${k.note})` : ''}`
+}
 
 function statusText(s: SessionSummary): string {
   if (s.live) return s.pid ? `running · pid ${s.pid}` : 'running'
@@ -108,6 +112,12 @@ if (props.dev) {
     restart: (id: number) => sessions.restart(id),
     close: (id: number) => sessions.close(id),
     lock: (id: number, locked: boolean, pinValue: string | null = null) => sessions.setLocked(id, locked, pinValue),
+    providers: async () => (await providers.load(), plain(providers.list)),
+    providerSave: (input: ProviderSave) => providers.save(input).then((p) => plain(p ?? providers.error)),
+    providerTest: (id: number) => providers.test(id).then(() => plain(providers.byId.get(id) ?? providers.error)),
+    providerRefresh: (id: number) => providers.refresh(id).then(() => plain(providers.byId.get(id) ?? providers.error)),
+    providerCatalog: (id: number) => providers.catalog(id).then(plain),
+    providerShortlist: (id: number, models: string[]) => providers.setShortlist(id, models).then(() => plain(providers.byId.get(id))),
     addTestKey: (label: string) => unwrap(commands.devVaultAddTestKey(label)).then(async (k) => (await keys.load(), k)),
     leakCheck: (credentialId: number) => unwrap(commands.devLeakCheck(credentialId, terminal.value?.screenText() ?? '')),
     error: () => sessions.error,
@@ -126,11 +136,12 @@ if (props.dev) {
             <span class="dot" :class="s.live ? 'live' : s.status" />
             <span class="name">{{ s.name }}</span>
             <span v-if="s.locked" class="lock" title="Locked">🔒</span>
-            <span class="agent">{{ AGENT_NAMES[s.agent] }}</span>
+            <span class="agent">{{ AGENT_LABELS[s.agent] }}</span>
           </button>
         </li>
       </ul>
       <button class="wide quiet" @click="mode = 'keys'">Keys and lock</button>
+      <button class="wide quiet" @click="mode = 'providers'">Providers</button>
     </aside>
 
     <section class="main">
@@ -144,6 +155,7 @@ if (props.dev) {
         @cancel="mode = 'session'"
       />
       <KeysPanel v-else-if="mode === 'keys'" />
+      <ProvidersPanel v-else-if="mode === 'providers'" />
 
       <template v-else-if="current">
         <header class="head">
@@ -172,10 +184,11 @@ if (props.dev) {
           </div>
         </header>
         <p class="meta">
-          {{ AGENT_NAMES[current.agent] }} · <code>{{ current.cwd }}</code>
+          {{ AGENT_LABELS[current.agent] }} · <code>{{ current.cwd }}</code>
           <template v-if="current.credentialLabel"> · key {{ current.credentialLabel }} as <code>{{ current.credentialEnv }}</code></template>
         </p>
         <p v-if="current.agent !== 'shell'" class="meta">
+          <template v-if="current.providerName">on {{ current.providerName }} · </template>
           <template v-if="optionsText(current)">{{ optionsText(current) }} · </template>
           {{ versionText(current.cliVersion, current.versionFit, agents.byKind.get(current.agent)?.verifiedVersion ?? null) }}
           <template v-if="current.agentSessionId"> · conversation <code :title="current.agentSessionId">{{ current.agentSessionId.slice(0, 8) }}</code>{{ current.resumed ? ' (resumed)' : '' }}</template>
@@ -183,6 +196,7 @@ if (props.dev) {
         <p v-if="observedText(current)" class="meta" :class="{ differs: current.observedDiffers.length }">
           Newest turn ran {{ observedText(current) }}<template v-if="current.observedDiffers.length">, not what was asked: {{ current.observedDiffers.join('; ') }}</template>
         </p>
+        <p v-if="cappedText(current)" class="meta">{{ cappedText(current) }}</p>
         <p v-if="current.note" class="note">{{ current.note }}</p>
         <p v-if="current.scrollbackError" class="note">{{ current.scrollbackError }}</p>
         <p v-if="notice" class="note">{{ notice }}</p>

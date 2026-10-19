@@ -15,6 +15,7 @@ pub mod env;
 pub mod lock;
 pub mod migrate;
 pub mod opencode;
+pub mod providers;
 pub mod scrollback;
 pub mod scrub;
 pub mod session;

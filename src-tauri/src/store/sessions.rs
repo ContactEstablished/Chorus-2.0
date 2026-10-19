@@ -23,6 +23,8 @@ pub struct SessionRow {
     /// Resolved: defaults filled in, checked against the agent's declaration.
     pub options: LaunchOptions,
     pub agent_session_id: Option<String>,
+    /// The provider the agent runs on (`store::providers`), if not its own login or key.
+    pub provider_id: Option<u32>,
 }
 
 pub struct NewSession<'a> {
@@ -35,6 +37,7 @@ pub struct NewSession<'a> {
     pub rows: u16,
     pub options: &'a LaunchOptions,
     pub agent_session_id: Option<&'a str>,
+    pub provider_id: Option<u32>,
 }
 
 pub struct NewRun<'a> {
@@ -61,7 +64,7 @@ pub struct RunRow {
 }
 
 const SESSION_COLUMNS: &str = "id, name, agent, cwd, state, credential_id, credential_env, cols, rows, locked, note, \
-                               created_at, options, agent_session_id";
+                               created_at, options, agent_session_id, provider_id";
 
 fn session_from(r: &Row<'_>) -> rusqlite::Result<SessionRow> {
     let bad = |i: usize, what: &str, v: String| {
@@ -85,6 +88,7 @@ fn session_from(r: &Row<'_>) -> rusqlite::Result<SessionRow> {
         created_at: r.get(11)?,
         options: serde_json::from_str(&options).map_err(|_| bad(12, "options", options.clone()))?,
         agent_session_id: r.get(13)?,
+        provider_id: r.get(14)?,
     })
 }
 
@@ -93,8 +97,8 @@ pub fn insert(store: &Store, s: &NewSession<'_>) -> Result<u32, String> {
     store.with(|c| {
         c.execute(
             "INSERT INTO sessions (name, agent, cwd, state, credential_id, credential_env, cols, rows, created_at,
-                                   options, agent_session_id)
-             VALUES (?1, ?2, ?3, 'running', ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                                   options, agent_session_id, provider_id)
+             VALUES (?1, ?2, ?3, 'running', ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             params![
                 s.name,
                 s.agent.as_str(),
@@ -105,7 +109,8 @@ pub fn insert(store: &Store, s: &NewSession<'_>) -> Result<u32, String> {
                 s.rows,
                 now_ms(),
                 options,
-                s.agent_session_id
+                s.agent_session_id,
+                s.provider_id
             ],
         )?;
         Ok(c.last_insert_rowid() as u32)
@@ -245,6 +250,7 @@ mod tests {
             rows: 30,
             options: &NO_OPTIONS,
             agent_session_id: None,
+            provider_id: None,
         }
     }
 
