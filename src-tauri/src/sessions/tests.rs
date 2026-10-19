@@ -34,6 +34,7 @@ impl Fixture {
             rows: 30,
             options: Default::default(),
             provider_id: None,
+            description: None,
         };
         let s = self.manager.create(req).unwrap();
         assert!(s.live, "shell should be running: {:?}", s.note);
@@ -248,6 +249,7 @@ fn bad_input_is_refused_at_the_boundary() {
         rows: 30,
         options: Default::default(),
         provider_id: None,
+        description: None,
     };
     assert!(f.manager.create(req.clone()).unwrap_err().contains("full path"));
     req.cwd = f.dir.join("missing").display().to_string();
@@ -261,4 +263,37 @@ fn bad_input_is_refused_at_the_boundary() {
     req.credential = Some(CredentialUse { id: 99, env_var: "PATH".into() });
     assert!(f.manager.create(req).is_err());
     assert!(f.manager.write(12345, "x").is_err());
+}
+
+#[test]
+fn a_preset_launch_names_and_notes_its_sessions() {
+    let f = Fixture::new("launch");
+    let session = CreateSession {
+        agent: AgentKind::Shell,
+        cwd: f.dir.join("work").display().to_string(),
+        name: Some("Fix login".into()),
+        credential: None,
+        cols: 100,
+        rows: 30,
+        options: Default::default(),
+        provider_id: None,
+        description: Some("  Ticket 42  ".into()),
+    };
+    // A shell can't build: Workbench and Pair say so, and nothing starts.
+    let refused = f.manager.launch(LaunchRequest { preset: Preset::Workbench, session: session.clone() }).unwrap_err();
+    assert!(refused.contains("other than Shell"), "{refused}");
+    assert!(f.manager.list().unwrap().is_empty());
+    let swarm = f.manager.presets(AgentKind::Codex).into_iter().find(|p| p.preset == Preset::Swarm).unwrap();
+    assert!(swarm.slots.is_empty() && swarm.reason.unwrap().contains("worktree"));
+
+    let out = f.manager.launch(LaunchRequest { preset: Preset::Solo, session }).unwrap();
+    assert_eq!(out.len(), 1);
+    let s = out[0].session.clone().unwrap();
+    assert_eq!((s.name.as_str(), s.description.as_deref()), ("Fix login", Some("Ticket 42")));
+
+    let renamed = f.manager.rename(s.id, "Fix the login page").unwrap();
+    assert_eq!(renamed.name, "Fix the login page");
+    assert!(f.manager.rename(s.id, "  ").is_err());
+    assert_eq!(f.manager.set_description(s.id, None).unwrap().description, None);
+    assert!(f.manager.set_description(s.id, Some(&"x".repeat(501))).is_err());
 }

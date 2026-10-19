@@ -12,7 +12,17 @@ import ProvidersPanel from './ProvidersPanel.vue'
 import { useSessionsStore } from '../stores/sessions'
 import { useKeysStore } from '../stores/keys'
 import { useProvidersStore } from '../stores/providers'
-import { commands, unwrap, type CreateSession, type ProviderSave, type SessionSummary } from '../ipc'
+import {
+  commands,
+  unwrap,
+  type AgentKind,
+  type CreateSession,
+  type LaunchRequest,
+  type ProfileSave,
+  type ProviderSave,
+  type SessionSummary,
+} from '../ipc'
+import { useProfilesStore } from '../stores/profiles'
 import { AGENT_LABELS, money, observedText, optionsText, versionText } from './labels'
 import { useAgentsStore } from '../stores/agents'
 
@@ -27,6 +37,10 @@ const busy = ref(false)
 const pin = ref('')
 const askingPin = ref(false)
 const notice = ref<string | null>(null)
+const profiles = useProfilesStore()
+// Renaming and the note, edited in the header.
+const nameDraft = ref<string | null>(null)
+const noteDraft = ref<string | null>(null)
 const terminal = ref<InstanceType<typeof SessionTerminal> | null>(null)
 
 onMounted(async () => {
@@ -59,11 +73,24 @@ function select(id: number): void {
   notice.value = null
 }
 
-async function create(request: CreateSession): Promise<void> {
+async function launch(request: LaunchRequest): Promise<void> {
   busy.value = true
-  const s = await sessions.create(request)
+  const out = await sessions.launch(request)
   busy.value = false
-  if (s) select(s.id)
+  const first = out?.[0]?.session
+  if (first) select(first.id)
+  const failed = (out ?? []).filter((o) => o.error)
+  if (failed.length) {
+    notice.value = `Started ${out!.length - failed.length} of ${out!.length}. ${failed.map((o) => `${AGENT_LABELS[o.agent]} couldn't start: ${o.error}`).join(' ')}`
+  }
+}
+
+async function saveName(s: SessionSummary): Promise<void> {
+  if (nameDraft.value !== null && (await sessions.rename(s.id, nameDraft.value))) nameDraft.value = null
+}
+
+async function saveNote(s: SessionSummary): Promise<void> {
+  if (noteDraft.value !== null && (await sessions.setDescription(s.id, noteDraft.value.trim() || null))) noteDraft.value = null
 }
 
 async function restart(s: SessionSummary): Promise<void> {
@@ -98,7 +125,8 @@ if (props.dev) {
   const api = {
     list: () => plain(sessions.list),
     create: async (request: Omit<CreateSession, 'options'> & { options?: CreateSession['options'] }) => {
-      await create({ ...request, options: request.options ?? { effort: null, permission: null, model: null } })
+      const s = await sessions.create({ ...request, options: request.options ?? { effort: null, permission: null, model: null } })
+      if (s) select(s.id)
       return plain(sessions.selected)
     },
     agents: async (refresh = false) => {
@@ -112,6 +140,12 @@ if (props.dev) {
     restart: (id: number) => sessions.restart(id),
     close: (id: number) => sessions.close(id),
     lock: (id: number, locked: boolean, pinValue: string | null = null) => sessions.setLocked(id, locked, pinValue),
+    launch: (request: LaunchRequest) => sessions.launch(request).then(plain),
+    presets: (agent: AgentKind) => commands.launchPresets(agent).then(plain),
+    profiles: async () => (await profiles.load(), plain(profiles.list)),
+    profileSave: (input: ProfileSave) => profiles.save(input).then((p) => plain(p ?? profiles.error)),
+    rename: (id: number, name: string) => sessions.rename(id, name),
+    describe: (id: number, text: string | null) => sessions.setDescription(id, text),
     providers: async () => (await providers.load(), plain(providers.list)),
     providerSave: (input: ProviderSave) => providers.save(input).then((p) => plain(p ?? providers.error)),
     providerTest: (id: number) => providers.test(id).then(() => plain(providers.byId.get(id) ?? providers.error)),
@@ -151,7 +185,7 @@ if (props.dev) {
         v-if="mode === 'new'"
         :keys="keys.keys"
         :busy="busy"
-        @create="create"
+        @launch="launch"
         @cancel="mode = 'session'"
       />
       <KeysPanel v-else-if="mode === 'keys'" />
@@ -160,7 +194,11 @@ if (props.dev) {
       <template v-else-if="current">
         <header class="head">
           <div class="title">
-            <h2>{{ current.name }}</h2>
+            <template v-if="nameDraft !== null">
+              <input v-model="nameDraft" maxlength="80" autocomplete="off" @keyup.enter="saveName(current)" @keyup.esc="nameDraft = null" />
+              <button @click="saveName(current)">Save</button>
+            </template>
+            <h2 v-else :title="'Rename'" class="name" @click="nameDraft = current.name">{{ current.name }}</h2>
             <span class="status" :class="current.live ? 'live' : current.status">{{ statusText(current) }}</span>
           </div>
           <div class="controls">
@@ -183,6 +221,14 @@ if (props.dev) {
             </button>
           </div>
         </header>
+        <p v-if="noteDraft !== null" class="description edit">
+          <textarea v-model="noteDraft" maxlength="500" rows="2" />
+          <button @click="saveNote(current)">Save note</button>
+          <button @click="noteDraft = null">Cancel</button>
+        </p>
+        <p v-else class="description" @click="noteDraft = current.description ?? ''">
+          {{ current.description ?? 'Add a note on what this session is for…' }}
+        </p>
         <p class="meta">
           {{ AGENT_LABELS[current.agent] }} · <code>{{ current.cwd }}</code>
           <template v-if="current.credentialLabel"> · key {{ current.credentialLabel }} as <code>{{ current.credentialEnv }}</code></template>
@@ -334,6 +380,24 @@ h2 {
 .note,
 .meta.differs {
   color: var(--status-needs);
+}
+.name {
+  cursor: text;
+}
+.description {
+  margin: 0;
+  color: var(--text-2);
+  font-size: 13.5px;
+  cursor: text;
+  white-space: pre-wrap;
+}
+.description.edit {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+.description.edit textarea {
+  flex: 1;
 }
 .error {
   margin: 0;

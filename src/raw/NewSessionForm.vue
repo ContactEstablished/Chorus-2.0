@@ -1,23 +1,40 @@
 <script setup lang="ts">
 /**
- * Starts a session: which agent, in which folder, with which of the options that agent declares,
- * and optionally a stored key as a variable. Options an agent lacks are left out with the reason,
- * and each choice shows the exact arguments it adds (for opencode, the server configuration).
+ * The launch dialog: which agent, in which folder, with which of the options that agent declares, a
+ * provider and model, and optionally a stored key as a variable; a preset for how many sessions to
+ * start; a name and a note. Options an agent lacks are left out with the reason, and each choice
+ * shows the exact arguments it adds (for opencode, the server configuration). A saved profile
+ * fills the settings in one click. P4 restyles it into the app shell.
  */
-import { computed, onMounted, ref, watch } from 'vue'
-import type { AgentKind, CreateSession, CredentialSummary, Effort, Permission } from '../ipc'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import {
+  commands,
+  type AgentKind,
+  type CreateSession,
+  type CredentialSummary,
+  type Effort,
+  type LaunchRequest,
+  type Permission,
+  type Preset,
+  type PresetChoice,
+  type ProfileSummary,
+} from '../ipc'
 import { useAgentsStore } from '../stores/agents'
+import { useProfilesStore } from '../stores/profiles'
 import { useProvidersStore } from '../stores/providers'
-import { EFFORT_LABELS, PERMISSION_LABELS, detectionText, money } from './labels'
+import { AGENT_LABELS, EFFORT_LABELS, PERMISSION_LABELS, detectionText, money, optionsText } from './labels'
 
 const props = defineProps<{ keys: CredentialSummary[]; busy: boolean }>()
-const emit = defineEmits<{ create: [request: CreateSession]; cancel: [] }>()
+const emit = defineEmits<{ launch: [request: LaunchRequest]; cancel: [] }>()
 
 const agents = useAgentsStore()
 const providers = useProvidersStore()
+const profiles = useProfilesStore()
 onMounted(() => {
   void agents.load(true)
   void providers.load()
+  void profiles.load()
+  void loadPresets()
 })
 
 const FOLDER_KEY = 'chorus.newSession.folder'
@@ -40,6 +57,10 @@ const permission = ref<Permission | null>(null)
 const model = ref('')
 // null = the agent's own login, or a key given below.
 const providerId = ref<number | null>(null)
+const description = ref('')
+const preset = ref<Preset>('solo')
+const presetChoices = ref<PresetChoice[]>([])
+const ROLE_LABELS = { builder: 'builds', reviewer: 'reviews', shell: 'shell' } as const
 
 const info = computed(() => agents.byKind.get(agent.value) ?? null)
 const kinds = computed<AgentKind[]>(() =>
@@ -52,7 +73,52 @@ watch(agent, () => {
   permission.value = null
   model.value = ''
   providerId.value = null
+  void loadPresets()
 })
+
+async function loadPresets(): Promise<void> {
+  try {
+    presetChoices.value = await commands.launchPresets(agent.value)
+  } catch {
+    presetChoices.value = []
+  }
+  if (presetChoices.value.find((p) => p.preset === preset.value)?.reason) preset.value = 'solo'
+}
+const chosenPreset = computed(() => presetChoices.value.find((p) => p.preset === preset.value) ?? null)
+const planText = computed(() =>
+  (chosenPreset.value?.slots ?? [])
+    .map((s) => `${AGENT_LABELS[s.agent]}${s.role && chosenPreset.value?.slots.length !== 1 ? ` (${ROLE_LABELS[s.role]})` : ''}`)
+    .join(' + '),
+)
+
+// Profiles: fill the form from one, or save the form as one. The agent goes first, because
+// changing it clears the other choices.
+const profileName = ref('')
+const savedNote = ref('')
+async function applyProfile(p: ProfileSummary): Promise<void> {
+  agent.value = p.agent
+  await nextTick()
+  effort.value = p.options.effort
+  permission.value = p.options.permission
+  model.value = p.options.model ?? ''
+  providerId.value = p.providerId
+  keyId.value = p.credential?.id ?? null
+  envVar.value = p.credential?.envVar ?? ''
+  profileName.value = p.name
+  savedNote.value = p.providerName === '(deleted provider)' ? 'Its provider was deleted: choose another.' : `Filled from ${p.name}.`
+}
+async function saveProfile(): Promise<void> {
+  const existing = profiles.list.find((p) => p.name === profileName.value.trim())
+  const saved = await profiles.save({
+    id: existing?.id ?? null,
+    name: profileName.value,
+    agent: agent.value,
+    options: { effort: effort.value, permission: permission.value, model: model.value.trim() || null },
+    providerId: providerId.value,
+    credential: keyId.value === null ? null : { id: keyId.value, envVar: envVar.value.trim() },
+  })
+  savedNote.value = saved ? `Saved as ${saved.name}.` : ''
+}
 
 // Every provider an agent could run on is listed; the ones this agent can't use say why.
 const routes = computed(() =>
@@ -91,7 +157,8 @@ const canSubmit = computed(
     cwd.value.trim() !== '' &&
     (keyId.value === null || envVar.value.trim() !== '') &&
     !effortWithoutModel.value &&
-    (providerId.value === null || model.value.trim() !== ''),
+    (providerId.value === null || model.value.trim() !== '') &&
+    !chosenPreset.value?.reason,
 )
 
 function submit(): void {
@@ -101,7 +168,7 @@ function submit(): void {
   } catch {
     // A remembered folder is a convenience; without storage the field just starts empty.
   }
-  emit('create', {
+  const session: CreateSession = {
     agent: agent.value,
     cwd: cwd.value,
     name: name.value.trim() || null,
@@ -110,13 +177,25 @@ function submit(): void {
     rows: 30,
     options: { effort: effort.value, permission: permission.value, model: model.value.trim() || null },
     providerId: providerId.value,
-  })
+    description: description.value.trim() || null,
+  }
+  emit('launch', { preset: preset.value, session })
 }
 </script>
 
 <template>
   <form class="panel" @submit.prevent="submit">
     <h2>New session</h2>
+    <div v-if="profiles.list.length" class="chips">
+      <span class="chips-label">Profiles</span>
+      <span v-for="p in profiles.list" :key="p.id" class="chip">
+        <button type="button" :title="optionsText(p) || 'defaults'" @click="applyProfile(p)">
+          {{ p.name }} <em>{{ AGENT_LABELS[p.agent] }}{{ p.providerName ? ` · ${p.providerName}` : '' }}</em>
+        </button>
+        <button type="button" class="x" :title="`Delete ${p.name}`" @click="profiles.remove(p.id)">×</button>
+      </span>
+    </div>
+    <p v-if="savedNote" class="hint">{{ savedNote }}</p>
     <label>
       <span>Agent</span>
       <select v-model="agent">
@@ -127,6 +206,19 @@ function submit(): void {
       {{ detectionText(info) }}
     </p>
     <p v-else-if="agents.error" class="hint warn">{{ agents.error }}</p>
+    <fieldset v-if="presetChoices.length" class="presets">
+      <legend>Start</legend>
+      <label v-for="p in presetChoices" :key="p.preset" class="preset" :class="{ off: p.reason }">
+        <input v-model="preset" type="radio" :value="p.preset" :disabled="p.reason !== null" />
+        <span>
+          <strong>{{ p.label }}</strong> · {{ p.blurb }}
+          <em v-if="p.reason"> ({{ p.reason }})</em>
+        </span>
+      </label>
+      <p v-if="chosenPreset && chosenPreset.slots.length > 1" class="hint">
+        Starts {{ planText }} in the same folder. {{ chosenPreset.note }} The second session uses its agent's defaults.
+      </p>
+    </fieldset>
     <label>
       <span>Folder</span>
       <input v-model="cwd" placeholder="C:\Projects\app" spellcheck="false" autocomplete="off" />
@@ -134,6 +226,10 @@ function submit(): void {
     <label>
       <span>Name <em>(optional)</em></span>
       <input v-model="name" maxlength="80" autocomplete="off" />
+    </label>
+    <label>
+      <span>Note <em>(optional: what this session is for)</em></span>
+      <textarea v-model="description" maxlength="500" rows="2" />
     </label>
 
     <template v-if="info && info.kind !== 'shell'">
@@ -203,8 +299,17 @@ function submit(): void {
       <input v-model="envVar" placeholder="OPENROUTER_API_KEY" spellcheck="false" autocomplete="off" />
     </label>
     <p class="hint">The key reaches the process only as this environment variable, and is redacted from its output.</p>
+    <div class="row">
+      <input v-model="profileName" placeholder="Profile name" maxlength="80" autocomplete="off" />
+      <button type="button" :disabled="!profileName.trim()" @click="saveProfile">
+        {{ profiles.list.some((p) => p.name === profileName.trim()) ? 'Update profile' : 'Save as profile' }}
+      </button>
+    </div>
+    <p v-if="profiles.error" class="hint warn">{{ profiles.error }}</p>
     <div class="actions">
-      <button type="submit" class="primary" :disabled="!canSubmit || busy">{{ busy ? 'Starting…' : 'Start' }}</button>
+      <button type="submit" class="primary" :disabled="!canSubmit || busy">
+        {{ busy ? 'Starting…' : (chosenPreset?.slots.length ?? 1) > 1 ? `Start ${chosenPreset?.slots.length} sessions` : 'Start' }}
+      </button>
       <button type="button" @click="emit('cancel')">Cancel</button>
     </div>
   </form>
@@ -240,6 +345,62 @@ em {
 }
 .hint.warn {
   color: var(--status-needs);
+}
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.chips-label {
+  color: var(--text-2);
+  font-size: 13px;
+  margin-right: 4px;
+}
+.chip {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.chip button {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 3px 10px;
+  font-size: 12.5px;
+}
+.chip .x {
+  padding: 3px 8px;
+  color: var(--text-muted);
+}
+.presets {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 12px 10px;
+  display: grid;
+  gap: 6px;
+}
+.presets legend {
+  color: var(--text-2);
+  font-size: 13px;
+  padding: 0 4px;
+}
+.preset {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 13px;
+}
+.preset.off {
+  color: var(--text-muted);
+}
+.row {
+  display: flex;
+  gap: 10px;
+}
+.row input {
+  flex: 1;
 }
 .args {
   color: var(--text-muted);

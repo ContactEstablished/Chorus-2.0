@@ -15,6 +15,7 @@
 pub mod commands;
 pub mod job;
 pub mod mirror;
+pub mod profiles;
 
 use std::collections::{BTreeMap, HashMap};
 use std::io::{Read, Write};
@@ -29,6 +30,7 @@ use chorus_core::batch::{PTY_BATCH, SCRUB_CARRY_RELEASE_MS};
 use chorus_core::cli::{VersionFit, fit, parse_version};
 use chorus_core::conpty::{CURSOR_REPORT, Handshake};
 use chorus_core::env::{ChildEnvInput, compose_child_env, valid_secret_var};
+use chorus_core::launch::{self as launch_rules, Preset, Role, Slot};
 use chorus_core::opencode::{self as oc, Observed};
 use chorus_core::providers::{self as prov, ProviderKind};
 use chorus_core::scrollback::{boundary, exit_line, restart_screen};
@@ -99,6 +101,8 @@ pub struct SessionSummary {
     pub locked: bool,
     /// Why the session isn't running, or what went wrong, in words to show as is.
     pub note: Option<String>,
+    /// The user's note on what the session is for.
+    pub description: Option<String>,
     pub credential_label: Option<String>,
     pub credential_env: Option<String>,
     pub last_exit_code: Option<u32>,
@@ -163,9 +167,44 @@ pub struct CreateSession {
     /// provider's model id.
     #[serde(default)]
     pub provider_id: Option<u32>,
+    /// What the session is for, shown on its card and header.
+    #[serde(default)]
+    pub description: Option<String>,
 }
 
+/// Starts the sessions a preset makes. `session` is the first; the others are derived from it.
 #[derive(Debug, Clone, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct LaunchRequest {
+    pub preset: Preset,
+    pub session: CreateSession,
+}
+
+/// One session a launch tried to start.
+#[derive(Debug, Clone, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct LaunchOutcome {
+    pub agent: AgentKind,
+    pub role: Option<Role>,
+    pub session: Option<SessionSummary>,
+    pub error: Option<String>,
+}
+
+/// A preset as the launch form shows it for one agent.
+#[derive(Debug, Clone, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct PresetChoice {
+    pub preset: Preset,
+    pub label: String,
+    pub blurb: String,
+    pub note: Option<String>,
+    /// The sessions it would start; empty when it can't.
+    pub slots: Vec<Slot>,
+    /// Why it can't, for this agent on this machine.
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct CredentialUse {
     pub id: u32,
@@ -185,6 +224,9 @@ const MAX_CWD_BYTES: usize = 1024;
 /// How long Close and Restart wait for a run's output to drain before moving on.
 const FINISH_TIMEOUT: Duration = Duration::from_secs(5);
 const BOUNDARY_RESTARTED: &str = "── Restarted ──";
+/// A Claude Code run that exits within this of starting, in a folder it doesn't trust, ended at its
+/// trust question.
+const TRUST_EXIT_WINDOW: Duration = Duration::from_secs(300);
 /// How long quitting waits for minted keys to be revoked.
 const SHUTDOWN_REVOKE_WAIT: Duration = Duration::from_secs(4);
 const BOUNDARY_RELAUNCHED: &str = "── Chorus restarted: session relaunched ──";
@@ -310,6 +352,7 @@ struct Run {
     /// Set before Chorus itself ends the process (Close, Restart), so the exit isn't taken for the
     /// agent quitting.
     requested: Mutex<Option<ExitCause>>,
+    started: Instant,
     /// Filled by the exit watcher for the output thread, which writes the exit line last.
     exit: Mutex<Option<(ExitCause, u32)>>,
     finished: (Mutex<bool>, Condvar),
@@ -457,6 +500,7 @@ impl SessionManager {
             pid: run.as_ref().map(|r| r.pid),
             locked: row.locked,
             note: row.note.clone(),
+            description: row.description.clone(),
             credential_label,
             credential_env: row.credential_env.clone(),
             last_exit_code: last.as_ref().and_then(|r| r.exit_code),
@@ -546,24 +590,38 @@ impl SessionManager {
         }
     }
 
-    pub fn create(self: &Arc<Self>, req: CreateSession) -> Result<SessionSummary, String> {
-        check_size(req.cols, req.rows)?;
-        let cwd = check_cwd(&req.cwd)?;
-        if let Some(c) = &req.credential {
+    /// Checks a session's settings (also a launch profile's): options the agent declares, a key
+    /// that exists under a usable variable name, and a provider the agent can run on with a model.
+    pub fn check_settings(
+        &self,
+        agent: AgentKind,
+        options: &LaunchOptions,
+        provider_id: Option<u32>,
+        credential: Option<&CredentialUse>,
+    ) -> Result<LaunchOptions, String> {
+        if let Some(c) = credential {
             if !valid_secret_var(&c.env_var) {
                 return Err(format!("{:?} can't be used as the key's variable name.", c.env_var));
             }
             credentials::get(&self.store, c.id)?.ok_or("That key no longer exists.")?;
         }
-        let spec = req.agent.spec();
-        let options = spec.resolve(&req.options)?;
-        if let Some(pid) = req.provider_id {
+        let options = agent.spec().resolve(options)?;
+        if let Some(pid) = provider_id {
             let provider = provider_rows::get(&self.store, pid)?.ok_or("That provider no longer exists.")?;
-            prov::route_support(req.agent, provider.kind)?;
+            prov::route_support(agent, provider.kind)?;
             if options.model.is_none() {
                 return Err(format!("Choose a model for {}.", provider.name));
             }
         }
+        Ok(options)
+    }
+
+    pub fn create(self: &Arc<Self>, req: CreateSession) -> Result<SessionSummary, String> {
+        check_size(req.cols, req.rows)?;
+        let cwd = check_cwd(&req.cwd)?;
+        let options = self.check_settings(req.agent, &req.options, req.provider_id, req.credential.as_ref())?;
+        let description = launch_rules::clean_description(req.description.as_deref())?;
+        let spec = req.agent.spec();
         // Chorus names the conversation up front where the agent lets it, so every later run can
         // resume it.
         let conversation =
@@ -583,6 +641,7 @@ impl SessionManager {
                 options: &options,
                 agent_session_id: conversation.as_deref(),
                 provider_id: req.provider_id,
+                description: description.as_deref(),
             },
         )?;
         let live = self.live_for(id);
@@ -742,6 +801,9 @@ impl SessionManager {
         if unreadable > 0 {
             notes.push(format!("{unreadable} stored key(s) couldn't be decrypted, so they aren't redacted in this session."));
         }
+        if row.agent == AgentKind::Claude && agents::claude_folder_trusted(&parent, &row.cwd) == Some(false) {
+            notes.push(chorus_core::claude::TRUST_NOTE_BEFORE.to_owned());
+        }
         if let Some(n) = detected.as_ref().and_then(|d| version_note(row.agent, d)) {
             notes.push(n);
         }
@@ -751,6 +813,7 @@ impl SessionManager {
         let run = Arc::new(Run {
             id: run_id,
             pid,
+            started: Instant::now(),
             writer: Mutex::new(writer),
             master: Mutex::new(Some(pair.master)),
             job,
@@ -972,7 +1035,8 @@ impl SessionManager {
                 let (end, state) = after_exit(cause);
                 let _ = rows::end_run(&m.store, run.id, end, Some(code));
                 if state == Some(SessionState::Exited) {
-                    let _ = rows::set_state(&m.store, live.id, SessionState::Exited, Some(&format!("Exited with code {code}.")));
+                    let note = m.exit_note(live.id, code, run.started.elapsed()).unwrap_or_else(|| format!("Exited with code {code}."));
+                    let _ = rows::set_state(&m.store, live.id, SessionState::Exited, Some(&note));
                 }
                 *run.exit.lock().expect("exit lock") = Some((cause, code));
                 if let Some(ledger) = run.capped {
@@ -1063,6 +1127,78 @@ impl SessionManager {
         Ok(summary)
     }
 
+    /// The agents a launch can use: those found on this machine, or all of them before the first
+    /// detection finishes (a launch then fails visibly if one is missing).
+    fn installed(&self) -> Vec<AgentKind> {
+        AgentKind::ALL.into_iter().filter(|k| self.agents.get(*k).is_none_or(|d| d.found)).collect()
+    }
+
+    /// Every preset as it would work for `agent` here.
+    pub fn presets(&self, agent: AgentKind) -> Vec<PresetChoice> {
+        let installed = self.installed();
+        launch_rules::PRESETS
+            .iter()
+            .map(|p| {
+                let plan = launch_rules::plan(*p, agent, &installed);
+                PresetChoice {
+                    preset: *p,
+                    label: p.label().to_owned(),
+                    blurb: p.blurb().to_owned(),
+                    note: p.note().map(str::to_owned),
+                    reason: plan.as_ref().err().cloned(),
+                    slots: plan.unwrap_or_default(),
+                }
+            })
+            .collect()
+    }
+
+    /// Starts the sessions `preset` makes. The first is `session` as given; a reviewer or a shell
+    /// is derived from it (same folder, its agent's defaults, no key). If the first can't be
+    /// created nothing is; a later one that fails is reported and the others stay.
+    pub fn launch(self: &Arc<Self>, req: LaunchRequest) -> Result<Vec<LaunchOutcome>, String> {
+        let slots = launch_rules::plan(req.preset, req.session.agent, &self.installed())?;
+        let first = self.create(req.session.clone())?;
+        let mut out = vec![LaunchOutcome { agent: first.agent, role: slots[0].role, session: Some(first.clone()), error: None }];
+        for slot in &slots[1..] {
+            let derived = CreateSession {
+                agent: slot.agent,
+                cwd: req.session.cwd.clone(),
+                name: Some(launch_rules::slot_name(&first.name, slot.role)),
+                credential: None,
+                cols: req.session.cols,
+                rows: req.session.rows,
+                options: LaunchOptions::default(),
+                provider_id: None,
+                description: launch_rules::slot_description(&first.name, slot.role),
+            };
+            let (session, error) = match self.create(derived) {
+                Ok(s) => (Some(s), None),
+                Err(e) => (None, Some(e)),
+            };
+            out.push(LaunchOutcome { agent: slot.agent, role: slot.role, session, error });
+        }
+        Ok(out)
+    }
+
+    pub fn rename(&self, id: u32, name: &str) -> Result<SessionSummary, String> {
+        self.row(id)?;
+        if name.trim().is_empty() {
+            return Err("A session needs a name.".into());
+        }
+        rows::set_name(&self.store, id, &clean_name(Some(name), "")?)?;
+        let summary = self.summary(id)?;
+        (self.notify)(summary.clone());
+        Ok(summary)
+    }
+
+    pub fn set_description(&self, id: u32, text: Option<&str>) -> Result<SessionSummary, String> {
+        self.row(id)?;
+        rows::set_description(&self.store, id, launch_rules::clean_description(text)?.as_deref())?;
+        let summary = self.summary(id)?;
+        (self.notify)(summary.clone());
+        Ok(summary)
+    }
+
     pub fn set_locked(&self, id: u32, locked: bool, pin: Option<&str>) -> Result<SessionSummary, String> {
         self.row(id)?;
         if !locked {
@@ -1101,6 +1237,19 @@ impl SessionManager {
                 break;
             }
         }
+    }
+
+    /// Why a run that ended by itself ended, when Chorus can tell from a structured source: Claude
+    /// Code exiting soon after start in a folder it still doesn't trust answered No to its trust
+    /// question (LESSONS L33).
+    fn exit_note(&self, id: u32, code: u32, ran: Duration) -> Option<String> {
+        let row = self.row(id).ok()?;
+        let parent: Vec<(String, String)> = std::env::vars().collect();
+        (row.agent == AgentKind::Claude
+            && code != 0
+            && ran < TRUST_EXIT_WINDOW
+            && agents::claude_folder_trusted(&parent, &row.cwd) == Some(false))
+        .then(|| chorus_core::claude::TRUST_NOTE_AFTER.to_owned())
     }
 
     /// Revokes a run's minted key and reads its cost, on a thread of its own.

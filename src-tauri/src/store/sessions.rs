@@ -25,6 +25,8 @@ pub struct SessionRow {
     pub agent_session_id: Option<String>,
     /// The provider the agent runs on (`store::providers`), if not its own login or key.
     pub provider_id: Option<u32>,
+    /// The user's note on what the session is for.
+    pub description: Option<String>,
 }
 
 pub struct NewSession<'a> {
@@ -38,6 +40,7 @@ pub struct NewSession<'a> {
     pub options: &'a LaunchOptions,
     pub agent_session_id: Option<&'a str>,
     pub provider_id: Option<u32>,
+    pub description: Option<&'a str>,
 }
 
 pub struct NewRun<'a> {
@@ -64,7 +67,7 @@ pub struct RunRow {
 }
 
 const SESSION_COLUMNS: &str = "id, name, agent, cwd, state, credential_id, credential_env, cols, rows, locked, note, \
-                               created_at, options, agent_session_id, provider_id";
+                               created_at, options, agent_session_id, provider_id, description";
 
 fn session_from(r: &Row<'_>) -> rusqlite::Result<SessionRow> {
     let bad = |i: usize, what: &str, v: String| {
@@ -89,6 +92,7 @@ fn session_from(r: &Row<'_>) -> rusqlite::Result<SessionRow> {
         options: serde_json::from_str(&options).map_err(|_| bad(12, "options", options.clone()))?,
         agent_session_id: r.get(13)?,
         provider_id: r.get(14)?,
+        description: r.get(15)?,
     })
 }
 
@@ -97,8 +101,8 @@ pub fn insert(store: &Store, s: &NewSession<'_>) -> Result<u32, String> {
     store.with(|c| {
         c.execute(
             "INSERT INTO sessions (name, agent, cwd, state, credential_id, credential_env, cols, rows, created_at,
-                                   options, agent_session_id, provider_id)
-             VALUES (?1, ?2, ?3, 'running', ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                                   options, agent_session_id, provider_id, description)
+             VALUES (?1, ?2, ?3, 'running', ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             params![
                 s.name,
                 s.agent.as_str(),
@@ -110,7 +114,8 @@ pub fn insert(store: &Store, s: &NewSession<'_>) -> Result<u32, String> {
                 now_ms(),
                 options,
                 s.agent_session_id,
-                s.provider_id
+                s.provider_id,
+                s.description
             ],
         )?;
         Ok(c.last_insert_rowid() as u32)
@@ -147,6 +152,14 @@ pub fn set_state(store: &Store, id: u32, state: SessionState, note: Option<&str>
 
 pub fn set_note(store: &Store, id: u32, note: Option<&str>) -> Result<(), String> {
     store.with(|c| c.execute("UPDATE sessions SET note = ?1 WHERE id = ?2", params![note, id]).map(|_| ()))
+}
+
+pub fn set_name(store: &Store, id: u32, name: &str) -> Result<(), String> {
+    store.with(|c| c.execute("UPDATE sessions SET name = ?1 WHERE id = ?2", params![name, id]).map(|_| ()))
+}
+
+pub fn set_description(store: &Store, id: u32, description: Option<&str>) -> Result<(), String> {
+    store.with(|c| c.execute("UPDATE sessions SET description = ?1 WHERE id = ?2", params![description, id]).map(|_| ()))
 }
 
 pub fn set_size(store: &Store, id: u32, cols: u16, rows: u16) -> Result<(), String> {
@@ -251,6 +264,7 @@ mod tests {
             options: &NO_OPTIONS,
             agent_session_id: None,
             provider_id: None,
+            description: None,
         }
     }
 

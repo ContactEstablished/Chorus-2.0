@@ -101,6 +101,22 @@ pub fn env_value(env: &[(String, String)], name: &str) -> Option<String> {
     env.iter().find(|(k, _)| k.eq_ignore_ascii_case(name)).map(|(_, v)| v.clone())
 }
 
+/// Claude Code's config, which has grown past a megabyte on a busy machine.
+const MAX_CLAUDE_CONFIG_BYTES: u64 = 64 * 1024 * 1024;
+
+/// Whether Claude Code trusts `cwd` or a folder above it, from its own config
+/// (`$CLAUDE_CONFIG_DIR/.claude.json`, else `~/.claude.json`), read only. `None` when unreadable.
+pub fn claude_folder_trusted(parent_env: &[(String, String)], cwd: &str) -> Option<bool> {
+    let path = env_value(parent_env, "CLAUDE_CONFIG_DIR")
+        .map(PathBuf::from)
+        .or_else(|| env_value(parent_env, "USERPROFILE").map(PathBuf::from))?
+        .join(".claude.json");
+    if std::fs::metadata(&path).ok()?.len() > MAX_CLAUDE_CONFIG_BYTES {
+        return None;
+    }
+    chorus_core::claude::folder_trusted(&std::fs::read_to_string(&path).ok()?, cwd)
+}
+
 /// Whether the agent has recorded the conversation `id`, so the next run resumes it instead of
 /// starting it. Claude Code writes `<config>/projects/<folder>/<id>.jsonl` once the conversation has
 /// a message; Grok keeps `~/.grok/sessions/<folder>/<id>/` (its bundled docs, unverified while Grok

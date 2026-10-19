@@ -63,7 +63,7 @@ export function versionText(version: string | null, fit: VersionFit | null, veri
 }
 
 /** The session header's summary of what it asked its agent for. */
-export function optionsText(s: SessionSummary): string {
+export function optionsText(s: Pick<SessionSummary, 'options'>): string {
   const parts: string[] = []
   if (s.options.effort) parts.push(`${EFFORT_LABELS[s.options.effort]} effort`)
   if (s.options.permission) parts.push(PERMISSION_LABELS[s.options.permission])

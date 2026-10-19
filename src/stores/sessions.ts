@@ -1,6 +1,15 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
-import { commands, events, unwrap, type CloseReport, type CreateSession, type SessionSummary } from '../ipc'
+import {
+  commands,
+  events,
+  unwrap,
+  type CloseReport,
+  type CreateSession,
+  type LaunchOutcome,
+  type LaunchRequest,
+  type SessionSummary,
+} from '../ipc'
 
 /**
  * Sessions as the back end reports them. The back end owns every session (ARCHITECTURE §1); this
@@ -65,6 +74,27 @@ export const useSessionsStore = defineStore('sessions', () => {
     return s
   }
 
+  /** Starts a preset's sessions and selects the first. Each outcome says if its session failed. */
+  async function launch(request: LaunchRequest): Promise<LaunchOutcome[] | null> {
+    const out = await attempt(() => unwrap(commands.sessionsLaunch(request)))
+    for (const o of out ?? []) if (o.session) apply(o.session)
+    const first = out?.[0]?.session
+    if (first) selectedId.value = first.id
+    return out
+  }
+
+  async function rename(id: number, name: string): Promise<boolean> {
+    const s = await attempt(() => unwrap(commands.sessionRename(id, name)))
+    if (s) apply(s)
+    return s !== null
+  }
+
+  async function setDescription(id: number, text: string | null): Promise<boolean> {
+    const s = await attempt(() => unwrap(commands.sessionSetDescription(id, text)))
+    if (s) apply(s)
+    return s !== null
+  }
+
   async function restart(id: number): Promise<void> {
     const s = await attempt(() => unwrap(commands.sessionRestart(id)))
     if (s) apply(s)
@@ -85,5 +115,21 @@ export const useSessionsStore = defineStore('sessions', () => {
     return s !== null
   }
 
-  return { byId, list, selected, selectedId, error, init, dispose, apply, create, restart, close, setLocked }
+  return {
+    byId,
+    list,
+    selected,
+    selectedId,
+    error,
+    init,
+    dispose,
+    apply,
+    create,
+    launch,
+    rename,
+    setDescription,
+    restart,
+    close,
+    setLocked,
+  }
 })

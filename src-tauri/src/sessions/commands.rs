@@ -5,12 +5,13 @@
 
 use std::sync::Arc;
 
+use chorus_core::agent::AgentKind;
 use tauri::State;
 use tauri::ipc::Channel;
 
-use super::{CloseReport, CreateSession, PtyBytes, SessionManager, SessionSummary};
+use super::{CloseReport, CreateSession, LaunchOutcome, LaunchRequest, PresetChoice, PtyBytes, SessionManager, SessionSummary};
 
-type Manager<'a> = State<'a, Arc<SessionManager>>;
+pub type Manager<'a> = State<'a, Arc<SessionManager>>;
 
 async fn blocking<T: Send + 'static>(
     m: &Manager<'_>,
@@ -80,4 +81,30 @@ pub async fn session_set_locked(
     pin: Option<String>,
 ) -> Result<SessionSummary, String> {
     blocking(&state, move |m| m.set_locked(session_id, locked, pin.as_deref())).await
+}
+
+/// Starts the sessions a preset makes (one for Solo, two for Pair and Workbench).
+#[tauri::command]
+#[specta::specta]
+pub async fn sessions_launch(state: Manager<'_>, request: LaunchRequest) -> Result<Vec<LaunchOutcome>, String> {
+    blocking(&state, move |m| m.launch(request)).await
+}
+
+/// Every preset as it would work for `agent` on this machine, with the reason when it can't.
+#[tauri::command]
+#[specta::specta]
+pub fn launch_presets(state: Manager<'_>, agent: AgentKind) -> Vec<PresetChoice> {
+    state.presets(agent)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn session_rename(state: Manager<'_>, session_id: u32, name: String) -> Result<SessionSummary, String> {
+    state.rename(session_id, &name)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn session_set_description(state: Manager<'_>, session_id: u32, description: Option<String>) -> Result<SessionSummary, String> {
+    state.set_description(session_id, description.as_deref())
 }

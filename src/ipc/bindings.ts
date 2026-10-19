@@ -25,6 +25,15 @@ export const commands = {
 	providerSetShortlist: (id: number, models: string[]) => typedError<ProviderSummary, string>(__TAURI_INVOKE("provider_set_shortlist", { id, models })),
 	sessionsList: () => typedError<SessionSummary[], string>(__TAURI_INVOKE("sessions_list")),
 	sessionCreate: (request: CreateSession) => typedError<SessionSummary, string>(__TAURI_INVOKE("session_create", { request })),
+	/**  Starts the sessions a preset makes (one for Solo, two for Pair and Workbench). */
+	sessionsLaunch: (request: LaunchRequest) => typedError<LaunchOutcome[], string>(__TAURI_INVOKE("sessions_launch", { request })),
+	/**  Every preset as it would work for `agent` on this machine, with the reason when it can't. */
+	launchPresets: (agent: AgentKind) => __TAURI_INVOKE<PresetChoice[]>("launch_presets", { agent }),
+	sessionRename: (sessionId: number, name: string) => typedError<SessionSummary, string>(__TAURI_INVOKE("session_rename", { sessionId, name })),
+	sessionSetDescription: (sessionId: number, description: string | null) => typedError<SessionSummary, string>(__TAURI_INVOKE("session_set_description", { sessionId, description })),
+	profilesList: () => typedError<ProfileSummary[], string>(__TAURI_INVOKE("profiles_list")),
+	profileSave: (input: ProfileSave) => typedError<ProfileSummary, string>(__TAURI_INVOKE("profile_save", { input })),
+	profileDelete: (id: number) => typedError<boolean, string>(__TAURI_INVOKE("profile_delete", { id })),
 	/**
 	 *  Starts sending a session's output to `output`: its saved scrollback first, then live bytes.
 	 *  Returns a view id for `session_detach`.
@@ -175,6 +184,8 @@ export type CreateSession = {
 	 *  provider's model id.
 	 */
 	providerId?: number | null,
+	/**  What the session is for, shown on its card and header. */
+	description?: string | null,
 };
 
 export type CredentialSummary = {
@@ -256,6 +267,20 @@ export type LaunchOptions = {
 	model: string | null,
 };
 
+/**  One session a launch tried to start. */
+export type LaunchOutcome = {
+	agent: AgentKind,
+	role: Role | null,
+	session: SessionSummary | null,
+	error: string | null,
+};
+
+/**  Starts the sessions a preset makes. `session` is the first; the others are derived from it. */
+export type LaunchRequest = {
+	preset: Preset,
+	session: CreateSession,
+};
+
 export type LeakReport = {
 	/**  Longest run of the key (8 bytes or more) found in the text passed in, such as a pane's screen. */
 	text: number,
@@ -288,6 +313,50 @@ export type Permission =
 export type PermissionChoice = {
 	permission: Permission,
 	args: string,
+};
+
+export type Preset = 
+/**  One agent. */
+"solo" | 
+/**  One agent builds, a second agent reviews the same folder. */
+"pair" | 
+/**  An agent plus a shell in the same folder. */
+"workbench" | 
+/**  Several agents, each in its own worktree (P5). */
+"swarm";
+
+/**  A preset as the launch form shows it for one agent. */
+export type PresetChoice = {
+	preset: Preset,
+	label: string,
+	blurb: string,
+	note: string | null,
+	/**  The sessions it would start; empty when it can't. */
+	slots: Slot[],
+	/**  Why it can't, for this agent on this machine. */
+	reason: string | null,
+};
+
+export type ProfileSave = {
+	/**  `None` adds one. */
+	id: number | null,
+	name: string,
+	agent: AgentKind,
+	options: LaunchOptions,
+	providerId: number | null,
+	credential: CredentialUse | null,
+};
+
+export type ProfileSummary = {
+	id: number,
+	name: string,
+	agent: AgentKind,
+	options: LaunchOptions,
+	providerId: number | null,
+	/**  `(deleted provider)` when it no longer exists: using the profile then says so. */
+	providerName: string | null,
+	credential: CredentialUse | null,
+	updatedAtSecs: number,
 };
 
 export type ProviderKind = 
@@ -342,6 +411,9 @@ export type ResumeKind =
 /**  The conversation lives in a server Chorus runs for the session. */
 "server";
 
+/**  What a session in a launch is for. A label, not a limit: a reviewer can write files too. */
+export type Role = "builder" | "reviewer" | "shell";
+
 export type SessionStatus = "running" | "exited" | "closed";
 
 /**  Everything the UI shows about a session. */
@@ -360,6 +432,8 @@ export type SessionSummary = {
 	locked: boolean,
 	/**  Why the session isn't running, or what went wrong, in words to show as is. */
 	note: string | null,
+	/**  The user's note on what the session is for. */
+	description: string | null,
 	credentialLabel: string | null,
 	credentialEnv: string | null,
 	lastExitCode: number | null,
@@ -396,6 +470,15 @@ export type SessionSummary = {
 
 export type SessionUpdated = {
 	session: SessionSummary,
+};
+
+/**
+ *  One session a launch makes. The first slot is the session the user set up; the others are
+ *  derived from it.
+ */
+export type Slot = {
+	agent: AgentKind,
+	role: Role | null,
 };
 
 /**  How a found version relates to the one Chorus checked. */

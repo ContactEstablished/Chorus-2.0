@@ -63,6 +63,7 @@ function session(id: number, over: Partial<SessionSummary> = {}): SessionSummary
     providerId: null,
     providerName: null,
     cappedKey: null,
+    description: null,
     ...over,
   }
 }
