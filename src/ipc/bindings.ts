@@ -31,6 +31,8 @@ export const commands = {
 	launchPresets: (agent: AgentKind) => __TAURI_INVOKE<PresetChoice[]>("launch_presets", { agent }),
 	sessionRename: (sessionId: number, name: string) => typedError<SessionSummary, string>(__TAURI_INVOKE("session_rename", { sessionId, name })),
 	sessionSetDescription: (sessionId: number, description: string | null) => typedError<SessionSummary, string>(__TAURI_INVOKE("session_set_description", { sessionId, description })),
+	/**  A session's newest turns with their prompts, final messages, tool calls and asks. */
+	sessionHistory: (sessionId: number, limit: number) => typedError<SessionHistory, string>(__TAURI_INVOKE("session_history", { sessionId, limit })),
 	profilesList: () => typedError<ProfileSummary[], string>(__TAURI_INVOKE("profiles_list")),
 	profileSave: (input: ProfileSave) => typedError<ProfileSummary, string>(__TAURI_INVOKE("profile_save", { input })),
 	profileDelete: (id: number) => typedError<boolean, string>(__TAURI_INVOKE("profile_delete", { id })),
@@ -80,6 +82,20 @@ export const events = {
 };
 
 /* Types */
+export type Activity = 
+/**  No event yet, or the agent has no event channel (Grok, a shell). */
+"unknown" | 
+/**  A turn is in progress. */
+"working" | 
+/**  The agent waits for permission to act. */
+"awaiting-approval" | 
+/**  The agent asked a question, or ended its turn with one. */
+"needs-answer" | 
+/**  The turn ended and the agent waits for the next prompt. */
+"ready" | 
+/**  The turn ended in an error. */
+"failed";
+
 export type AgentInfo = {
 	kind: AgentKind,
 	displayName: string,
@@ -119,6 +135,12 @@ export type AppInfo = {
 	/**  The live data directory. Shown in the window so it's always clear which data is in use. */
 	dataDir: string,
 	tauriVersion: string,
+};
+
+export type AskEntry = {
+	kind: string,
+	subject: string,
+	answer: string | null,
 };
 
 /**
@@ -414,6 +436,17 @@ export type ResumeKind =
 /**  What a session in a launch is for. A label, not a limit: a reviewer can write files too. */
 export type Role = "builder" | "reviewer" | "shell";
 
+/**  A session's recent turns and how complete its records are. */
+export type SessionHistory = {
+	turns: TurnEntry[],
+	/**  All turns recorded for the session. */
+	total: number,
+	/**  Turns with both a start and an end. */
+	ended: number,
+	/**  Turns whose prompt was recorded. */
+	withPrompt: number,
+};
+
 export type SessionStatus = "running" | "exited" | "closed";
 
 /**  Everything the UI shows about a session. */
@@ -457,6 +490,10 @@ export type SessionSummary = {
 	versionFit: VersionFit | null,
 	/**  The last run continued the agent's conversation rather than starting one. */
 	resumed: boolean,
+	/**  What the agent is doing, from its events (ARCHITECTURE §6); `unknown` without a channel. */
+	activity: Activity,
+	/**  Working, but neither an event nor output for a while: shown, never assumed (§6). */
+	noSignal: boolean,
 	/**  What the running agent's newest turn really used, read back from the agent (opencode). */
 	observed: Observed | null,
 	/**  How that turn differs from `options`, one phrase each; empty when it matches. */
@@ -479,6 +516,26 @@ export type SessionUpdated = {
 export type Slot = {
 	agent: AgentKind,
 	role: Role | null,
+};
+
+export type ToolEntry = {
+	tool: string,
+	target: string | null,
+	failed: boolean,
+	finished: boolean,
+};
+
+/**  A turn as the session's history shows it. */
+export type TurnEntry = {
+	id: number,
+	prompt: string | null,
+	promptSource: string | null,
+	startedAtSecs: number,
+	endedAtSecs: number | null,
+	endReason: string | null,
+	finalMessage: string | null,
+	tools: ToolEntry[],
+	asks: AskEntry[],
 };
 
 /**  How a found version relates to the one Chorus checked. */

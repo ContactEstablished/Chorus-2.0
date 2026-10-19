@@ -108,3 +108,10 @@ pub fn session_rename(state: Manager<'_>, session_id: u32, name: String) -> Resu
 pub fn session_set_description(state: Manager<'_>, session_id: u32, description: Option<String>) -> Result<SessionSummary, String> {
     state.set_description(session_id, description.as_deref())
 }
+
+/// A session's newest turns with their prompts, final messages, tool calls and asks.
+#[tauri::command]
+#[specta::specta]
+pub fn session_history(state: Manager<'_>, session_id: u32, limit: u32) -> Result<crate::store::history::SessionHistory, String> {
+    state.history(session_id, limit)
+}

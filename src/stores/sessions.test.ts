@@ -64,6 +64,8 @@ function session(id: number, over: Partial<SessionSummary> = {}): SessionSummary
     providerName: null,
     cappedKey: null,
     description: null,
+    activity: 'unknown',
+    noSignal: false,
     ...over,
   }
 }

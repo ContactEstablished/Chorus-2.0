@@ -9,6 +9,7 @@ import SessionTerminal from './SessionTerminal.vue'
 import NewSessionForm from './NewSessionForm.vue'
 import KeysPanel from './KeysPanel.vue'
 import ProvidersPanel from './ProvidersPanel.vue'
+import HistoryPanel from './HistoryPanel.vue'
 import { useSessionsStore } from '../stores/sessions'
 import { useKeysStore } from '../stores/keys'
 import { useProvidersStore } from '../stores/providers'
@@ -23,7 +24,7 @@ import {
   type SessionSummary,
 } from '../ipc'
 import { useProfilesStore } from '../stores/profiles'
-import { AGENT_LABELS, money, observedText, optionsText, versionText } from './labels'
+import { ACTIVITY_LABELS, AGENT_LABELS, money, observedText, optionsText, versionText } from './labels'
 import { useAgentsStore } from '../stores/agents'
 
 const props = defineProps<{ dev: boolean }>()
@@ -39,6 +40,7 @@ const askingPin = ref(false)
 const notice = ref<string | null>(null)
 const profiles = useProfilesStore()
 // Renaming and the note, edited in the header.
+const showHistory = ref(false)
 const nameDraft = ref<string | null>(null)
 const noteDraft = ref<string | null>(null)
 const terminal = ref<InstanceType<typeof SessionTerminal> | null>(null)
@@ -61,7 +63,7 @@ function cappedText(s: SessionSummary): string | null {
 }
 
 function statusText(s: SessionSummary): string {
-  if (s.live) return s.pid ? `running · pid ${s.pid}` : 'running'
+  if (s.live) return `${ACTIVITY_LABELS[s.activity]}${s.noSignal ? ' · no signal' : ''}${s.pid ? ` · pid ${s.pid}` : ''}`
   if (s.status === 'running') return 'starting…'
   return s.lastExitCode === null ? 'exited' : `exited (${s.lastExitCode})`
 }
@@ -146,6 +148,7 @@ if (props.dev) {
     profileSave: (input: ProfileSave) => profiles.save(input).then((p) => plain(p ?? profiles.error)),
     rename: (id: number, name: string) => sessions.rename(id, name),
     describe: (id: number, text: string | null) => sessions.setDescription(id, text),
+    history: (id: number, limit = 30) => unwrap(commands.sessionHistory(id, limit)).then(plain),
     providers: async () => (await providers.load(), plain(providers.list)),
     providerSave: (input: ProviderSave) => providers.save(input).then((p) => plain(p ?? providers.error)),
     providerTest: (id: number) => providers.test(id).then(() => plain(providers.byId.get(id) ?? providers.error)),
@@ -167,7 +170,7 @@ if (props.dev) {
       <ul>
         <li v-for="s in sessions.list" :key="s.id">
           <button class="item" :class="{ on: mode === 'session' && s.id === sessions.selectedId }" @click="select(s.id)">
-            <span class="dot" :class="s.live ? 'live' : s.status" />
+            <span class="dot" :class="s.live ? (s.noSignal ? 'no-signal' : s.activity) : s.status" :title="statusText(s)" />
             <span class="name">{{ s.name }}</span>
             <span v-if="s.locked" class="lock" title="Locked">🔒</span>
             <span class="agent">{{ AGENT_LABELS[s.agent] }}</span>
@@ -243,6 +246,10 @@ if (props.dev) {
           Newest turn ran {{ observedText(current) }}<template v-if="current.observedDiffers.length">, not what was asked: {{ current.observedDiffers.join('; ') }}</template>
         </p>
         <p v-if="cappedText(current)" class="meta">{{ cappedText(current) }}</p>
+        <p class="meta">
+          <button class="quiet" @click="showHistory = !showHistory">{{ showHistory ? 'Hide history' : 'History' }}</button>
+        </p>
+        <HistoryPanel v-if="showHistory" :session="current" />
         <p v-if="current.note" class="note">{{ current.note }}</p>
         <p v-if="current.scrollbackError" class="note">{{ current.scrollbackError }}</p>
         <p v-if="notice" class="note">{{ notice }}</p>
@@ -320,8 +327,27 @@ if (props.dev) {
   border-radius: 50%;
   background: var(--status-done);
 }
-.dot.live {
+.dot.unknown,
+.dot.ready {
   background: var(--status-ready);
+}
+.dot.working {
+  background: var(--status-working);
+}
+.dot.awaiting-approval {
+  background: var(--status-approval);
+}
+.dot.needs-answer {
+  background: var(--status-input);
+}
+.dot.failed {
+  background: var(--status-failed);
+}
+.dot.no-signal {
+  background: transparent;
+  border: 2px solid var(--status-working);
+  width: 6px;
+  height: 6px;
 }
 .dot.exited {
   background: var(--status-failed);

@@ -2,10 +2,12 @@
 // never edit it by hand). Import IPC from here, not from bindings.ts directly.
 export { commands, events } from './bindings'
 export type {
+  Activity,
   AgentInfo,
   AgentKind,
   AgentRoute,
   AppInfo,
+  AskEntry,
   BackendPulse,
   CappedKeyInfo,
   CatalogEntry,
@@ -35,9 +37,12 @@ export type {
   ProviderSummary,
   ResumeKind,
   Role,
+  SessionHistory,
   SessionStatus,
   SessionSummary,
   Slot,
+  ToolEntry,
+  TurnEntry,
   VersionFit,
 } from './bindings'
 

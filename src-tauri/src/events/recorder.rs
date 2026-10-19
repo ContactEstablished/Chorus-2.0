@@ -1,0 +1,256 @@
+//! A run's events, recorded (D7): the state machine in `chorus_core::activity` decides which turns
+//! open and close, and this writes them, their tool calls and asks to the history tables. Every
+//! piece of text is scrubbed first, with the same secrets the run's output is scrubbed with.
+
+use std::collections::HashMap;
+use std::sync::Arc;
+
+use chorus_core::activity::{Activity, Tracker, TurnChange};
+use chorus_core::events::{AgentEvent, compact_for_log, hook_event_name};
+use chorus_core::scrub::{Pattern, scrub_all};
+use serde_json::Value;
+
+use crate::store::{Store, history};
+
+/// An approval or question waiting for its answer.
+struct OpenAsk {
+    row: i64,
+    kind: &'static str,
+    ask_ref: Option<String>,
+    tool: Option<String>,
+    turn_row: Option<i64>,
+}
+
+pub struct Recorder {
+    session_id: u32,
+    run_id: u32,
+    /// `"hook"` for prompts seen through Claude Code's or Codex's hooks, `"server"` for opencode.
+    prompt_source: &'static str,
+    tracker: Tracker,
+    redact: Arc<Vec<Vec<u8>>>,
+    patterns: Arc<Vec<Pattern>>,
+    /// Tracker key → turn row.
+    turns: HashMap<u64, i64>,
+    /// The agent's turn id → turn row, to file tool calls under the right turn.
+    turn_rows: HashMap<String, i64>,
+    newest_turn: Option<i64>,
+    /// Call id → tool row; calls without an id are matched by tool name, oldest first.
+    tools: HashMap<String, i64>,
+    unnamed_tools: Vec<(String, i64)>,
+    asks: Vec<OpenAsk>,
+}
+
+impl Recorder {
+    pub fn new(session_id: u32, run_id: u32, prompt_source: &'static str, redact: Arc<Vec<Vec<u8>>>, patterns: Arc<Vec<Pattern>>) -> Self {
+        Self {
+            session_id,
+            run_id,
+            prompt_source,
+            tracker: Tracker::default(),
+            redact,
+            patterns,
+            turns: HashMap::new(),
+            turn_rows: HashMap::new(),
+            newest_turn: None,
+            tools: HashMap::new(),
+            unnamed_tools: Vec::new(),
+            asks: Vec::new(),
+        }
+    }
+
+    pub fn activity(&self) -> Activity {
+        self.tracker.activity()
+    }
+
+    pub fn stale(&self, now_ms: i64, last_output_ms: i64) -> bool {
+        self.tracker.stale(now_ms, last_output_ms)
+    }
+
+    fn clean(&self, text: &str) -> String {
+        String::from_utf8_lossy(&scrub_all(text.as_bytes(), &self.redact, &self.patterns)).into_owned()
+    }
+
+    fn turn_for(&self, turn: Option<&str>) -> Option<i64> {
+        turn.and_then(|t| self.turn_rows.get(t).copied()).or(self.newest_turn)
+    }
+
+    /// Records one payload from an agent and the events it carried. The writes are done before
+    /// this returns, so a prompt is durable before the agent acts on it.
+    pub fn record(&mut self, store: &Store, source: &str, raw: &Value, events: &[AgentEvent], now_ms: i64) {
+        let body = self.clean(&compact_for_log(raw));
+        let _ = history::record_event(store, self.session_id, Some(self.run_id), source, hook_event_name(raw).as_deref(), &body);
+        for event in events {
+            let changes = self.tracker.apply(event, now_ms);
+            for change in changes {
+                self.apply_change(store, change);
+            }
+            self.apply_detail(store, event);
+        }
+    }
+
+    fn apply_change(&mut self, store: &Store, change: TurnChange) {
+        match change {
+            TurnChange::Opened { key, turn, prompt } => {
+                let prompt_row = prompt
+                    .filter(|p| !p.trim().is_empty())
+                    .and_then(|p| history::insert_prompt(store, self.session_id, Some(self.run_id), self.prompt_source, &self.clean(&p)).ok());
+                if let Ok(row) = history::open_turn(store, self.session_id, Some(self.run_id), turn.as_deref(), prompt_row) {
+                    self.turns.insert(key, row);
+                    if let Some(t) = turn {
+                        self.turn_rows.insert(t, row);
+                    }
+                    self.newest_turn = Some(row);
+                }
+            }
+            TurnChange::Closed { key, end, message } => {
+                let Some(row) = self.turns.remove(&key) else { return };
+                let message = message.map(|m| self.clean(&m));
+                let _ = history::close_turn(store, row, end.as_str(), message.as_deref());
+                // Asks still open when their turn ends: nothing answered them through a channel.
+                let answer = match end {
+                    chorus_core::activity::TurnEnd::Interrupted => "turn interrupted",
+                    chorus_core::activity::TurnEnd::Lost => "run ended",
+                    _ => "no answer seen",
+                };
+                for ask in self.asks.iter().filter(|a| a.turn_row == Some(row)) {
+                    let _ = history::answer_ask(store, ask.row, answer);
+                }
+                self.asks.retain(|a| a.turn_row != Some(row));
+            }
+        }
+    }
+
+    fn answer(&mut self, store: &Store, pick: impl Fn(&OpenAsk) -> bool, answer: &str) {
+        if let Some(i) = self.asks.iter().position(pick) {
+            let ask = self.asks.remove(i);
+            let _ = history::answer_ask(store, ask.row, answer);
+        }
+    }
+
+    fn apply_detail(&mut self, store: &Store, event: &AgentEvent) {
+        match event {
+            AgentEvent::ToolStarted { turn, call, tool, target } => {
+                // A tool running after an approval for it means the approval was given.
+                self.answer(store, |a| a.kind == "approval" && a.tool.as_deref() == Some(tool), "allowed");
+                let target = target.as_deref().map(|t| self.clean(t));
+                if let Ok(row) = history::tool_started(store, self.session_id, self.turn_for(turn.as_deref()), call.as_deref(), tool, target.as_deref()) {
+                    match call {
+                        Some(c) => {
+                            self.tools.insert(c.clone(), row);
+                        }
+                        None => self.unnamed_tools.push((tool.clone(), row)),
+                    }
+                }
+            }
+            AgentEvent::ToolFinished { turn, call, tool, target, failed } => {
+                self.answer(store, |a| a.kind == "approval" && a.tool.as_deref() == Some(tool), "allowed");
+                let row = call.as_ref().and_then(|c| self.tools.remove(c)).or_else(|| {
+                    let i = self.unnamed_tools.iter().position(|(t, _)| t == tool)?;
+                    Some(self.unnamed_tools.remove(i).1)
+                });
+                let row = match row {
+                    Some(r) => Some(r),
+                    // Seen only finishing (hooks started mid-call): record it whole.
+                    None => {
+                        let target = target.as_deref().map(|t| self.clean(t));
+                        history::tool_started(store, self.session_id, self.turn_for(turn.as_deref()), call.as_deref(), tool, target.as_deref()).ok()
+                    }
+                };
+                if let Some(r) = row {
+                    let _ = history::tool_finished(store, r, *failed);
+                }
+            }
+            AgentEvent::ApprovalAsked { turn, ask, tool, target } => {
+                let subject = self.clean(&match target {
+                    Some(t) => format!("{tool}: {t}"),
+                    None => tool.clone(),
+                });
+                let turn_row = self.turn_for(turn.as_deref());
+                if let Ok(row) = history::open_ask(store, self.session_id, turn_row, "approval", ask.as_deref(), &subject) {
+                    self.asks.push(OpenAsk { row, kind: "approval", ask_ref: ask.clone(), tool: Some(tool.clone()), turn_row });
+                }
+            }
+            AgentEvent::ApprovalAnswered { ask, allowed } => {
+                let answer = if *allowed { "allowed" } else { "rejected" };
+                self.answer(store, |a| a.kind == "approval" && (ask.is_none() || a.ask_ref == *ask), answer);
+            }
+            AgentEvent::QuestionAsked { turn, ask, question } => {
+                let turn_row = self.turn_for(turn.as_deref());
+                if let Ok(row) = history::open_ask(store, self.session_id, turn_row, "question", ask.as_deref(), &self.clean(question)) {
+                    self.asks.push(OpenAsk { row, kind: "question", ask_ref: ask.clone(), tool: None, turn_row });
+                }
+            }
+            AgentEvent::QuestionAnswered { ask, answer } => {
+                let text = answer.as_deref().map(|a| self.clean(a)).unwrap_or_else(|| "answered".into());
+                self.answer(store, |a| a.kind == "question" && (ask.is_none() || a.ask_ref == *ask), &text);
+            }
+            _ => {}
+        }
+    }
+
+    /// The run ended: its open turns are lost.
+    pub fn run_ended(&mut self, store: &Store) {
+        for change in self.tracker.run_ended() {
+            self.apply_change(store, change);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::store::sessions::{self as rows, NewSession};
+    use chorus_core::agent::{AgentKind, LaunchOptions};
+    use chorus_core::events::from_claude_hook;
+    use serde_json::json;
+
+    #[test]
+    fn hook_payloads_become_history_with_secrets_scrubbed() {
+        let store = Store::in_memory();
+        let id = rows::insert(
+            &store,
+            &NewSession {
+                name: "t",
+                agent: AgentKind::Claude,
+                cwd: "C:\\w",
+                credential_id: None,
+                credential_env: None,
+                cols: 80,
+                rows: 24,
+                options: &LaunchOptions::default(),
+                agent_session_id: None,
+                provider_id: None,
+                description: None,
+            },
+        )
+        .unwrap();
+        let run = rows::start_run(&store, &rows::NewRun { session_id: id, pid: None, program: "claude.exe", args: &[], cli_version: None, resumed: false }).unwrap();
+        let secret = b"s3cr3t-value-123456".to_vec();
+        let mut r = Recorder::new(id, run, "hook", Arc::new(vec![secret]), Arc::new(chorus_core::scrub::builtin_patterns()));
+        let feed = |r: &mut Recorder, v: Value, t: i64| {
+            let events = from_claude_hook(&v);
+            r.record(&store, "claude-hook", &v, &events, t);
+        };
+        feed(&mut r, json!({"hook_event_name":"UserPromptSubmit","prompt_id":"p1","prompt":"use key s3cr3t-value-123456 please"}), 1);
+        feed(&mut r, json!({"hook_event_name":"PermissionRequest","prompt_id":"p1","tool_name":"Write","tool_input":{"file_path":"a.txt"}}), 2);
+        assert_eq!(r.activity(), Activity::AwaitingApproval);
+        feed(&mut r, json!({"hook_event_name":"PreToolUse","prompt_id":"p1","tool_name":"Write","tool_use_id":"t1","tool_input":{"file_path":"a.txt"}}), 3);
+        feed(&mut r, json!({"hook_event_name":"PostToolUse","prompt_id":"p1","tool_name":"Write","tool_use_id":"t1","tool_input":{"file_path":"a.txt"},"tool_response":{"ok":true}}), 4);
+        feed(&mut r, json!({"hook_event_name":"Stop","prompt_id":"p1","last_assistant_message":"Wrote a.txt."}), 5);
+        assert_eq!(r.activity(), Activity::Ready);
+
+        let turns = history::recent_turns(&store, id, 5).unwrap();
+        assert_eq!(turns.len(), 1);
+        let t = &turns[0];
+        assert_eq!(t.prompt.as_deref(), Some("use key [REDACTED-CREDENTIAL] please"));
+        assert_eq!((t.end_reason.as_deref(), t.final_message.as_deref()), (Some("done"), Some("Wrote a.txt.")));
+        assert_eq!((t.tools.len(), t.tools[0].finished), (1, true));
+        assert_eq!((t.asks[0].subject.as_str(), t.asks[0].answer.as_deref()), ("Write: a.txt", Some("allowed")));
+        let logged: String = store.with(|c| c.query_row("SELECT group_concat(body, ' ') FROM agent_events", [], |r| r.get(0))).unwrap();
+        assert!(!logged.contains("s3cr3t-value-123456") && !logged.contains("tool_response"));
+
+        feed(&mut r, json!({"hook_event_name":"UserPromptSubmit","prompt_id":"p2","prompt":"next"}), 6);
+        r.run_ended(&store);
+        assert_eq!(history::recent_turns(&store, id, 5).unwrap()[1].end_reason.as_deref(), Some("lost"));
+    }
+}

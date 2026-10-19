@@ -33,6 +33,7 @@ pub fn builder() -> Builder<tauri::Wry> {
             s::launch_presets,
             s::session_rename,
             s::session_set_description,
+            s::session_history,
             sessions::profiles::profiles_list,
             sessions::profiles::profile_save,
             sessions::profiles::profile_delete,

@@ -101,6 +101,13 @@ pub fn env_value(env: &[(String, String)], name: &str) -> Option<String> {
     env.iter().find(|(k, _)| k.eq_ignore_ascii_case(name)).map(|(_, v)| v.clone())
 }
 
+/// `chorus-hook.exe`, Codex's hook command (D37), beside Chorus's own executable. The dev command
+/// builds it there before starting the app.
+pub fn hook_relay() -> Option<PathBuf> {
+    let relay = std::env::current_exe().ok()?.parent()?.join("chorus-hook.exe");
+    relay.is_file().then_some(relay)
+}
+
 /// Claude Code's config, which has grown past a megabyte on a busy machine.
 const MAX_CLAUDE_CONFIG_BYTES: u64 = 64 * 1024 * 1024;
 

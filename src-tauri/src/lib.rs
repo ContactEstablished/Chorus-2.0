@@ -2,6 +2,7 @@
 
 mod agents;
 mod app;
+mod events;
 mod fleet;
 mod ipc;
 mod lock;
@@ -68,6 +69,9 @@ pub fn run() {
             );
             // Sessions open now, so views can attach; they relaunch off this thread, because an
             // opencode session waits for its server.
+            // The listener agent hooks post to, before any session launches (P3).
+            manager.set_hook_listener(events::listener::start(manager.clone()));
+            manager.watch_signals();
             let relaunch = manager.reopen()?;
             // Revoke OpenRouter keys an earlier Chorus minted and couldn't revoke. Only keys from
             // before this start are touched, so it can run beside the relaunches, which mint new ones.

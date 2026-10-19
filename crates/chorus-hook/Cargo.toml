@@ -1,0 +1,14 @@
+[package]
+name = "chorus-hook"
+description = "Codex's hook command: relays a hook payload to Chorus's loopback listener (D37)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# Standard library only (D37): it starts once per hook, so it stays small and quick.
+[dependencies]
+
+[lints]
+workspace = true

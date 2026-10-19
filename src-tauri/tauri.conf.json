@@ -4,7 +4,7 @@
   "version": "../package.json",
   "identifier": "com.contactestablished.chorus2",
   "build": {
-    "beforeDevCommand": "npm run web:dev",
+    "beforeDevCommand": "cargo build -p chorus-hook && npm run web:dev",
     "devUrl": "http://localhost:1420",
     "beforeBuildCommand": "npm run web:build",
     "frontendDist": "../dist"

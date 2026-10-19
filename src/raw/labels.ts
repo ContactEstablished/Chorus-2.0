@@ -1,4 +1,4 @@
-import type { AgentInfo, AgentKind, Effort, Permission, ProviderKind, SessionSummary, VersionFit } from '../ipc'
+import type { Activity, AgentInfo, AgentKind, Effort, Permission, ProviderKind, SessionSummary, VersionFit } from '../ipc'
 
 export const AGENT_LABELS: Record<AgentKind, string> = {
   shell: 'Shell',
@@ -22,6 +22,16 @@ export function money(usd: number | null | undefined): string {
 
 export function when(secs: number | null): string {
   return secs ? new Date(secs * 1000).toLocaleString() : 'never'
+}
+
+/** What a running session's agent is doing, from its events (ARCHITECTURE §6). */
+export const ACTIVITY_LABELS: Record<Activity, string> = {
+  unknown: 'running',
+  working: 'working',
+  'awaiting-approval': 'waiting for your approval',
+  'needs-answer': 'needs your answer',
+  ready: 'ready for the next step',
+  failed: 'its last turn failed',
 }
 
 export const EFFORT_LABELS: Record<Effort, string> = {

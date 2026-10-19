@@ -20,12 +20,15 @@ pub mod profiles;
 use std::collections::{BTreeMap, HashMap};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
+use chorus_core::activity::Activity;
 use chorus_core::agent::{LaunchOptions, ResumeKind, uuid_v4};
+use chorus_core::hooks as hk;
 use chorus_core::batch::{PTY_BATCH, SCRUB_CARRY_RELEASE_MS};
 use chorus_core::cli::{VersionFit, fit, parse_version};
 use chorus_core::conpty::{CURSOR_REPORT, Handshake};
@@ -45,6 +48,9 @@ use tauri_specta::Event;
 use crate::agents::detect::Detector;
 use crate::agents::opencode::{Api, Server};
 use crate::agents::{self, AgentKind};
+use crate::events::recorder::Recorder;
+use crate::events::{HookRefused, same_token};
+use crate::store::history;
 use crate::store::providers as provider_rows;
 use crate::store::sessions::{self as rows, NewRun, NewSession, SessionRow};
 use crate::store::{Store, credentials};
@@ -122,6 +128,10 @@ pub struct SessionSummary {
     pub version_fit: Option<VersionFit>,
     /// The last run continued the agent's conversation rather than starting one.
     pub resumed: bool,
+    /// What the agent is doing, from its events (ARCHITECTURE §6); `unknown` without a channel.
+    pub activity: Activity,
+    /// Working, but neither an event nor output for a while: shown, never assumed (§6).
+    pub no_signal: bool,
     /// What the running agent's newest turn really used, read back from the agent (opencode).
     pub observed: Option<Observed>,
     /// How that turn differs from `options`, one phrase each; empty when it matches.
@@ -224,6 +234,12 @@ const MAX_CWD_BYTES: usize = 1024;
 /// How long Close and Restart wait for a run's output to drain before moving on.
 const FINISH_TIMEOUT: Duration = Duration::from_secs(5);
 const BOUNDARY_RESTARTED: &str = "── Restarted ──";
+/// The most turns one history request returns.
+const MAX_HISTORY_TURNS: u32 = 500;
+/// How often "no signal" is checked.
+const SIGNAL_CHECK: Duration = Duration::from_secs(10);
+/// How long raw agent events are kept for diagnosis.
+const EVENT_LOG_KEEP_MS: i64 = 14 * 24 * 60 * 60 * 1000;
 /// A Claude Code run that exits within this of starting, in a folder it doesn't trust, ended at its
 /// trust question.
 const TRUST_EXIT_WINDOW: Duration = Duration::from_secs(300);
@@ -238,8 +254,8 @@ fn check_size(cols: u16, rows: u16) -> Result<PtySize, String> {
     Ok(PtySize { cols, rows, pixel_width: 0, pixel_height: 0 })
 }
 
-/// A fresh password for a run's opencode server: 24 random bytes as hex.
-fn server_password() -> String {
+/// A fresh secret for a run (opencode's server password, a hook token): 24 random bytes as hex.
+fn random_token() -> String {
     vault::random_bytes(24).iter().map(|b| format!("{b:02x}")).collect()
 }
 
@@ -364,6 +380,14 @@ struct Run {
     asked: LaunchOptions,
     /// What the newest turn ran with, read back from the agent.
     observed: Mutex<Option<Observed>>,
+    /// The token this run's hooks must present; only the agent's environment holds it.
+    hook_token: Option<String>,
+    /// This run's events, turned into state and history.
+    recorder: Mutex<Recorder>,
+    /// When the run last printed anything (Unix ms): output keeps a quiet turn from looking dead.
+    last_output_ms: AtomicI64,
+    /// Whether "no signal" was last reported, so a change is sent once.
+    no_signal_shown: AtomicBool,
 }
 
 impl Run {
@@ -414,6 +438,8 @@ pub struct SessionManager {
     quitting: AtomicBool,
     notify: Notify,
     agents: Detector,
+    /// The event listener's port, or why it isn't running.
+    hook_listener: OnceLock<Result<u16, String>>,
 }
 
 impl SessionManager {
@@ -425,7 +451,78 @@ impl SessionManager {
             quitting: AtomicBool::new(false),
             notify,
             agents: Detector::default(),
+            hook_listener: OnceLock::new(),
         })
+    }
+
+    /// Where hooks post to (`events::listener`); launches after this get hooks.
+    pub fn set_hook_listener(&self, listener: Result<u16, String>) {
+        let _ = self.hook_listener.set(listener);
+    }
+
+    /// Claude Code's hook settings for a session, in Chorus's data (never the repo, LESSONS L1).
+    /// It holds the address only; the token is in the child's environment.
+    fn write_claude_settings(&self, session_id: u32, url: &str) -> Result<PathBuf, String> {
+        let dir = self.data_dir.join("hooks");
+        std::fs::create_dir_all(&dir).map_err(|e| format!("creating {}: {e}", dir.display()))?;
+        let path = dir.join(format!("claude-session-{session_id}.json"));
+        std::fs::write(&path, hk::claude_settings(url)).map_err(|e| format!("writing {}: {e}", path.display()))?;
+        Ok(path)
+    }
+
+    /// A hook post from a session's agent: checked against the run's token, then recorded before
+    /// the reply goes back.
+    pub fn receive_hook(&self, session_id: u32, token: &str, body: &[u8]) -> Result<(), HookRefused> {
+        let live = self.open_live(session_id).map_err(|_| HookRefused::NotFound)?;
+        let run = live.current_run().ok_or(HookRefused::NotFound)?;
+        let expected = run.hook_token.as_deref().ok_or(HookRefused::NotFound)?;
+        if !same_token(expected, token) {
+            return Err(HookRefused::Unauthorized);
+        }
+        let payload: serde_json::Value = serde_json::from_slice(body).map_err(|_| HookRefused::BadBody)?;
+        let agent = self.row(session_id).map_err(|_| HookRefused::NotFound)?.agent;
+        let (source, events) = match agent {
+            AgentKind::Claude => ("claude-hook", chorus_core::events::from_claude_hook(&payload)),
+            AgentKind::Codex => ("codex-hook", chorus_core::events::from_codex_hook(&payload)),
+            _ => return Err(HookRefused::NotFound),
+        };
+        let before = {
+            let mut recorder = run.recorder.lock().expect("recorder lock");
+            let before = recorder.activity();
+            recorder.record(&self.store, source, &payload, &events, crate::store::now_ms());
+            before != recorder.activity()
+        };
+        if before {
+            self.notify_id(session_id);
+        }
+        Ok(())
+    }
+
+    /// A session's newest turns, oldest first, and how complete its records are.
+    pub fn history(&self, id: u32, limit: u32) -> Result<history::SessionHistory, String> {
+        self.row(id)?;
+        let (total, ended, with_prompt) = history::turn_counts(&self.store, id)?;
+        Ok(history::SessionHistory { turns: history::recent_turns(&self.store, id, limit.clamp(1, MAX_HISTORY_TURNS))?, total, ended, with_prompt })
+    }
+
+    /// Every few seconds: tells the front end when a session starts or stops showing "no signal".
+    pub fn watch_signals(self: &Arc<Self>) {
+        let m = self.clone();
+        let _ = std::thread::Builder::new().name("signal-watch".into()).spawn(move || {
+            loop {
+                std::thread::sleep(SIGNAL_CHECK);
+                let runs: Vec<(u32, Arc<Run>)> = {
+                    let live = m.live.lock().expect("live lock");
+                    live.values().filter_map(|l| l.current_run().map(|r| (l.id, r))).collect()
+                };
+                for (id, run) in runs {
+                    let stale = run.recorder.lock().expect("recorder lock").stale(crate::store::now_ms(), run.last_output_ms.load(Ordering::Relaxed));
+                    if run.no_signal_shown.swap(stale, Ordering::SeqCst) != stale {
+                        m.notify_id(id);
+                    }
+                }
+            }
+        });
     }
 
     pub fn store(&self) -> &Store {
@@ -515,6 +612,8 @@ impl SessionManager {
             }),
             cli_version: last.as_ref().and_then(|r| r.cli_version.clone()),
             resumed: last.as_ref().is_some_and(|r| r.resumed),
+            activity: run.as_ref().map_or(Activity::Unknown, |r| r.recorder.lock().expect("recorder lock").activity()),
+            no_signal: run.as_ref().is_some_and(|r| r.no_signal_shown.load(Ordering::SeqCst)),
             observed_differs: match (&observed, &run) {
                 (Some(o), Some(r)) => oc::differences(row.agent.spec(), &r.asked, o),
                 _ => Vec::new(),
@@ -574,7 +673,10 @@ impl SessionManager {
         mirror::prune(&self.scrollback_dir(), &open.iter().map(|r| r.id).collect::<Vec<_>>());
         for row in &open {
             self.live_for(row.id);
+            // Turns the previous Chorus left open ended with it.
+            let _ = history::close_open_turns(&self.store, row.id);
         }
+        let _ = history::prune_events(&self.store, EVENT_LOG_KEEP_MS);
         Ok(open.iter().map(|r| r.id).filter(|id| plan.relaunch.contains(id)).collect())
     }
 
@@ -725,15 +827,44 @@ impl SessionManager {
         }
         // opencode: its server's password, which the server and `attach` both read from the
         // environment (and which is redacted like a key), and the options as server configuration.
-        let server_password = (row.agent == AgentKind::Opencode).then(server_password);
+        let server_password = (row.agent == AgentKind::Opencode).then(random_token);
         if let Some(p) = &server_password {
             secrets.push((oc::PASSWORD_VAR.to_owned(), p.clone()));
             if let Some(config) = oc::config_content(spec, &options, opencode_provider.as_ref()) {
                 launch.additions.push((oc::CONFIG_VAR, config));
             }
         }
+        // Hooks: the agent posts its events to Chorus's listener, with a token only its environment
+        // holds (D36, D37).
+        let mut hook_args: Vec<String> = Vec::new();
+        let mut hook_token = None;
+        if matches!(row.agent, AgentKind::Claude | AgentKind::Codex) {
+            match self.hook_listener.get() {
+                Some(Ok(port)) => {
+                    let url = hk::hook_url(*port, row.id);
+                    let setup = match row.agent {
+                        AgentKind::Claude => self.write_claude_settings(row.id, &url).map(|p| vec!["--settings".to_owned(), p.display().to_string()]),
+                        _ => agents::hook_relay()
+                            .map(|relay| hk::codex_hook_args(&relay.display().to_string(), &url))
+                            .ok_or_else(|| "chorus-hook.exe isn't beside Chorus".to_owned()),
+                    };
+                    match setup {
+                        Ok(a) => {
+                            let token = random_token();
+                            secrets.push((hk::TOKEN_VAR.to_owned(), token.clone()));
+                            hook_token = Some(token);
+                            hook_args = a;
+                        }
+                        Err(e) => notes.push(format!("No events from {} this run ({e}), so its state isn't tracked.", row.agent.display_name())),
+                    }
+                }
+                Some(Err(e)) => notes.push(format!("No agent events this run: {e}.")),
+                None => notes.push("No agent events this run: the event listener isn't running.".into()),
+            }
+        }
         let (mut redact, unreadable) = vault::all_for_scrubbing(&self.store);
         redact.extend(secrets.iter().map(|(_, v)| v.clone().into_bytes()));
+        let history_redact = Arc::new(redact.clone());
         let additions: Vec<(&str, &str)> = launch.additions.iter().map(|(k, v)| (*k, v.as_str())).collect();
         let env = compose_child_env(&ChildEnvInput { parent: &parent, required: &[], additions: &additions, secrets: &secrets });
 
@@ -748,6 +879,7 @@ impl SessionManager {
             // The CLI's own arguments, a provider's, then the options, then the conversation, which
             // goes last because for Codex it is a subcommand.
             args.extend(route_args);
+            args.extend(hook_args);
             args.extend(spec.option_args(&options));
             let conversation = row.agent_session_id.as_deref();
             let exists = conversation.is_some_and(|id| agents::conversation_exists(row.agent, id, &parent));
@@ -824,6 +956,16 @@ impl SessionManager {
             capped,
             asked: options,
             observed: Mutex::new(None),
+            recorder: Mutex::new(Recorder::new(
+                row.id,
+                run_id,
+                if row.agent == AgentKind::Opencode { "server" } else { "hook" },
+                history_redact,
+                Arc::new(builtin_patterns()),
+            )),
+            hook_token,
+            last_output_ms: AtomicI64::new(crate::store::now_ms()),
+            no_signal_shown: AtomicBool::new(false),
         });
         *live.run.lock().expect("run lock") = Some(run.clone());
         if spec.resume.kind() == ResumeKind::Discovered && row.agent_session_id.is_none() {
@@ -971,6 +1113,7 @@ impl SessionManager {
                     match next {
                         Ok(chunk) => {
                             last_input = Instant::now();
+                            r.last_output_ms.store(crate::store::now_ms(), Ordering::Relaxed);
                             // ConPTY waits for this answer before it draws anything.
                             let (chunk, answer) = handshake.push(&chunk);
                             if answer {
@@ -1034,6 +1177,7 @@ impl SessionManager {
                 let cause = classify_exit(requested, m.quitting.load(Ordering::SeqCst), system_shutting_down());
                 let (end, state) = after_exit(cause);
                 let _ = rows::end_run(&m.store, run.id, end, Some(code));
+                run.recorder.lock().expect("recorder lock").run_ended(&m.store);
                 if state == Some(SessionState::Exited) {
                     let note = m.exit_note(live.id, code, run.started.elapsed()).unwrap_or_else(|| format!("Exited with code {code}."));
                     let _ = rows::set_state(&m.store, live.id, SessionState::Exited, Some(&note));

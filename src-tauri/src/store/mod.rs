@@ -4,6 +4,7 @@
 //! `chorus_core::migrate`). Typed queries for each area live in the submodules.
 
 pub mod credentials;
+pub mod history;
 pub mod profiles;
 pub mod providers;
 pub mod sessions;
@@ -21,6 +22,7 @@ const MIGRATION_FILES: &[(&str, &str)] = &[
     ("0002_agent_options.sql", include_str!("../../migrations/0002_agent_options.sql")),
     ("0003_providers.sql", include_str!("../../migrations/0003_providers.sql")),
     ("0004_launch.sql", include_str!("../../migrations/0004_launch.sql")),
+    ("0005_history.sql", include_str!("../../migrations/0005_history.sql")),
 ];
 
 pub struct Store {

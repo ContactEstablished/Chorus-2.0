@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["src-tauri", "crates/chorus-core"]
+members = ["src-tauri", "crates/chorus-core", "crates/chorus-hook"]
 
 [workspace.package]
 version = "0.1.0"
@@ -26,6 +26,9 @@ tauri-plugin-single-instance = "2"
 # opencode's loopback server, OpenRouter, gateways and Jev (ARCHITECTURE §10). TLS is Windows'
 # own (SChannel, through native-tls), so nothing is compiled from C.
 reqwest = { version = "0.13", default-features = false, features = ["json", "native-tls"] }
+# The loopback listener for agent hooks (ARCHITECTURE §10, P3). Tokio is already Tauri's runtime.
+axum = { version = "0.8", default-features = false, features = ["tokio", "http1"] }
+tokio = { version = "1", features = ["net"] }
 windows = { version = "0.62", features = [
   "Win32_Foundation",
   "Win32_Security",
