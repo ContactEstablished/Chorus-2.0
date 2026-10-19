@@ -5,8 +5,11 @@
 
 #![forbid(unsafe_code)]
 
+pub mod agent;
 pub mod batch;
 pub mod build;
+pub mod cli;
+pub mod codex;
 pub mod conpty;
 pub mod env;
 pub mod lock;
