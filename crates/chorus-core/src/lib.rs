@@ -8,4 +8,5 @@
 pub mod batch;
 pub mod build;
 pub mod env;
+pub mod scrub;
 pub mod shim;

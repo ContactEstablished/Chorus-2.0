@@ -30,7 +30,7 @@ onMounted(async () => {
 })
 onBeforeUnmount(() => unlistenExit?.())
 
-async function spawn(agent: AgentKind): Promise<SpawnResult> {
+async function spawn(agent: AgentKind, credential: { label: string; envVar: string } | null = null): Promise<SpawnResult> {
   const output = new Channel<ArrayBuffer>()
   output.onmessage = (buf) => {
     const bytes = new Uint8Array(buf)
@@ -41,7 +41,7 @@ async function spawn(agent: AgentKind): Promise<SpawnResult> {
     term.value?.write(bytes, () => pendingWrites--)
   }
   const { cols, rows } = term.value?.size() ?? { cols: 80, rows: 24 }
-  const res = await commands.ptySpawn({ agent, cols, rows }, output)
+  const res = await commands.ptySpawn({ agent, cols, rows, credential }, output)
   if (res.status === 'error') {
     status.value = `spawn failed: ${res.error}`
     throw new Error(res.error)
@@ -152,8 +152,22 @@ function setTermBox(width: string, height: string): void {
   termBox.value = { width, height }
 }
 
+async function addFakeKey(label: string) {
+  const res = await commands.spikeVaultAddFakeKey(label)
+  if (res.status === 'error') throw new Error(res.error)
+  return res.data
+}
+
+async function screenKeyFragment(label: string): Promise<number> {
+  const res = await commands.spikeVaultContains(label, term.value?.screenText() ?? '')
+  if (res.status === 'error') throw new Error(res.error)
+  return res.data
+}
+
 const api = {
   spawn,
+  addFakeKey,
+  screenKeyFragment,
   write,
   submit,
   resize,

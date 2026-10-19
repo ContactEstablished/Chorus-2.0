@@ -4,6 +4,7 @@ mod agents;
 mod app;
 mod ipc;
 mod sessions;
+mod vault;
 
 use tauri::Manager;
 

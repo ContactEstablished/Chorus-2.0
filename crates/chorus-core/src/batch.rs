@@ -13,6 +13,10 @@ pub struct BatchPolicy {
 /// Measured in S1: an 8 ms window keeps echo under one 60 Hz frame; 256 KiB caps message size.
 pub const PTY_BATCH: BatchPolicy = BatchPolicy { window_ms: 8, max_bytes: 256 * 1024 };
 
+/// How long the scrubber may hold back the possible start of a key once output goes quiet. A held
+/// tail is usually one or two bytes (a trailing 's' could start 'sk-'), released after this.
+pub const SCRUB_CARRY_RELEASE_MS: u64 = 30;
+
 impl BatchPolicy {
     /// `oldest_pending_ms` is how long the oldest unsent byte has waited.
     pub fn should_flush(&self, pending_bytes: usize, oldest_pending_ms: u64) -> bool {

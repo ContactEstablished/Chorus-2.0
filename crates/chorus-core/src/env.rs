@@ -53,6 +53,17 @@ pub fn compose_child_env(input: &ChildEnvInput<'_>) -> BTreeMap<String, String> 
     out
 }
 
+/// Whether `name` may carry a secret: an upper-case identifier of at most 64 characters that does not
+/// shadow a baseline or pinned variable.
+pub fn valid_secret_var(name: &str) -> bool {
+    let mut chars = name.chars();
+    let first_ok = chars.next().is_some_and(|c| c.is_ascii_uppercase() || c == '_');
+    first_ok
+        && name.len() <= 64
+        && chars.all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
+        && !BASELINE.iter().chain(PINNED.iter().map(|(k, _)| k)).any(|b| b.eq_ignore_ascii_case(name))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -88,6 +99,18 @@ mod tests {
         let env = compose_child_env(&ChildEnvInput { parent: &p, required: &["TERM"], additions: &[], secrets: &[] });
         assert_eq!(env.get("TERM").map(String::as_str), Some("xterm-256color"));
         assert_eq!(env.get("COLORTERM").map(String::as_str), Some("truecolor"));
+    }
+
+    #[test]
+    fn secret_variable_names_are_checked() {
+        assert!(valid_secret_var("OPENROUTER_API_KEY"));
+        assert!(!valid_secret_var("PATH"));
+        assert!(!valid_secret_var("Path"));
+        assert!(!valid_secret_var("TERM"));
+        assert!(!valid_secret_var("lower_case"));
+        assert!(!valid_secret_var("1ABC"));
+        assert!(!valid_secret_var(""));
+        assert!(!valid_secret_var(&"A".repeat(65)));
     }
 
     #[test]

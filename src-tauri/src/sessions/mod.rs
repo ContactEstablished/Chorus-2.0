@@ -14,8 +14,9 @@ use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use chorus_core::batch::PTY_BATCH;
-use chorus_core::env::{ChildEnvInput, compose_child_env};
+use chorus_core::batch::{PTY_BATCH, SCRUB_CARRY_RELEASE_MS};
+use chorus_core::env::{ChildEnvInput, compose_child_env, valid_secret_var};
+use chorus_core::scrub::{StreamScrubber, builtin_patterns};
 use portable_pty::{ChildKiller, CommandBuilder, MasterPty, PtySize, native_pty_system};
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -47,6 +48,15 @@ pub struct SpawnRequest {
     pub agent: AgentKind,
     pub cols: u16,
     pub rows: u16,
+    /// A vault key to inject into the child's environment, decrypted only now.
+    pub credential: Option<CredentialRef>,
+}
+
+#[derive(Debug, Clone, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct CredentialRef {
+    pub label: String,
+    pub env_var: String,
 }
 
 #[derive(Debug, Clone, Serialize, Type)]
@@ -87,6 +97,8 @@ pub struct SessionManager {
     next_id: AtomicU32,
     /// Agents run here during the spikes: inside 2.0's data folder, outside any repo.
     scratch_root: PathBuf,
+    /// DPAPI blobs by label. In memory for the S4 spike; SQLite in P1.
+    vault: Mutex<HashMap<String, Vec<u8>>>,
 }
 
 const MAX_WRITE_BYTES: usize = 1 << 20;
@@ -100,7 +112,14 @@ fn check_size(cols: u16, rows: u16) -> Result<PtySize, String> {
 
 impl SessionManager {
     pub fn new(scratch_root: PathBuf) -> Self {
-        Self { sessions: Mutex::new(HashMap::new()), next_id: AtomicU32::new(1), scratch_root }
+        Self { sessions: Mutex::new(HashMap::new()), next_id: AtomicU32::new(1), scratch_root, vault: Mutex::default() }
+    }
+
+    /// Decrypts a stored key for a launch. The plaintext lives only as long as the launch needs it.
+    fn decrypt(&self, label: &str) -> Result<Vec<u8>, String> {
+        let vault = self.vault.lock().expect("vault lock");
+        let sealed = vault.get(label).ok_or_else(|| format!("no key labelled {label:?}"))?;
+        crate::vault::unprotect(sealed).map_err(|e| format!("decrypting {label:?}: {e}"))
     }
 
     fn get(&self, id: u32) -> Result<Arc<Session>, String> {
@@ -118,7 +137,16 @@ impl SessionManager {
         let parent: Vec<(String, String)> = std::env::vars().collect();
         let launch = agents::resolve(req.agent, &parent, &state_dir)?;
         let additions: Vec<(&str, &str)> = launch.additions.iter().map(|(k, v)| (*k, v.as_str())).collect();
-        let env = compose_child_env(&ChildEnvInput { parent: &parent, required: &[], additions: &additions, secrets: &[] });
+        let mut secrets: Vec<(String, String)> = Vec::new();
+        if let Some(cred) = &req.credential {
+            if !valid_secret_var(&cred.env_var) {
+                return Err(format!("{:?} is not a usable variable name for a key", cred.env_var));
+            }
+            let key = String::from_utf8(self.decrypt(&cred.label)?).map_err(|_| "stored key is not text")?;
+            secrets.push((cred.env_var.clone(), key));
+        }
+        let env = compose_child_env(&ChildEnvInput { parent: &parent, required: &[], additions: &additions, secrets: &secrets });
+        let scrubber = StreamScrubber::new(secrets.iter().map(|(_, v)| v.clone().into_bytes()), builtin_patterns());
 
         let mut cmd = CommandBuilder::new(&launch.program);
         cmd.args(&launch.args);
@@ -147,7 +175,7 @@ impl SessionManager {
         });
         self.sessions.lock().expect("sessions lock").insert(id, session.clone());
 
-        stream_output(reader, output);
+        stream_output(reader, scrubber, output);
 
         // Exit watcher: report the exit, then close the pseudoconsole so the reader sees EOF
         // (ConPTY keeps the pipe open until it is closed).
@@ -177,8 +205,9 @@ impl SessionManager {
     }
 }
 
-/// Reader thread → batching thread → channel. The reader never blocks on the webview.
-fn stream_output(mut reader: Box<dyn Read + Send>, output: Channel<PtyBytes>) {
+/// Reader thread → scrubber → batching thread → channel. Nothing reaches the view unscrubbed, and
+/// the reader never blocks on the webview.
+fn stream_output(mut reader: Box<dyn Read + Send>, mut scrubber: StreamScrubber, output: Channel<PtyBytes>) {
     let (tx, rx) = mpsc::channel::<Vec<u8>>();
     std::thread::spawn(move || {
         let mut buf = vec![0u8; 64 * 1024];
@@ -196,20 +225,37 @@ fn stream_output(mut reader: Box<dyn Read + Send>, output: Channel<PtyBytes>) {
     std::thread::spawn(move || {
         let mut pending: Vec<u8> = Vec::new();
         let mut oldest: Option<Instant> = None;
+        let mut last_input = Instant::now();
         loop {
             let waited = oldest.map_or(0, |t| t.elapsed().as_millis() as u64);
-            let next = if pending.is_empty() {
-                rx.recv().map_err(|_| RecvTimeoutError::Disconnected)
-            } else {
+            let next = if !pending.is_empty() {
                 rx.recv_timeout(Duration::from_millis(PTY_BATCH.wait_ms(waited)))
+            } else if scrubber.pending() > 0 {
+                rx.recv_timeout(Duration::from_millis(SCRUB_CARRY_RELEASE_MS))
+            } else {
+                rx.recv().map_err(|_| RecvTimeoutError::Disconnected)
             };
             match next {
                 Ok(chunk) => {
-                    oldest.get_or_insert_with(Instant::now);
-                    pending.extend_from_slice(&chunk);
+                    last_input = Instant::now();
+                    let safe = scrubber.push(&chunk);
+                    if !safe.is_empty() {
+                        oldest.get_or_insert_with(Instant::now);
+                        pending.extend_from_slice(&safe);
+                    }
                 }
-                Err(RecvTimeoutError::Timeout) => {}
+                Err(RecvTimeoutError::Timeout) => {
+                    // Output went quiet with a possible key start held back: release it.
+                    if scrubber.pending() > 0 && last_input.elapsed() >= Duration::from_millis(SCRUB_CARRY_RELEASE_MS) {
+                        let safe = scrubber.flush();
+                        if !safe.is_empty() {
+                            oldest.get_or_insert_with(Instant::now);
+                            pending.extend_from_slice(&safe);
+                        }
+                    }
+                }
                 Err(RecvTimeoutError::Disconnected) => {
+                    pending.extend(scrubber.flush());
                     if !pending.is_empty() {
                         let _ = output.send(PtyBytes(std::mem::take(&mut pending)));
                     }
@@ -261,4 +307,60 @@ pub fn pty_resize(state: State<'_, SessionManager>, session_id: u32, cols: u16, 
 #[specta::specta]
 pub fn pty_close(state: State<'_, SessionManager>, session_id: u32) -> Result<CloseReport, String> {
     state.close(session_id)
+}
+
+// ── Spike S4 helpers. The key never crosses IPC: only its length, fingerprint and yes/no answers.
+
+#[derive(Debug, Clone, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct FakeKeyInfo {
+    pub label: String,
+    pub key_len: u32,
+    pub blob_len: u32,
+    /// First 16 hex digits of the key's SHA-256.
+    pub fingerprint: String,
+    /// Where the sealed blob was written, so it can be inspected at rest.
+    pub blob_path: String,
+}
+
+/// Generates a random, OpenRouter-shaped fake key, seals it with DPAPI and stores the blob.
+#[tauri::command]
+#[specta::specta]
+pub fn spike_vault_add_fake_key(state: State<'_, SessionManager>, label: String) -> Result<FakeKeyInfo, String> {
+    if label.is_empty() || label.len() > 64 || !label.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+        return Err("label must be 1-64 letters, digits or dashes".into());
+    }
+    let hex: String = crate::vault::random_bytes(32).iter().map(|b| format!("{b:02x}")).collect();
+    let key = format!("sk-or-v1-{hex}");
+    let sealed = crate::vault::protect(key.as_bytes()).map_err(|e| e.to_string())?;
+    let dir = state.scratch_root.join("vault");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let blob_path = dir.join(format!("{label}.bin"));
+    std::fs::write(&blob_path, &sealed).map_err(|e| e.to_string())?;
+    let info = FakeKeyInfo {
+        label: label.clone(),
+        key_len: key.len() as u32,
+        blob_len: sealed.len() as u32,
+        fingerprint: crate::vault::fingerprint(key.as_bytes()),
+        blob_path: blob_path.display().to_string(),
+    };
+    state.vault.lock().expect("vault lock").insert(label, sealed);
+    Ok(info)
+}
+
+/// The length of the longest piece of the stored key that appears in `text` (0 to the key's
+/// length). Catches partial leaks; returns a number, never the key.
+#[tauri::command]
+#[specta::specta]
+pub fn spike_vault_contains(state: State<'_, SessionManager>, label: String, text: String) -> Result<u32, String> {
+    if text.len() > MAX_WRITE_BYTES {
+        return Err("text too large".into());
+    }
+    let key = state.decrypt(&label)?;
+    let hay = text.as_bytes();
+    let longest = (1..=key.len())
+        .rev()
+        .find(|&n| key.windows(n).any(|piece| hay.windows(n).any(|w| w == piece)))
+        .unwrap_or(0);
+    Ok(longest as u32)
 }

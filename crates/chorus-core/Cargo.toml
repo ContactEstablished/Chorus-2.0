@@ -11,6 +11,7 @@ publish.workspace = true
 # (ARCHITECTURE §2, D11).
 [dependencies]
 serde = { workspace = true }
+serde_json = { workspace = true }
 
 [lints]
 workspace = true

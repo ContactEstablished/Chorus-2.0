@@ -21,6 +21,8 @@ pub fn builder() -> Builder<tauri::Wry> {
             sessions::pty_write,
             sessions::pty_resize,
             sessions::pty_close,
+            sessions::spike_vault_add_fake_key,
+            sessions::spike_vault_contains,
         ])
         .events(collect_events![app::BackendPulse, sessions::PtyExited])
 }

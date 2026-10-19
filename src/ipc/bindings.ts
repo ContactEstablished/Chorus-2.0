@@ -12,6 +12,13 @@ export const commands = {
 	ptyWrite: (sessionId: number, data: string) => typedError<null, string>(__TAURI_INVOKE("pty_write", { sessionId, data })),
 	ptyResize: (sessionId: number, cols: number, rows: number) => typedError<null, string>(__TAURI_INVOKE("pty_resize", { sessionId, cols, rows })),
 	ptyClose: (sessionId: number) => typedError<CloseReport, string>(__TAURI_INVOKE("pty_close", { sessionId })),
+	/**  Generates a random, OpenRouter-shaped fake key, seals it with DPAPI and stores the blob. */
+	spikeVaultAddFakeKey: (label: string) => typedError<FakeKeyInfo, string>(__TAURI_INVOKE("spike_vault_add_fake_key", { label })),
+	/**
+	 *  The length of the longest piece of the stored key that appears in `text` (0 to the key's
+	 *  length). Catches partial leaks; returns a number, never the key.
+	 */
+	spikeVaultContains: (label: string, text: string) => typedError<number, string>(__TAURI_INVOKE("spike_vault_contains", { label, text })),
 };
 
 /** Events */
@@ -47,6 +54,21 @@ export type CloseReport = {
 	jobPids: number[],
 };
 
+export type CredentialRef = {
+	label: string,
+	envVar: string,
+};
+
+export type FakeKeyInfo = {
+	label: string,
+	keyLen: number,
+	blobLen: number,
+	/**  First 16 hex digits of the key's SHA-256. */
+	fingerprint: string,
+	/**  Where the sealed blob was written, so it can be inspected at rest. */
+	blobPath: string,
+};
+
 /**  Dev or release, as the front end sees it. */
 export type Flavor = "dev" | "release";
 
@@ -59,6 +81,8 @@ export type SpawnRequest = {
 	agent: AgentKind,
 	cols: number,
 	rows: number,
+	/**  A vault key to inject into the child's environment, decrypted only now. */
+	credential: CredentialRef | null,
 };
 
 export type SpawnResult = {
