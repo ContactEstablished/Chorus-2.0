@@ -9,6 +9,7 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebglAddon } from '@xterm/addon-webgl'
 import '@xterm/xterm/css/xterm.css'
+import { TERMINAL_OPTIONS } from './terminal'
 
 const emit = defineEmits<{
   input: [data: string]
@@ -22,13 +23,7 @@ let fit: FitAddon | null = null
 let observer: ResizeObserver | null = null
 
 onMounted(() => {
-  term = new Terminal({
-    fontFamily: "'JetBrains Mono', 'Cascadia Mono', Consolas, monospace",
-    fontSize: 13,
-    scrollback: 10_000,
-    allowProposedApi: false,
-    theme: { background: '#0a0f16', foreground: '#edf2f8', cursor: '#1ec8f0', selectionBackground: '#1ec8f055' },
-  })
+  term = new Terminal({ ...TERMINAL_OPTIONS, theme: { ...TERMINAL_OPTIONS.theme } })
   fit = new FitAddon()
   term.loadAddon(fit)
   term.open(host.value!)

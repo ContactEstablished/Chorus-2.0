@@ -82,11 +82,10 @@ impl Mirror {
         }
     }
 
-    /// Rewrites the file for a new run: the old output kept in scrollback above `boundary`, on a
-    /// screen of `rows` rows.
-    pub fn begin_new_run(&mut self, boundary: &str, rows: u16) {
+    /// Rewrites the file for a new run: the old output kept in scrollback above `boundary`.
+    pub fn begin_new_run(&mut self, boundary: &str) {
         let old = self.read_raw().unwrap_or_default();
-        let prepared = prepare_history(&old, self.max, boundary, rows);
+        let prepared = prepare_history(&old, self.max, boundary);
         self.replace(&prepared, "preparing history");
     }
 
@@ -168,7 +167,7 @@ mod tests {
         let dir = temp_dir("run");
         let mut m = Mirror::with_cap(&dir, 1, 4096);
         m.append(b"\x1b[?1049hold screen");
-        m.begin_new_run("-- Restarted --", 24);
+        m.begin_new_run("-- Restarted --");
         m.append(b"new output");
         let all = String::from_utf8(m.read_all()).unwrap();
         let old = all.find("old screen").unwrap();

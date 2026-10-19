@@ -102,6 +102,10 @@ composer/actions ─► ActionRouter ─► structured channel if available, els
   before sending to views. A view that attaches is sent the mirror, then live output, under one lock,
   so nothing is lost or repeated. Views come and go; the session runs headless meanwhile. Chorus answers
   ConPTY's opening cursor request itself (LESSONS L32).
+- **History across runs:** when a run starts in a session that has output (Restart, relaunch), the old
+  screen and a dividing line are pushed into scrollback and the run gets a blank screen. Anything Chorus
+  writes inside the viewport would be erased by ConPTY. Views must set xterm.js's
+  `scrollOnEraseInDisplay` (`src/components/terminal.ts`, LESSONS L34).
 - **Close spares windows:** Close ends the run's job but leaves processes with visible windows, and what
   runs under them, alive: a browser the agent opened survives (LESSONS L22). A locked session refuses
   Close and Restart.

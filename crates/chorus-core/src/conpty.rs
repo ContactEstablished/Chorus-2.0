@@ -7,19 +7,17 @@
 //! and takes the request out of the stream; otherwise an attached xterm.js would answer a second
 //! time and the extra reply would arrive as typed input.
 //!
-//! Chorus knows where the cursor is because every run starts on a screen it prepared: the top-left
-//! of a fresh terminal for a new session, or the row under the dividing line that
-//! `scrollback::restart_screen` draws for a Restart or a relaunch.
+//! Chorus knows where the cursor is because every run starts at the top-left of a blank screen: a
+//! fresh terminal for a new session, or the screen `scrollback::restart_screen` leaves for a
+//! Restart or a relaunch.
 
 pub const CURSOR_REQUEST: &[u8] = b"\x1b[6n";
 
+/// The reply: the cursor is at row 1, column 1.
+pub const CURSOR_REPORT: &[u8] = b"\x1b[1;1R";
+
 /// How far into a run's output to look for the request before giving up on it.
 const LOOK_LIMIT: usize = 4096;
-
-/// The reply to the request: the cursor is at `row`, column 1 (both 1-based).
-pub fn cursor_report(row: u16) -> Vec<u8> {
-    format!("\x1b[{row};1R").into_bytes()
-}
 
 /// Finds and removes the opening cursor request in a run's output.
 #[derive(Debug, Default)]
@@ -94,10 +92,5 @@ mod tests {
         let mut h = Handshake::new();
         assert_eq!(h.push(b"ab\x1b"), (b"ab".to_vec(), false));
         assert_eq!(h.flush(), b"\x1b".to_vec());
-    }
-
-    #[test]
-    fn the_reply_names_the_row() {
-        assert_eq!(cursor_report(2), b"\x1b[2;1R".to_vec());
     }
 }

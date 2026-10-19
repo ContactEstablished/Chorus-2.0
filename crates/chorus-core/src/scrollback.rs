@@ -61,10 +61,6 @@ pub fn strip_alt_screen(bytes: &[u8]) -> Vec<u8> {
     out
 }
 
-/// Lines scrolled to move a screen into scrollback, at least: a replayed screen must leave the
-/// viewport before the next run draws, and the view may have more rows than the PTY had.
-const MIN_LIFT_LINES: usize = 60;
-
 /// Resets the scroll region and attributes and parks the cursor on the last row: a replayed screen
 /// was painted with absolute cursor moves and can leave the cursor anywhere.
 const PARK: &[u8] = b"\x1b[r\x1b[m\x1b[999;1H";
@@ -79,30 +75,30 @@ pub fn boundary(text: &str) -> Vec<u8> {
     out
 }
 
-/// The row a run starts on after [`restart_screen`]: the one under the dividing line.
-pub const ROW_AFTER_RESTART_SCREEN: u16 = 2;
-
-/// What a view shows when a new run starts in a session that already has output: leave the
-/// alternate screen (a full-screen TUI's last screen would otherwise be thrown away), lift the
-/// whole screen into scrollback, clear the viewport, and put the dividing line on the top row. The
-/// cursor ends at row [`ROW_AFTER_RESTART_SCREEN`], column 1, which is what Chorus tells ConPTY
-/// (`conpty::Handshake`).
-pub fn restart_screen(boundary_text: &str, rows: u16) -> Vec<u8> {
-    let lift = usize::from(rows).max(MIN_LIFT_LINES);
-    let mut out = b"\x1b[?1049l".to_vec();
-    out.extend_from_slice(PARK);
-    out.extend_from_slice("\r\n".repeat(lift).as_bytes());
-    out.extend_from_slice(b"\x1b[H\x1b[2J\x1b[2m");
+/// What a view shows when a new run starts in a session that already has output. It leaves the
+/// alternate screen (a full-screen TUI's last screen would otherwise be thrown away), pushes the
+/// screen into scrollback, writes the dividing line and pushes that up too, so the run starts at
+/// the top-left of a blank screen, where `conpty::CURSOR_REPORT` tells ConPTY the cursor is.
+///
+/// The dividing line can't stay on screen: ConPTY doesn't know it is there, and erases it the
+/// next time it repaints the top row (seen with Claude Code, LESSONS L34).
+///
+/// The pushes are Erase in Display (`ESC[2J`). Chorus's views set xterm.js's
+/// `scrollOnEraseInDisplay`, which makes it move the rows up to the last one with text into
+/// scrollback, so the old screen's trailing blank rows aren't kept (`src/components/terminal.ts`).
+pub fn restart_screen(boundary_text: &str) -> Vec<u8> {
+    // The scroll region is reset first: only a full-screen scroll feeds the scrollback.
+    let mut out = b"\x1b[?1049l\x1b[r\x1b[m\x1b[2J\x1b[H\x1b[2m".to_vec();
     out.extend_from_slice(boundary_text.as_bytes());
-    out.extend_from_slice(b"\x1b[0m\r\n");
+    out.extend_from_slice(b"\x1b[0m\x1b[2J\x1b[H");
     out
 }
 
 /// The mirror rewritten for a new run: the capped old bytes on the normal screen, then
 /// [`restart_screen`]. New output is appended after this, so a replay ends in the same state as a
 /// view that watched it live.
-pub fn prepare_history(old: &[u8], max: usize, boundary_text: &str, rows: u16) -> Vec<u8> {
-    let screen = restart_screen(boundary_text, rows);
+pub fn prepare_history(old: &[u8], max: usize, boundary_text: &str) -> Vec<u8> {
+    let screen = restart_screen(boundary_text);
     let mut out = strip_alt_screen(cap_tail(old, max.saturating_sub(screen.len())));
     out.extend_from_slice(&screen);
     out
@@ -146,21 +142,21 @@ mod tests {
     fn history_fits_the_cap_and_ends_on_a_cleared_screen_with_the_boundary() {
         let old = [b"\x1b[?1049h".as_slice(), &b"line\n".repeat(50_000)].concat();
         let max = 64 * 1024;
-        let prepared = prepare_history(&old, max, "── Restarted ──", 30);
+        let prepared = prepare_history(&old, max, "── Restarted ──");
         assert!(prepared.len() <= max, "{} > {max}", prepared.len());
         assert!(!prepared.windows(8).any(|w| w == b"\x1b[?1049h"));
-        assert!(prepared.ends_with(&restart_screen("── Restarted ──", 30)));
+        assert!(prepared.ends_with(&restart_screen("── Restarted ──")));
         // Nothing to keep: just the screen.
-        assert_eq!(prepare_history(b"", max, "x", 30), restart_screen("x", 30));
+        assert_eq!(prepare_history(b"", max, "x"), restart_screen("x"));
     }
 
     #[test]
-    fn the_restart_screen_lifts_at_least_the_whole_viewport() {
-        let small = String::from_utf8(restart_screen("x", 10)).unwrap();
-        assert_eq!(small.matches("\r\n").count(), MIN_LIFT_LINES + 1);
-        let tall = String::from_utf8(restart_screen("x", 200)).unwrap();
-        assert_eq!(tall.matches("\r\n").count(), 201);
-        assert!(tall.contains("\x1b[H\x1b[2J\x1b[2mx\x1b[0m\r\n"));
+    fn the_restart_screen_pushes_the_screen_then_the_line_into_scrollback() {
+        // The same bytes are replayed into xterm.js by src/components/terminal.test.ts.
+        assert_eq!(
+            restart_screen("── Restarted ──"),
+            "\x1b[?1049l\x1b[r\x1b[m\x1b[2J\x1b[H\x1b[2m── Restarted ──\x1b[0m\x1b[2J\x1b[H".as_bytes()
+        );
     }
 
     #[test]

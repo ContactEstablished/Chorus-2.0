@@ -156,12 +156,22 @@ pseudoconsole with `PSEUDOCONSOLE_INHERIT_CURSOR`. The first output is a cursor-
 session with no view attached, which includes every session relaunched at boot, would hang with the
 request as its only output. Chorus answers the request itself and removes it from the stream
 (`chorus_core::conpty`); otherwise xterm.js answers a second time and its reply arrives as typed
-input. The answer has to be true, so every run starts on a screen Chorus prepared: the top-left of a
-new terminal, or the row under the dividing line after a Restart or relaunch.
+input. The answer has to be true, so every run starts at the top-left of a blank screen: a new
+terminal, or the one left after a Restart or relaunch (L34).
 
 **L33 — Claude Code 2.1.300's folder-trust prompt defaults to "No, exit" (P1).** In a folder it hasn't
 seen, Enter declines, and the session exits with code 1. P2's Claude adapter should recognise that
 prompt and say what it is, not just show "exited (1)".
+
+**L34 — ConPTY erases on-screen text it didn't draw (P1).** ConPTY keeps its own copy of the screen
+and repaints rows from it. Text that Chorus adds to a session's stream inside the viewport is erased
+the next time ConPTY repaints that row. The first version put the dividing line on row 1 after a
+relaunch, and Claude Code 2.1.300 caused a repaint from the top-left (`ESC[H ESC[K`) that erased it.
+That version also scrolled 60 newlines to move the old screen into scrollback, which left 45 to 60
+blank lines after each run's output, so restored history looked lost. Now the restart screen pushes
+the old screen, and then the dividing line, into scrollback with Erase in Display, and the run starts
+on a blank screen. xterm.js 6 keeps erased rows only with `scrollOnEraseInDisplay`, and then only up to
+the last row with text.
 
 ## Money and models
 

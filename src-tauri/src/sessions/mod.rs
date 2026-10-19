@@ -25,9 +25,9 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 use chorus_core::batch::{PTY_BATCH, SCRUB_CARRY_RELEASE_MS};
-use chorus_core::conpty::{Handshake, cursor_report};
+use chorus_core::conpty::{CURSOR_REPORT, Handshake};
 use chorus_core::env::{ChildEnvInput, compose_child_env, valid_secret_var};
-use chorus_core::scrollback::{ROW_AFTER_RESTART_SCREEN, boundary, exit_line, restart_screen};
+use chorus_core::scrollback::{boundary, exit_line, restart_screen};
 use chorus_core::scrub::{StreamScrubber, builtin_patterns};
 use chorus_core::session::{ExitCause, SessionState, after_exit, classify_exit, clean_name, plan_boot};
 use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system};
@@ -222,13 +222,13 @@ impl Hub {
     }
 
     /// Marks the start of a new run: rewrites the mirror's history and shows attached views the
-    /// same cleared screen with the dividing line on top.
-    fn new_run(&self, boundary_text: &str, rows: u16) {
+    /// same screen: the old one and the dividing line pushed into scrollback.
+    fn new_run(&self, boundary_text: &str) {
         let mut g = self.inner.lock().expect("hub lock");
         if let Some(m) = g.mirror.as_mut() {
-            m.begin_new_run(boundary_text, rows);
+            m.begin_new_run(boundary_text);
         }
-        let shown = restart_screen(boundary_text, rows);
+        let shown = restart_screen(boundary_text);
         g.views.retain(|(_, sink)| sink(&shown));
     }
 
@@ -249,8 +249,6 @@ impl Hub {
 struct Run {
     id: u32,
     pid: u32,
-    /// The screen row the cursor is on when the run starts, for ConPTY's opening handshake.
-    start_row: u16,
     writer: Mutex<Box<dyn Write + Send>>,
     master: Mutex<Option<Box<dyn MasterPty + Send>>>,
     job: Job,
@@ -408,8 +406,8 @@ impl SessionManager {
         }
         for row in open.iter().filter(|r| plan.relaunch.contains(&r.id)) {
             let live = self.live_for(row.id);
-            live.hub.new_run(BOUNDARY_RELAUNCHED, row.rows);
-            if let Err(e) = self.start_run(&live, true) {
+            live.hub.new_run(BOUNDARY_RELAUNCHED);
+            if let Err(e) = self.start_run(&live) {
                 self.record_failure(&live, &e);
             }
         }
@@ -440,7 +438,7 @@ impl SessionManager {
             },
         )?;
         let live = self.live_for(id);
-        if let Err(e) = self.start_run(&live, false) {
+        if let Err(e) = self.start_run(&live) {
             self.record_failure(&live, &e);
         }
         let summary = self.summary(id)?;
@@ -456,9 +454,9 @@ impl SessionManager {
         self.notify_id(live.id);
     }
 
-    /// Launches a run. `after_restart_screen` says the views were just shown `restart_screen`, which
-    /// decides where ConPTY is told the cursor is.
-    fn start_run(self: &Arc<Self>, live: &Arc<Live>, after_restart_screen: bool) -> Result<(), String> {
+    /// Launches a run. It starts at the top-left of a blank screen: a new session's, or the one
+    /// `restart_screen` left.
+    fn start_run(self: &Arc<Self>, live: &Arc<Live>) -> Result<(), String> {
         let row = self.row(live.id)?;
         let size = check_size(row.cols, row.rows)?;
         if !Path::new(&row.cwd).is_dir() {
@@ -515,7 +513,6 @@ impl SessionManager {
         let run = Arc::new(Run {
             id: run_id,
             pid,
-            start_row: if after_restart_screen { ROW_AFTER_RESTART_SCREEN } else { 1 },
             writer: Mutex::new(writer),
             master: Mutex::new(Some(pair.master)),
             job,
@@ -581,7 +578,7 @@ impl SessionManager {
                             let (chunk, answer) = handshake.push(&chunk);
                             if answer {
                                 let mut w = r.writer.lock().expect("writer lock");
-                                let _ = w.write_all(&cursor_report(r.start_row)).and_then(|()| w.flush());
+                                let _ = w.write_all(CURSOR_REPORT).and_then(|()| w.flush());
                             }
                             let safe = scrubber.push(&chunk);
                             if !safe.is_empty() {
@@ -719,9 +716,9 @@ impl SessionManager {
         self.refuse_if_locked(&row, "restart")?;
         let live = self.live_for(id);
         self.end_run_for(&live, ExitCause::UserRestart);
-        live.hub.new_run(BOUNDARY_RESTARTED, row.rows);
+        live.hub.new_run(BOUNDARY_RESTARTED);
         rows::set_state(&self.store, id, SessionState::Running, None)?;
-        if let Err(e) = self.start_run(&live, true) {
+        if let Err(e) = self.start_run(&live) {
             self.record_failure(&live, &e);
         }
         let summary = self.summary(id)?;
