@@ -1,7 +1,7 @@
 # Chorus 2.0 — Open questions
 
 Questions that still need Matthew. When one is answered, it moves to [DECISIONS.md](DECISIONS.md) and
-gets a row in the resolved table below.
+gets a row in the resolved table below. Each has a default that stands if he doesn't object.
 
 ## Still open
 
@@ -9,6 +9,21 @@ gets a row in the resolved table below.
 purpose. If it is an LLM gateway, it could also serve the narrator or day summaries. *Until Matthew
 says: it stays a stored key in Settings → Providers, with a connection test, and nothing else uses it.*
 Blocks: nothing before P2.
+
+**Q18 — How should Chorus read Grok's state?** (From spike S5.) Grok 1.0.62 has Claude-style hooks
+but loads them only from global files (`~/.grok/hooks/*.json`, `~/.claude/settings.json`, its
+`config.toml`), not per launch; structured approval exists only over ACP (`grok agent stdio`), which
+replaces the TUI. Options: (a) PTY only, plus Grok's OSC 7501 working/blocked/done status; (b) a
+Chorus-owned `~/.grok/hooks/chorus.json` whose URL is `${CHORUS_HOOK_URL}`, which Grok skips when that
+variable is empty, so it only fires for Chorus-launched sessions; (c) drive Grok over ACP and give up its
+TUI. None could be tested: Grok isn't signed in on this machine. *Default: (a) for P2; revisit (b) once
+Grok is signed in.* Blocks: P3.
+
+**Q19 — Codex plans.** (From spike S5.) In TUI mode Codex 0.162.1 exposes no plan: `update_plan` isn't
+written to the rollout and has no hook. Codex's experimental `app-server` does emit `turn/plan/updated`,
+and its TUI can attach with `--remote`, the same shape as opencode's serve + attach. *Default: P3 tries
+app-server + `--remote` behind a capability flag; until then Friendly says "plan not available for
+Codex".* Blocks: P6.
 
 ## Resolved 2026-10-18
 

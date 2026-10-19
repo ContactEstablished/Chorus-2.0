@@ -95,6 +95,30 @@ everything down.
 any `-c`, `--enable`, `--disable` or `--search` on the command line forces "embedded mode". The
 update-check switch Chorus needs (L7) is a `-c`, so Chorus-launched Codex always runs embedded.
 
+**L24 — Claude Code 2.1.300 hooks, as measured (S5).** HTTP hooks work for every event except
+`SessionStart`. A held `PermissionRequest` hook races Claude's own dialog, which appears ~0.3 s later;
+the first answer wins, and a hook timeout leaves the dialog up. A hook *deny* with a message lets the
+turn continue; the user picking "No" in the dialog interrupts it and sends **no `Stop`**.
+`UserPromptSubmit` fires when a prompt is *queued*, before the previous turn's `Stop`. The todo/task
+tools are off unless `CLAUDE_CODE_ENABLE_TODO_TOOLS=1` (undocumented). On Windows the shell tool is
+`PowerShell`, not `Bash`, so permission rules keyed on `Bash` miss it.
+
+**L25 — Codex 0.162.1 hooks need `PATHEXT`, and its rollouts omit plans and approvals (S5).** Without
+`PATHEXT` in the environment every hook fails with "hook exited with code 1". Hooks can be injected
+with `-c hooks.<Event>=…` plus `--dangerously-bypass-hook-trust` (both force embedded mode).
+`codex queue` reaches an embedded session. `update_plan` and approval requests are never written to the
+rollout.
+
+**L26 — An agent CLI launched without its update switch updates itself (S1, S5).** Chorus's first
+Grok launch replaced Grok 1.0.5 with 1.0.62 (L7 again) and cleared an expired sign-in. Grok 1.0.62
+documents `GROK_DISABLE_AUTOUPDATER=1` and `--no-auto-update`. This machine's Grok config also sets
+`permission_mode = "always-approve"`, so Chorus must always pass `--permission-mode` explicitly.
+
+**L27 — opencode serve is a complete control plane, and its free provider can stall (S5).** Events,
+questions, permissions, todos and queued prompts all work over the server API with the TUI attached.
+Basic auth comes from `OPENCODE_SERVER_PASSWORD` (environment). The keyless free model once took five
+minutes to time out a request before opencode retried; a stall is not a failure signal by itself.
+
 ## Money and models
 
 **L16 — Read-then-revoke under-reports OpenRouter spend.** Reading a capped key's usage right after the

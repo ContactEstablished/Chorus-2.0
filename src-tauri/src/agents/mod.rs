@@ -29,9 +29,22 @@ pub struct Launch {
     pub additions: Vec<(&'static str, String)>,
 }
 
+/// Run opencode's TUI against a server Chorus started (`opencode attach`), as ARCHITECTURE §5 plans.
+#[derive(Debug, Clone, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct OpencodeAttach {
+    pub port: u16,
+    pub session_id: String,
+}
+
 /// Resolves `kind` against the parent's `PATH`. `scratch` is a per-session folder for agents whose
 /// state must be isolated (opencode, LESSONS L5).
-pub fn resolve(kind: AgentKind, parent_env: &[(String, String)], scratch: &Path) -> Result<Launch, String> {
+pub fn resolve(
+    kind: AgentKind,
+    parent_env: &[(String, String)],
+    scratch: &Path,
+    attach: Option<&OpencodeAttach>,
+) -> Result<Launch, String> {
     let path = env_value(parent_env, "PATH").unwrap_or_default();
     match kind {
         AgentKind::Shell => {
@@ -45,9 +58,9 @@ pub fn resolve(kind: AgentKind, parent_env: &[(String, String)], scratch: &Path)
         }),
         AgentKind::Grok => Ok(Launch {
             program: find_on_path(&path, "grok.exe").ok_or("grok.exe not found on PATH")?,
-            args: vec![],
-            // Undocumented in grok 1.0.5's README (which documents `[cli] auto_update`), but the
-            // name is in the binary. Unverified: no update was available to suppress (S1).
+            // Both switches are documented in grok 1.0.62. Without them the first S1 launch updated
+            // Grok from 1.0.5 to 1.0.62 (LESSONS L26).
+            args: vec!["--no-auto-update".into()],
             additions: vec![("GROK_DISABLE_AUTOUPDATER", "1".into())],
         }),
         AgentKind::Codex => {
@@ -57,7 +70,16 @@ pub fn resolve(kind: AgentKind, parent_env: &[(String, String)], scratch: &Path)
             Ok(Launch { program, args, additions: vec![] })
         }
         AgentKind::Opencode => {
-            let (program, args) = through_shim(&path, "opencode.cmd")?;
+            let (program, mut args) = through_shim(&path, "opencode.cmd")?;
+            if let Some(a) = attach {
+                if a.session_id.is_empty()
+                    || a.session_id.len() > 64
+                    || !a.session_id.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+                {
+                    return Err("invalid opencode session id".into());
+                }
+                args.extend(["attach".into(), format!("http://127.0.0.1:{}", a.port), "--session".into(), a.session_id.clone()]);
+            }
             let state = scratch.join("xdg-state");
             let data = scratch.join("xdg-data");
             Ok(Launch {

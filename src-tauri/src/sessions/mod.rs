@@ -50,6 +50,14 @@ pub struct SpawnRequest {
     pub rows: u16,
     /// A vault key to inject into the child's environment, decrypted only now.
     pub credential: Option<CredentialRef>,
+    /// opencode only: attach the TUI to a running server (spike S5).
+    pub opencode_attach: Option<agents::OpencodeAttach>,
+    /// Extra arguments appended for spike S5 (for example `--settings <file>`). Removed with the
+    /// harness; P2 adapters build arguments from declared options instead.
+    pub spike_args: Option<Vec<String>>,
+    /// Extra non-secret environment for spike S5 (for example a feature switch). Names are checked
+    /// like secret variables; values are not scrubbed, so never pass a key here.
+    pub spike_env: Option<Vec<(String, String)>>,
 }
 
 #[derive(Debug, Clone, Deserialize, Type)]
@@ -135,8 +143,14 @@ impl SessionManager {
         std::fs::create_dir_all(&state_dir).map_err(|e| e.to_string())?;
 
         let parent: Vec<(String, String)> = std::env::vars().collect();
-        let launch = agents::resolve(req.agent, &parent, &state_dir)?;
-        let additions: Vec<(&str, &str)> = launch.additions.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        let launch = agents::resolve(req.agent, &parent, &state_dir, req.opencode_attach.as_ref())?;
+        let mut additions: Vec<(&str, &str)> = launch.additions.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        for (k, v) in req.spike_env.iter().flatten() {
+            if !valid_secret_var(k) || v.len() > 256 {
+                return Err(format!("{k:?} cannot be set"));
+            }
+            additions.push((k.as_str(), v.as_str()));
+        }
         let mut secrets: Vec<(String, String)> = Vec::new();
         if let Some(cred) = &req.credential {
             if !valid_secret_var(&cred.env_var) {
@@ -148,8 +162,15 @@ impl SessionManager {
         let env = compose_child_env(&ChildEnvInput { parent: &parent, required: &[], additions: &additions, secrets: &secrets });
         let scrubber = StreamScrubber::new(secrets.iter().map(|(_, v)| v.clone().into_bytes()), builtin_patterns());
 
+        let mut args = launch.args.clone();
+        if let Some(extra) = &req.spike_args {
+            if extra.len() > 16 || extra.iter().any(|a| a.len() > 1024 || a.contains('\0')) {
+                return Err("too many or too long extra arguments".into());
+            }
+            args.extend(extra.iter().cloned());
+        }
         let mut cmd = CommandBuilder::new(&launch.program);
-        cmd.args(&launch.args);
+        cmd.args(&args);
         cmd.cwd(&cwd);
         cmd.env_clear();
         for (k, v) in &env {
@@ -190,7 +211,7 @@ impl SessionManager {
             session_id: id,
             pid,
             program: launch.program.display().to_string(),
-            args: launch.args,
+            args,
             cwd: cwd.display().to_string(),
             env_names: env.keys().cloned().collect(),
         })
@@ -343,6 +364,30 @@ pub fn spike_vault_add_fake_key(state: State<'_, SessionManager>, label: String)
         blob_len: sealed.len() as u32,
         fingerprint: crate::vault::fingerprint(key.as_bytes()),
         blob_path: blob_path.display().to_string(),
+    };
+    state.vault.lock().expect("vault lock").insert(label, sealed);
+    Ok(info)
+}
+
+/// Seals a secret that a spike harness left in a file under the scratch folder (for example the
+/// opencode server password), so it can be injected like any vault key. The value never crosses IPC.
+#[tauri::command]
+#[specta::specta]
+pub fn spike_vault_import_file(state: State<'_, SessionManager>, label: String, file_name: String) -> Result<FakeKeyInfo, String> {
+    let ok_name =
+        !file_name.is_empty() && file_name.split(['/', '\\']).all(|p| !p.is_empty() && p != ".." && !p.contains(':'));
+    if !ok_name || label.is_empty() || label.len() > 64 {
+        return Err("bad label or file name".into());
+    }
+    let path = state.scratch_root.join(&file_name);
+    let value = std::fs::read_to_string(&path).map_err(|e| e.to_string())?.trim().to_owned();
+    let sealed = crate::vault::protect(value.as_bytes()).map_err(|e| e.to_string())?;
+    let info = FakeKeyInfo {
+        label: label.clone(),
+        key_len: value.len() as u32,
+        blob_len: sealed.len() as u32,
+        fingerprint: crate::vault::fingerprint(value.as_bytes()),
+        blob_path: String::new(),
     };
     state.vault.lock().expect("vault lock").insert(label, sealed);
     Ok(info)

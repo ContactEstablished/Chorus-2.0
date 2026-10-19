@@ -11,7 +11,7 @@ app (D22), deferring 1, and adopting the "Harness" mockups in `_assets/` as the 
 | [design/DESIGN.md](design/DESIGN.md) | Screens, tokens (Glacier and Dusk), status vocabulary, the splash brief |
 | [DECISIONS.md](DECISIONS.md) | Decision log for 2.0 (fresh numbering, D1…) |
 | [LESSONS.md](LESSONS.md) | What Chorus 1 learned the hard way about agent CLIs, Windows and measurement |
-| [OPEN-QUESTIONS.md](OPEN-QUESTIONS.md) | The one question still open, and where each resolved question was decided |
+| [OPEN-QUESTIONS.md](OPEN-QUESTIONS.md) | Questions still open (each with a default), and where each resolved question was decided |
 
 ---
 
@@ -108,10 +108,12 @@ saved launch profiles (the seed of Bots in P8).
 example, opencode's effort read back through its server, LESSONS L5), not only passed on the command line.
 
 ### P3 — Agent events and durable history
-A localhost listener for agent hooks (per-session capability token, delivered by file and never in argv);
-transcript and rollout tailers; the opencode server bridge; normalisation into one `AgentEvent` model and
+A localhost listener for agent hooks (per-session capability token, delivered only through the child's
+environment: Claude Code HTTP hooks with the token in a header, D36; the `chorus-hook` relay binary for
+Codex, D37); transcript and rollout tailers; the opencode server bridge; normalisation into one `AgentEvent` model and
 the session state machine (Working, Needs your answer, Awaiting approval, Ready, Completed, Failed —
-ARCHITECTURE §6). Turn capture. **Durable history:** every prompt from every source (typed in the
+ARCHITECTURE §6). Turn capture, pairing prompts with turn ends first-in-first-out and closing
+interrupted turns without a `Stop` (S5). **Durable history:** every prompt from every source (typed in the
 terminal and seen through hooks, the composer, Telegram, automations; dictated text arrives as typed or
 pasted text) written to SQLite and scrubbed first; per-turn final messages, tool-call summaries, and
 questions and approvals with their answers (D7). Activity lights fed by events, with PTY silence as the

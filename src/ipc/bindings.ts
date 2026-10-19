@@ -19,6 +19,11 @@ export const commands = {
 	 *  length). Catches partial leaks; returns a number, never the key.
 	 */
 	spikeVaultContains: (label: string, text: string) => typedError<number, string>(__TAURI_INVOKE("spike_vault_contains", { label, text })),
+	/**
+	 *  Seals a secret that a spike harness left in a file under the scratch folder (for example the
+	 *  opencode server password), so it can be injected like any vault key. The value never crosses IPC.
+	 */
+	spikeVaultImportFile: (label: string, fileName: string) => typedError<FakeKeyInfo, string>(__TAURI_INVOKE("spike_vault_import_file", { label, fileName })),
 };
 
 /** Events */
@@ -72,6 +77,12 @@ export type FakeKeyInfo = {
 /**  Dev or release, as the front end sees it. */
 export type Flavor = "dev" | "release";
 
+/**  Run opencode's TUI against a server Chorus started (`opencode attach`), as ARCHITECTURE §5 plans. */
+export type OpencodeAttach = {
+	port: number,
+	sessionId: string,
+};
+
 export type PtyExited = {
 	sessionId: number,
 	exitCode: number,
@@ -83,6 +94,18 @@ export type SpawnRequest = {
 	rows: number,
 	/**  A vault key to inject into the child's environment, decrypted only now. */
 	credential: CredentialRef | null,
+	/**  opencode only: attach the TUI to a running server (spike S5). */
+	opencodeAttach: OpencodeAttach | null,
+	/**
+	 *  Extra arguments appended for spike S5 (for example `--settings <file>`). Removed with the
+	 *  harness; P2 adapters build arguments from declared options instead.
+	 */
+	spikeArgs: string[] | null,
+	/**
+	 *  Extra non-secret environment for spike S5 (for example a feature switch). Names are checked
+	 *  like secret variables; values are not scrubbed, so never pass a key here.
+	 */
+	spikeEnv: ([string, string])[] | null,
 };
 
 export type SpawnResult = {

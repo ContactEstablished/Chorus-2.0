@@ -9,7 +9,7 @@ and written up in `S<n>.md`; raw evidence stays in `_verify/`, which is never co
 | S2 | ~~Push-to-talk hotkey~~ | Removed (D22) |
 | S3 | Fleet strip: on top, never activated, draggable | pending |
 | S4 | DPAPI vault and env-only key injection | [Pass](S4.md): key reaches the child (length and hash match), never in argv, redacted on screen even when split |
-| S5 | Agent channels per CLI | pending |
+| S5 | Agent channels per CLI | [Pass, Grok changed approach](S5.md): Claude Code, Codex and opencode approvals, questions and queueing answered from Chorus; Grok unverifiable (not signed in) |
 | S6 | ~~Local transcription~~ | Removed (D22) |
 | S7 | 3D splash | pending |
 | S8 | Per-user installer beside Chorus 1 | pending |
@@ -51,4 +51,4 @@ stack requires; it adds nothing beyond that.
 | Claude Code | 2.1.300 | native `claude.exe` in `~/.local/bin` |
 | Codex | codex-cli 0.162.1 | npm shim `codex.cmd` → `node …\@openai\codex\bin\codex.js` |
 | opencode | 1.18.34 | npm shim `opencode.cmd` |
-| Grok | 1.0.5 (stable) | native `grok.exe` in `~/.grok/bin` |
+| Grok | 1.0.5 at the start of S1; **1.0.62** after it updated itself on first launch (S5 finding 1) | native `grok.exe` in `~/.grok/bin` |

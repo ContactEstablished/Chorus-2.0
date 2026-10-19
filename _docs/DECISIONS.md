@@ -5,7 +5,7 @@ Add new decisions at the bottom; never renumber. Status is **Decided** (Matthew 
 (recommended, awaiting his yes) or **Superseded** (replaced by the decision named).
 
 On 2026-10-18 Matthew kept the name Chorus, accepted every default in OPEN-QUESTIONS.md, and moved voice
-out of Chorus into a separate dictation app (D22–D35). Only the JEV AI key's purpose is still open.
+out of Chorus into a separate dictation app (D22–D35). What is still open is in OPEN-QUESTIONS.md.
 
 | # | Date | Decision | Status | Why |
 |---|---|---|---|---|
@@ -44,3 +44,5 @@ out of Chorus into a separate dictation app (D22–D35). Only the JEV AI key's p
 | D33 | 2026-10-18 | A **one-time, read-only import of projects** (path, name, colour, order) from Chorus 1's database, as a small P4 task. It never writes to Chorus 1's data (was Q15) | Decided | Saves setup; keys are still re-entered (D5) |
 | D34 | 2026-10-18 | **Automations start with schedules**; GitHub triggers come later by polling with `gh`, since there is no server to receive webhooks (was Q16) | Decided | Local-first app with no public endpoint |
 | D35 | 2026-10-18 | Claude Code's built-in `--remote-control` mode and Codex's experimental one are **noted, and decided at P13** alongside the Telegram relay (was Q17) | Decided | Not needed before P13 |
+| D36 | 2026-10-18 | **Claude Code hooks use its native HTTP hook type.** The per-session token goes in an `Authorization` header filled from the child's environment (`allowedEnvVars`), so the settings file, argv and URL never hold it. `SessionStart` is not available over HTTP and Chorus doesn't need it | Proposed | Spike S5 proved it on 2.1.300; it removes Chorus 1's token-in-URL-in-settings-file and the curl `-o NUL` workaround |
+| D37 | 2026-10-18 | **Codex hooks are injected with `-c hooks.<Event>=…` and `--dangerously-bypass-hook-trust`, running a small `chorus-hook` relay executable** built in this workspace (reads the token from its environment, posts stdin to the listener, prints a decision only when there is one). It uses the standard library only | Proposed | Codex 0.162.1 has command hooks only and runs them under `cmd`, which would put an expanded `%TOKEN%` into argv; S5 proved the relay pattern with a Node script. Codex already runs embedded because of `-c` (LESSONS L23), and `codex queue` still reaches it |

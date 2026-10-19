@@ -16,7 +16,13 @@ pub const BASELINE: &[&str] = &[
     "HOMEDRIVE",
     "HOMEPATH",
     "USERPROFILE",
-    // Additions from 2.0's S1 pass go here, each with what broke without it.
+    // S5, 2026-10-18: without it a Claude Code session created a literal `%SystemDrive%\ProgramData\
+    // Microsoft\Windows\Caches` folder in its working directory (a known-folder path left
+    // unexpanded). Chorus 1's repo root has the same stray folder.
+    "SystemDrive",
+    // S5, 2026-10-18: without it every Codex 0.162.1 hook failed ("hook exited with code 1"); a
+    // bisection over 15 standard variables showed PATHEXT alone restores them.
+    "PATHEXT",
 ];
 
 /// Imposed on every child, whatever the parent had. TERM=dumb inherited from a host shell once put

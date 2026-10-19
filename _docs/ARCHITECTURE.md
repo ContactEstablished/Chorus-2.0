@@ -103,26 +103,32 @@ composer/actions ─► ActionRouter ─► structured channel if available, els
 The Friendly view, the state machine and durable history all depend on knowing what an agent is doing.
 Each adapter declares which channels it has; the UI degrades visibly where one is missing.
 
-| | Claude Code 2.1.300 | Codex 0.162.1 | opencode 1.18.34 | Grok 1.0.5 | Shell |
+Verified in spike S5 against the installed versions ([spikes/S5.md](spikes/S5.md) has the evidence and
+the caveats). *(docs)* marks what could only be read, not run.
+
+| | Claude Code 2.1.300 | Codex 0.162.1 | opencode 1.18.34 | Grok 1.0.62 | Shell |
 |---|---|---|---|---|---|
-| Lifecycle events | **Hooks** via `--settings <file>` (verified in Chorus 1; 2.1.300 adds `PermissionRequest`, `StopFailure`, `PostToolUseFailure`) | **Hooks**: `codex features list` shows `hooks` stable and on (event names: *spike S5*) | **Server events**: run the TUI as `opencode attach <url>` against a `opencode serve` that 2.0 starts (*spike*) | none known (*spike*) | none |
-| Timeline content | transcript JSONL (+ `subagents/` files, LESSONS L6) | rollout JSONL (LESSONS L8 for shapes) | server API: sessions, messages, parts | PTY only | PTY only |
-| Plan / todo | `TodoWrite` tool calls in the transcript | `update_plan` calls in the rollout (*spike*) | todo parts via API (*spike*) | — | — |
-| Questions | `AskUserQuestion` tool (structured options) | final message classification | API (*spike*) | classification | — |
-| Answer an approval | candidate: `PermissionRequest` hook held open until you decide in 2.0, returning the decision (*spike*); fallback: keystrokes | hook decision if supported (*spike*); fallback: keystrokes | server permission reply (*spike*) | keystrokes | — |
-| Queue a message for the next pause | 2.0 holds it and writes it after `Stop` | `codex queue --thread <id> --message <text>` (verified present) | `prompt_async` (*spike*) | hold until PTY-silent | hold |
-| Resume | `--resume <id>` | session id lookup (Chorus 1 adapter) | via server session | resume flag (Chorus 1) | — |
+| Lifecycle events | **HTTP hooks** from `--settings <file>`, token in a header from the child's env (D36). Not `SessionStart` (unsupported over HTTP) | **Command hooks** via `-c hooks.<Event>=…` + `--dangerously-bypass-hook-trust`, through the `chorus-hook` relay (D37); needs `PATHEXT` | **Server events** (SSE `/event`) from an `opencode serve` 2.0 starts; TUI as `opencode attach <url> --session <id>` | Hooks only from global files; ACP over stdio *(docs)*; open question Q18 | none |
+| Turn start / end | `UserPromptSubmit` … `Stop`, paired first-in-first-out (a queued prompt fires `UserPromptSubmit` early); an interrupted turn sends no `Stop` | `UserPromptSubmit` … `Stop`; rollout `task_started` / `task_complete` | `session.status` busy … `session.idle` | *(docs)* | — |
+| Timeline content | transcript JSONL (+ `subagents/` files, LESSONS L6); `Stop.last_assistant_message` | rollout JSONL (LESSONS L8); `Stop.last_assistant_message` | server API: sessions, messages, parts | PTY only for now | PTY only |
+| Plan / todo | `TaskCreate`/`TaskUpdate` + `TaskCreated`/`TaskCompleted` hooks, only with `CLAUDE_CODE_ENABLE_TODO_TOOLS=1` (undocumented) | **none in TUI mode** (not in rollout, no hook); app-server `turn/plan/updated` *(docs)* | `todo.updated` events, `GET /session/{id}/todo` | — | — |
+| Questions | `AskUserQuestion` at `PreToolUse`, **answered** with `updatedInput.answers` | final message classification | `question.asked`, answered via `POST /question/{id}/reply` | classification | — |
+| Answer an approval | **held `PermissionRequest` hook** returns allow / deny + message; Claude's own dialog stays live in parallel and the first answer wins | **`PermissionRequest` hook** prints allow / deny + message | `POST /permission/{id}/reply` once / always / reject + message | keystrokes (ACP only for structured *(docs)*) | — |
+| Queue a message for the next pause | the TUI queues typed prompts natively; 2.0 can also hold and write after `Stop` | `codex queue --thread <id> --message <text>` (works on embedded sessions) | `prompt_async` (queued while busy) | hold until PTY-silent | hold |
+| Resume | `--resume <id>` | `codex resume <id>` | via server session (`attach --session`) | `--resume <id>` | — |
 
 **Fallbacks are explicit.** If a CLI update breaks a parser, the adapter reports "Friendly view
 unavailable for codex 0.170: unrecognised rollout format" in the session header, and Raw keeps working.
 Parsers are tested against **recorded fixtures per CLI version**, and an unknown version is *tried* and
 reported, never silently disabled (LESSONS L7).
 
-**Hook transport** (from Chorus 1, LESSONS L1–L2): a per-session settings file under 2.0's app data holds
-hook commands that POST the payload to `127.0.0.1:<port>/hook/<session-token>`. Fire-and-forget hooks
-must discard the response (`curl -o NUL`), because hook stdout is a decision channel. Only the approval
-hook deliberately returns a body. The listener is bound to loopback, and tokens are random per session and
-revoked on Close.
+**Hook transport** (S5, D36, D37; Chorus 1 background in LESSONS L1–L2): the listener is bound to
+loopback and hooks POST to `127.0.0.1:<port>/hook/<session-id>`. The per-session token is random,
+revoked on Close, and travels **only in the child's environment**: Claude Code's HTTP hooks send it as
+`Authorization: Bearer $CHORUS_HOOK_TOKEN` (`allowedEnvVars`), and the `chorus-hook` relay used for
+Codex reads it from its own environment. The settings file and argv never hold it. A hook reply is a
+decision channel, so fire-and-forget events get an empty 2xx body; only approval and question hooks
+return one.
 
 ## 6. Session states
 
