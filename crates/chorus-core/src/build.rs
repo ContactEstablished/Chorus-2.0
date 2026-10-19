@@ -6,7 +6,8 @@
 
 use serde::Serialize;
 
-/// The release identifier. The dev build appends [`DEV_SUFFIX`].
+/// The release identifier. The dev build appends [`DEV_SUFFIX`], and may add a further
+/// `.<label>` (lowercase letters and digits) for a second dev instance with its own data and lock.
 pub const RELEASE_IDENTIFIER: &str = "com.contactestablished.chorus2";
 pub const DEV_SUFFIX: &str = ".dev";
 
@@ -46,11 +47,12 @@ impl std::error::Error for FlavorError {}
 
 /// Classifies `identifier` and checks it against how the binary was compiled.
 pub fn flavor_for(identifier: &str, debug_build: bool) -> Result<BuildFlavor, FlavorError> {
-    let flavor = match identifier.strip_suffix(DEV_SUFFIX) {
-        Some(RELEASE_IDENTIFIER) => BuildFlavor::Dev,
-        Some(_) => return Err(FlavorError::UnknownIdentifier(identifier.to_owned())),
-        None if identifier == RELEASE_IDENTIFIER => BuildFlavor::Release,
-        None => return Err(FlavorError::UnknownIdentifier(identifier.to_owned())),
+    let flavor = if identifier == RELEASE_IDENTIFIER {
+        BuildFlavor::Release
+    } else if is_dev_identifier(identifier) {
+        BuildFlavor::Dev
+    } else {
+        return Err(FlavorError::UnknownIdentifier(identifier.to_owned()));
     };
     let expected = if debug_build { BuildFlavor::Dev } else { BuildFlavor::Release };
     if flavor == expected {
@@ -60,6 +62,17 @@ pub fn flavor_for(identifier: &str, debug_build: bool) -> Result<BuildFlavor, Fl
     }
 }
 
+/// `<release>.dev` or `<release>.dev.<label>`.
+fn is_dev_identifier(identifier: &str) -> bool {
+    let Some(rest) = identifier.strip_prefix(RELEASE_IDENTIFIER).and_then(|r| r.strip_prefix(DEV_SUFFIX)) else {
+        return false;
+    };
+    rest.is_empty()
+        || rest
+            .strip_prefix('.')
+            .is_some_and(|l| !l.is_empty() && l.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -67,6 +80,18 @@ mod tests {
     #[test]
     fn dev_identifier_in_a_debug_build_is_dev() {
         assert_eq!(flavor_for("com.contactestablished.chorus2.dev", true), Ok(BuildFlavor::Dev));
+    }
+
+    #[test]
+    fn a_labelled_dev_identifier_is_a_second_dev_instance() {
+        assert_eq!(flavor_for("com.contactestablished.chorus2.dev.p2test", true), Ok(BuildFlavor::Dev));
+        assert!(matches!(
+            flavor_for("com.contactestablished.chorus2.dev.p2test", false),
+            Err(FlavorError::Mismatch { debug_build: false, .. })
+        ));
+        for bad in ["com.contactestablished.chorus2.dev.", "com.contactestablished.chorus2.dev.P2", "com.contactestablished.chorus2.dev.a.b", "com.contactestablished.chorus2.devx", "com.contactestablished.chorus2.p2test"] {
+            assert!(matches!(flavor_for(bad, true), Err(FlavorError::UnknownIdentifier(_))), "{bad}");
+        }
     }
 
     #[test]
