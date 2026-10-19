@@ -1,7 +1,7 @@
 # Chorus 2.0 — Architecture
 
-Status: **proposed** (2026-10-18). Sections marked *spike* are not settled until the matching P0 spike
-in [PLAN.md](PLAN.md) reports.
+Status: **agreed** (2026-10-18; D9–D14, D30). Sections marked *spike* are not settled until the matching
+P0 spike in [PLAN.md](PLAN.md) reports.
 
 ## 1. Shape of the system
 
@@ -15,10 +15,10 @@ in [PLAN.md](PLAN.md) reports.
 │  │  Friendly / Raw      │   events +   │      ▼                ▼              │ │
 │  ├──────────────────────┤   channels   │ AgentEvents ◄── hook listener (HTTP) │ │
 │  │ splash window        │              │      │      ◄── transcript tailers   │ │
-│  │ mic overlay          │              │      │      ◄── agent server bridges │ │
-│  │ fleet switcher strip │              │      ▼                               │ │
+│  │ fleet switcher strip │              │      │      ◄── agent server bridges │ │
+│  │  (never activated)   │              │      ▼                               │ │
 │  └──────────────────────┘              │ Store (SQLite) · Vault (DPAPI)       │ │
-│                                        │ Git · Narrator · Council · Voice     │ │
+│                                        │ Git · Narrator · Council             │ │
 │                                        └──────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────────────────────────┘
         │ PTY                                     ▲ hooks POST / files / HTTP+SSE
@@ -29,9 +29,12 @@ in [PLAN.md](PLAN.md) reports.
 - **One Tauri process** hosts every window and the whole back end. Agents are child processes attached to
   ConPTY, grouped in a Windows Job Object so Close (or a crash of 2.0) never leaves orphans.
 - **Sessions belong to the back end.** A window attaches to a `session_id` and can come and go freely.
-- **Windows:** `main` (frameless, custom title bar), `splash` (short-lived), `overlay` (mic, always on top,
-  never focused), `fleet` (status strip, always on top, never focused). Each window gets only the Tauri
-  capabilities it needs (Tauri 2's per-window permission files).
+- **Windows:** `main` (frameless, custom title bar), `splash` (short-lived), `fleet` (status strip, always
+  on top, never activated, so an external dictation app keeps focus: D23, spike S3). Each window gets only
+  the Tauri capabilities it needs (Tauri 2's per-window permission files).
+- **Dictation compatibility (D23):** voice lives in a separate app (D22). Chorus never steals focus, the
+  composer and the Raw terminal accept inserted or pasted text, and nothing Chorus receives is
+  auto-submitted.
 
 ## 2. Repo layout
 
@@ -46,7 +49,7 @@ Chorus-2.0/
 │  └─ styles/tokens.css    design tokens for both themes (see design/DESIGN.md)
 ├─ src-tauri/              the app crate: Tauri setup, commands, IO (PTY, SQLite, files, HTTP)
 │  ├─ src/
-│  │  ├─ sessions/  agents/  events/  store/  vault/  git/  narrator/  voice/  council/ …
+│  │  ├─ sessions/  agents/  events/  store/  vault/  git/  narrator/  council/ …
 │  │  └─ main.rs / lib.rs
 │  ├─ capabilities/        per-window permissions
 │  └─ migrations/          numbered, forward-only SQL
@@ -64,7 +67,7 @@ fixtures. `src-tauri` does IO and wiring only. The compiler enforces it: `chorus
 ## 3. IPC
 
 - **Commands** (UI → back end) are `#[tauri::command]` functions taking and returning serde types.
-  TypeScript bindings are **generated** from the Rust types (proposed: `tauri-specta`), so a renamed field
+  TypeScript bindings are **generated** from the Rust types with `tauri-specta` (D12), so a renamed field
   is a compile error on both sides.
 - **Validation lives at the Rust boundary.** Serde rejects malformed shapes; commands then check
   semantics (ids exist, paths are inside the project, lengths are bounded). No validation library in the
@@ -174,11 +177,14 @@ Rule: anything written to `prompts`, `messages`, `tool_calls` or `asks` passes t
 At each turn end, a small model reads the last prompt, the final message, the plan, tool-call summaries and
 the diff stat (all scrubbed), and returns JSON: `now`, `blocker`, `next`, `is_question`, and up to four
 `actions` (`kind`, `title`, `what`, `sends`, `eta`). One call per turn end, cost recorded against the
-session, provider and key chosen in Settings (OPEN-QUESTIONS Q7). Done or dismissed actions are fed back
-in, so they are not suggested again. With no narrator configured, Friendly shows a generic Continue and
-Review step, and a note saying why.
+session. The model is a cheap OpenRouter model chosen in Settings; the narrator is on by default and can
+be switched off per project (D28). Done or dismissed actions are fed back in, so they are not suggested
+again. With no narrator configured, Friendly shows a generic Continue and Review step, and a note saying
+why.
 
-## 10. Proposed dependencies (pending approval — OPEN-QUESTIONS Q9)
+## 10. Dependencies (approved 2026-10-18, D30)
+
+Anything not on this list needs Matthew's approval first (CLAUDE.md).
 
 | Purpose | Crate / package | Why this one |
 |---|---|---|
@@ -191,12 +197,11 @@ Review step, and a note saying why.
 | Windows APIs | `windows` | DPAPI, Job Objects, `GetLastInputInfo`, foreground window |
 | Hook listener and HTTP client | `axum` (loopback server), `reqwest` (OpenRouter, Telegram) | Standard pair on tokio |
 | Errors and logs | `thiserror`, `anyhow`, `tracing` | Standard; logs pass the scrubber |
-| Tauri plugins | `global-shortcut`, `single-instance`, `dialog`, `shell`, `opener` (later `updater`) | Official |
+| Tauri plugins | `single-instance`, `dialog`, `shell`, `opener` (later `updater`) | Official |
 | Front end | `vue` 3.5, `pinia`, `vite`, `typescript`, `vue-tsc`, `vitest` | Chosen stack |
 | Terminal | `@xterm/xterm` 6 + `addon-fit`, `addon-webgl`, `addon-search`, `addon-unicode11` | Same as Chorus 1; search covers scrollback search |
 | Splash | `three` | 3D splash (alternative: hand-written WebGL, if you'd rather not add it) |
 | Fonts | Bricolage Grotesque, Instrument Sans, JetBrains Mono, bundled locally (OFL) | The mockup's type; no network at runtime |
-| Voice | `whisper-cli.exe` downloaded on first use, not linked | Proven in Chorus 1; avoids building whisper.cpp from source |
 
 ## 11. Port map (Chorus 1 → 2.0)
 
@@ -218,7 +223,6 @@ Port the behaviour and the tests; the shape will differ. Paths are relative to t
 | `git::worktrees` | `src/main/services/worktrees.ts`, `git.ts` |
 | `providers` | `modelCatalog*.ts`, `openrouterKeys.ts`, `src/main/routing/*` |
 | `council` | `councilCore.ts`, `councilDocketCore.ts`, `councilService.ts`, `councilMembers.ts` |
-| `voice` | `voice*.ts`, `whisper*.ts`, `hotkey*.ts`, `voiceOverlay.ts` |
 | `measure` | `attention*.ts`, `attributionCore.ts`, `subscriptionMeter.ts`, `engineLedger*.ts`, `dayReport*.ts` |
 | `chorus-core::projects` | `projectLifecycleCore.ts`, `src/shared/projectColors.ts` |
 | `fleet` | `fleetRegistry*.ts`, `src/shared/fleetRoster.ts` |
@@ -226,3 +230,6 @@ Port the behaviour and the tests; the shape will differ. Paths are relative to t
 Not ported (discarded): `team*`, `memoryService.ts`, `neo4jClient.ts`, `codeIndexCore.ts`,
 `symbolExtractorCore.ts`, `graphSchemaCore.ts`, `provenanceCore.ts`, `contextUsage*.ts`, `remote*`,
 `kimi.ts`, `apiSession.ts`, `notifications.ts` (OS toasts).
+
+Not ported (moved to the separate dictation app, D22): `voice*.ts`, `whisper*.ts`, `hotkey*.ts`,
+`voiceOverlay.ts`.

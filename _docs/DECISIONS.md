@@ -1,29 +1,46 @@
 # Chorus 2.0 — Decisions
 
 Fresh numbering for 2.0. Chorus 1's roadmap decisions (D1–D17x) are referred to as "Chorus 1 D<n>".
-Add new decisions at the bottom; never renumber. Status is **Decided** (Matthew agreed) or **Proposed**
-(recommended, awaiting his yes).
+Add new decisions at the bottom; never renumber. Status is **Decided** (Matthew agreed), **Proposed**
+(recommended, awaiting his yes) or **Superseded** (replaced by the decision named).
+
+On 2026-10-18 Matthew kept the name Chorus, accepted every default in OPEN-QUESTIONS.md, and moved voice
+out of Chorus into a separate dictation app (D22–D35). Only the JEV AI key's purpose is still open.
 
 | # | Date | Decision | Status | Why |
 |---|---|---|---|---|
-| D1 | 2026-10-18 | Rebuild Chorus from scratch as **Chorus 2.0** in a new repo, keeping 77 of 92 features and dropping 14 (see SCOPE.md) | Decided | Shed features that never worked (Team sessions, memory graph, remote hosts…) instead of carrying their weight |
+| D1 | 2026-10-18 | Rebuild Chorus from scratch as **Chorus 2.0** in a new repo, keeping 77 of 92 features and dropping 14 (see SCOPE.md; 73 kept once D22 moved voice out) | Decided | Shed features that never worked (Team sessions, memory graph, remote hosts…) instead of carrying their weight |
 | D2 | 2026-10-18 | **Tauri with a web UI** (Rust back end, WebView2 front end), not Electron and not a native Rust UI | Decided | Keeps xterm.js and web design freedom; Rust back end; smaller and faster than Electron |
 | D3 | 2026-10-18 | **Vue 3 + TypeScript + Vite + Pinia** for the front end | Decided | Existing patterns and design skill carry over |
-| D4 | 2026-10-18 | Pin **Tauri 2.x** (CLI 2.12 at time of writing), not the 3.0 alpha | Proposed | Stable plugin ecosystem; revisit when 3.0 is stable |
+| D4 | 2026-10-18 | Pin **Tauri 2.x** (CLI 2.12 at time of writing), not the 3.0 alpha | Decided | Stable plugin ecosystem; revisit when 3.0 is stable |
 | D5 | 2026-10-18 | **Re-enter API keys** in 2.0; no migration of Chorus 1's encrypted blobs | Decided | Chorus 1 keys are wrapped in Electron's OSCrypt key; migrating is fiddly for a handful of keys |
 | D6 | 2026-10-18 | Session controls are **Restart and Close only** | Decided | Matthew: restart, relaunch, kill and close overlapped |
-| D7 | 2026-10-18 | **Every prompt is written durably to SQLite** (WAL, `synchronous=FULL`), scrubbed first, from every source | Decided (responses scope open, Q6) | Chorus 1's prompt history didn't always survive a reboot or crash |
+| D7 | 2026-10-18 | **Every prompt is written durably to SQLite** (WAL, `synchronous=FULL`), scrubbed first, from every source. Of responses, each turn keeps the agent's **final message**, the **tool-call list** (tool, target, outcome; not raw output) and any **question or approval with its answer**. Full transcripts stay in each agent's own files, and 2.0 records their paths (was Q6) | Decided | Chorus 1's prompt history didn't always survive a reboot or crash; this gives a complete, searchable history without duplicating megabytes of tool output |
 | D8 | 2026-10-18 | The startup splash becomes a **3D, few-second** piece | Decided | Matthew's triage note |
-| D9 | 2026-10-18 | The **Harness mockups** are the UI direction: Overview board, Friendly/Raw session view, Next steps, Bots, Automations, Documents, Notes | Proposed (Q1) | Matthew added them to the new repo's `_assets/` |
-| D10 | 2026-10-18 | Agent state comes from **structured channels** (hooks, transcripts, agent servers); PTY silence is only a liveness extender | Proposed | Screen-scraping fails silently with each CLI update; Chorus 1 measured these channels and found them reliable |
-| D11 | 2026-10-18 | Business logic lives in a **`chorus-core` crate** with no IO and no Tauri | Proposed | Carries Chorus 1's `*Core.ts` rule, now enforced by the compiler |
-| D12 | 2026-10-18 | **Typed bindings are generated** from Rust types; validation happens at the Rust boundary | Proposed | Removes Zod and the "object could not be cloned" trap; renames break the build, not the runtime |
-| D13 | 2026-10-18 | Agents run inside a **Windows Job Object** | Proposed | Close and crashes never leave orphaned agent processes |
-| D14 | 2026-10-18 | **Dev and release builds use different app identifiers** and data directories, and the status bar shows which database is live | Proposed | Chorus 1 ended up with five databases and dev and installed copies colliding |
+| D9 | 2026-10-18 | The **Harness mockups** are the UI direction: Overview board, Friendly/Raw session view, Next steps, Bots, Automations, Documents, Notes. Nothing else is pending (was Q1) | Decided | Matthew added them to the new repo's `_assets/` |
+| D10 | 2026-10-18 | Agent state comes from **structured channels** (hooks, transcripts, agent servers); PTY silence is only a liveness extender | Decided | Screen-scraping fails silently with each CLI update; Chorus 1 measured these channels and found them reliable |
+| D11 | 2026-10-18 | Business logic lives in a **`chorus-core` crate** with no IO and no Tauri | Decided | Carries Chorus 1's `*Core.ts` rule, now enforced by the compiler |
+| D12 | 2026-10-18 | **Typed bindings are generated** from Rust types (`specta` + `tauri-specta`); validation happens at the Rust boundary | Decided | Removes Zod and the "object could not be cloned" trap; renames break the build, not the runtime |
+| D13 | 2026-10-18 | Agents run inside a **Windows Job Object** | Decided | Close and crashes never leave orphaned agent processes |
+| D14 | 2026-10-18 | **Dev and release builds use different app identifiers** and data directories, and the status bar shows which database is live | Decided | Chorus 1 ended up with five databases and dev and installed copies colliding |
 | D15 | 2026-10-18 | **Notifications are in-app only** (centre, tray badge, fleet strip) | Decided | OS exit toasts were discarded; toasts are disabled on this machine |
 | D16 | 2026-10-18 | **Telegram is the only remote access** | Decided | Remote hosts was discarded |
-| D17 | 2026-10-18 | **Notes replace project memory**: plain project-tagged notes injected into agent instructions | Proposed (Q12) | The Neo4j graph measured zero agent writes |
-| D18 | 2026-10-18 | **Mission Control becomes the Overview board**; forecasts wait until turn data is proven complete | Proposed (Q10) | Chorus 1 recorded 5 of 172 dispatches as finished |
-| D19 | 2026-10-18 | **Fail visible**: any degraded feature (unknown CLI version, missing channel, no narrator key) says so on screen | Proposed | Chorus 1's costliest bugs were silent version gates and silently dropped options |
-| D20 | 2026-10-18 | Local transcription shells out to a **downloaded `whisper-cli.exe`**, as in Chorus 1, rather than linking whisper.cpp | Proposed | Proven on this machine; avoids a native C++ build in the Rust toolchain |
-| D21 | 2026-10-18 | Windows only for v1 | Proposed (Q14) | ConPTY, DPAPI, Job Objects and the tray badge are Windows-specific; Tauri keeps macOS possible later |
+| D17 | 2026-10-18 | **Notes replace project memory**: plain project-tagged (or global) notes injected into agent instructions at launch; no graph (was Q12) | Decided | The Neo4j graph measured zero agent writes |
+| D18 | 2026-10-18 | **Mission Control becomes the Overview board**; cost and attention appear in session facts and a Usage screen; forecasts wait until turn capture is proven ≥95% complete (was Q10) | Decided | Chorus 1 recorded 5 of 172 dispatches as finished |
+| D19 | 2026-10-18 | **Fail visible**: any degraded feature (unknown CLI version, missing channel, no narrator key) says so on screen | Decided | Chorus 1's costliest bugs were silent version gates and silently dropped options |
+| D20 | 2026-10-18 | Local transcription shells out to a **downloaded `whisper-cli.exe`**, as in Chorus 1, rather than linking whisper.cpp | Superseded by D22 | Proven on this machine; avoids a native C++ build in the Rust toolchain |
+| D21 | 2026-10-18 | Windows only for v1 (was Q14) | Decided | ConPTY, DPAPI, Job Objects and the tray badge are Windows-specific; Tauri keeps macOS possible later |
+| D22 | 2026-10-18 | **Voice moves out of Chorus** into a separate, system-wide dictation app: push-to-talk and click-to-talk, local transcription, the mic overlay and target ring, and transcript cleanup. Phase P9 and spikes S2 and S6 are removed (numbers kept) | Decided | Matthew wants dictation in every application, not only in Chorus |
+| D23 | 2026-10-18 | **Chorus works with an external dictation app like any text field.** Chorus never steals focus (the fleet strip and any overlay are non-activating), the composer and the Raw terminal accept inserted or pasted text, and nothing Chorus receives is ever auto-submitted | Decided | Follows from D22: the dictation app types into whatever has focus, so Chorus must keep focus where the user put it and leave submitting to the user |
+| D24 | 2026-10-18 | The product is named **Chorus** and uses the **seven-bar mark**. The mockup's "Harness" wordmark and rotated-square glyph are placeholders (was Q2) | Decided | Chorus's existing name and official mark |
+| D25 | 2026-10-18 | Ship two themes: **Glacier** (default) and **Dusk** (was Q3) | Decided | The two themes the mockups define |
+| D26 | 2026-10-18 | The session view gets a collapsible **session strip** for fast switching (the filmstrip's job), and Sessions gets a **Wall** layout of live Raw terminals (the grid's job) (was Q4) | Decided | The mockup has no terminal grid, but both jobs are kept features |
+| D27 | 2026-10-18 | **Pop-out windows are deferred.** The architecture allows them later, since any window can attach to a session (was Q5) | Decided | The triage recorded no verdict |
+| D28 | 2026-10-18 | The **narrator** (Now / Blocker / Up next, suggested next steps) runs on a cheap **OpenRouter** model chosen in Settings, **on by default**, switchable off per project (was Q7) | Decided | One small call per turn end; scrubbed excerpts only. Whether the JEV AI key could serve instead is still open |
+| D29 | 2026-10-18 | **Chorus answers approvals itself** (for Claude Code, a held-open `PermissionRequest` hook) **if spike S5 proves it reliable**, falling back to the agent's own prompt in the terminal whenever Chorus doesn't answer (was Q8) | Decided | Approving from Friendly is the core of the supervisor; the fallback means a Chorus failure never blocks the agent |
+| D30 | 2026-10-18 | The **dependency list in ARCHITECTURE §10 is approved**, minus the voice items D22 removed (`global-shortcut`, `whisper-cli.exe`). Includes `tauri-specta` and `three` (was Q9) | Decided | Matthew accepted the default; anything else still needs his approval |
+| D31 | 2026-10-18 | Chorus 1's **skills framework folds into Bots** (instructions plus provider-neutral skill folders) **and Automations** (app-run work); no separate feature (was Q11) | Decided | Fewer concepts; Bots already carry instructions |
+| D32 | 2026-10-18 | **The repo is public** (confirmed on GitHub). Test evidence, screenshots with local paths and machine-specific notes stay out of commits (was Q13) | Decided | It is public; `_verify/` is gitignored for evidence |
+| D33 | 2026-10-18 | A **one-time, read-only import of projects** (path, name, colour, order) from Chorus 1's database, as a small P4 task. It never writes to Chorus 1's data (was Q15) | Decided | Saves setup; keys are still re-entered (D5) |
+| D34 | 2026-10-18 | **Automations start with schedules**; GitHub triggers come later by polling with `gh`, since there is no server to receive webhooks (was Q16) | Decided | Local-first app with no public endpoint |
+| D35 | 2026-10-18 | Claude Code's built-in `--remote-control` mode and Codex's experimental one are **noted, and decided at P13** alongside the Telegram relay (was Q17) | Decided | Not needed before P13 |

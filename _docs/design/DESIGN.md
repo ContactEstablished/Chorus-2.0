@@ -3,7 +3,7 @@
 Source of truth: the **Harness** mockups in `_assets/Harness UI mockups.zip` (`Harness.dc.html` in the
 Glacier theme, `Harness (Dusk).dc.html`, and `uploads/glacier-theme.css`). Screenshots of every screen are
 in `_assets/mockup-screens/`. Where this file and the mockup disagree, the mockup wins, except for the
-product name and logo (OPEN-QUESTIONS Q2).
+product name and logo: the app is **Chorus**, with the seven-bar mark ([Logo](#logo), D24).
 
 ## Screens
 
@@ -19,9 +19,10 @@ product name and logo (OPEN-QUESTIONS Q2).
 | Notes | `glacier-notes.png` | Project-tagged (or "All projects") notes; pinned notes first |
 | Settings | `glacier-settings.png` | Providers (connection state), notifications, appearance |
 
-**Rail:** logo + name, Overview (badge = sessions needing you), Sessions, Bots, Automations, Documents,
-Notes, Settings; then **Projects** (colour dot, session count, attention dot, +); **New session** pinned at
-the bottom. It collapses to icons under 720 px wide.
+**Rail:** the seven-bar mark and the wordmark **Chorus** at the top (where the mockup draws a rotated
+square and "Harness"), then Overview (badge = sessions needing you), Sessions, Bots, Automations,
+Documents, Notes, Settings; then **Projects** (colour dot, session count, attention dot, +); **New
+session** pinned at the bottom. It collapses to icons under 720 px wide, leaving the mark alone at the top.
 
 ## Status vocabulary
 
@@ -102,7 +103,7 @@ catching."*
 Working concept, to prototype in spike S7 and show him before building:
 
 - **Voices converging.** Particles (one stream per session being restored, coloured by project) sweep in
-  from depth and condense into the logo mark, which then turns in 3D under soft bloom.
+  from depth and condense into the seven-bar mark, which then turns in 3D under soft bloom.
 - **Real information.** "Restoring 6 sessions" counts up as each session actually comes back, so the
   animation is honest about what the app is doing.
 - **Budget.** First frame under ~300 ms, done in ≤3 s, skippable with any key or click; reduced-motion
@@ -110,6 +111,20 @@ Working concept, to prototype in spike S7 and show him before building:
 
 ## Logo
 
-Chorus 1's official mark is the **seven-bar symmetric mark** (bars 6 px on a 13 px pitch, heights
-28/44/62/76/62/44/28, the centre bar in the accent colour). The mockup draws a placeholder rotated-square
-glyph next to "Harness". Which name and mark 2.0 uses is OPEN-QUESTIONS Q2.
+The app is called **Chorus** and its logo is Chorus's official **seven-bar symmetric mark** (D24). The
+mockup's "Harness" wordmark and rotated-square glyph are placeholders: replace both wherever they appear
+(rail, title bar, splash, window title, installer).
+
+**Geometry** (from Chorus 1's `src/renderer/src/components/ChorusMark.vue`, the only place Chorus 1 draws
+it): seven bars, each 6 px wide on a 13 px pitch, fully rounded (`rx` = 3), vertically centred in an
+84 × 76 box. Heights from left to right are **28 / 44 / 62 / 76 / 62 / 44 / 28**, so bar *i* sits at
+x = 13·*i* and y = (76 − h) / 2. Scale the whole box; never stretch it to another aspect.
+
+**Colour:** the centre bar, the tallest, is the only coloured one and takes the theme's `--accent`. The
+three bars either side are neutral and mirror each other, darkest at the outside: `--logo-bar-low`
+(outer pair), `--logo-bar-mid`, `--logo-bar-high` (the pair beside the centre). Chorus 1 used
+`#3E4650`, `#4A535E` and `#5A646F`; each 2.0 theme sets its own three steps.
+
+**The symmetry is the mark.** A chorus is a lead voice with the rest ranged around it. Chorus 1's mocks
+once drew a six-bar version with the coloured bar off-centre; that is wrong, and so is any variant that
+breaks the mirror.

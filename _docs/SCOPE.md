@@ -1,20 +1,21 @@
 # Chorus 2.0 — Scope
 
-Baseline: Matthew's triage of all 92 Chorus 1 features on 2026-10-18 (**77 keep, 14 discard, 1
-undecided**), recorded in the triage artifact, plus the "Harness" mockups in `_assets/`. Phases refer to
-[PLAN.md](PLAN.md).
+Baseline: Matthew's triage of all 92 Chorus 1 features on 2026-10-18, recorded in the triage artifact,
+plus the "Harness" mockups in `_assets/`. After his follow-up the same day (voice moves to a separate
+app, D22), the count is **73 kept, 14 discarded, 4 moved out, 1 deferred**. Phases refer to
+[PLAN.md](PLAN.md); D-numbers to [DECISIONS.md](DECISIONS.md).
 
 ## Changes Matthew asked for
 
 | Feature | Change |
 |---|---|
 | Pane controls | **Restart and Close only.** Relaunch-with-fresh-key folds into Restart (a capped key is re-minted on every launch anyway); "kill but keep" goes away. |
-| Prompt history | **Every prompt durably in SQLite**, surviving crashes and reboots. Which parts of responses to keep is still open (OPEN-QUESTIONS Q6). |
+| Prompt history | **Every prompt durably in SQLite**, surviving crashes and reboots. Each turn also keeps the agent's final message, its tool-call list, and any question or approval with its answer (D7). |
 | Startup splash | **3D, eye-catching, still only a few seconds.** Brief in [design/DESIGN.md](design/DESIGN.md#startup-splash). |
 
-## New in 2.0 (from the Harness mockups)
+## New in 2.0
 
-These need Matthew's confirmation (OPEN-QUESTIONS Q1).
+From the Harness mockups, confirmed as the UI direction (D9), plus one setup aid (D33).
 
 | Feature | What it is | Phase |
 |---|---|---|
@@ -29,7 +30,8 @@ These need Matthew's confirmation (OPEN-QUESTIONS Q1).
 | Automations | A Bot run on a schedule or trigger; each run is an ordinary session | P8 |
 | Documents | Plans, specs and reports produced by sessions, tagged by project and linked to the session | P8 |
 | Notes | Project-tagged context for agents and future-you; untagged notes apply everywhere. Injected into agent instructions. | P8 |
-| Themes | Glacier and Dusk | P4 |
+| Themes | Glacier (default) and Dusk (D25) | P4 |
+| Import projects from Chorus 1 | One-time, read-only import of each project's path, name, colour and order from Chorus 1's database. Never writes to it; keys are not imported (D5) | P4 |
 
 ## Kept features and where they live
 
@@ -53,8 +55,8 @@ These need Matthew's confirmation (OPEN-QUESTIONS Q1).
 ### Layout
 | Feature | 2.0 home | Phase |
 |---|---|---|
-| Focus + filmstrip view | Session view + session strip (OPEN-QUESTIONS Q4) | P4 |
-| Grid view | "Wall" layout of Raw terminals under Sessions (Q4) | P4 |
+| Focus + filmstrip view | Session view + session strip (D26) | P4 |
+| Grid view | "Wall" layout of Raw terminals under Sessions (D26) | P4 |
 | Project rail | Projects section of the rail | P4 |
 | Hide, archive and delete projects | Project menu | P4 |
 | Project colors | Project tags and colours | P4 |
@@ -99,7 +101,7 @@ These need Matthew's confirmation (OPEN-QUESTIONS Q1).
 | Model catalog and shortlist | Settings → Providers | P2 |
 | OpenRouter capped keys | Per launch | P2 |
 | Repo secret scanner | Script + CI | P0 |
-| JEV AI key | Settings → Providers; purpose to decide (OPEN-QUESTIONS Q7) | P2 |
+| JEV AI key | Settings → Providers: a stored key with a connection test; its purpose is still open ([OPEN-QUESTIONS.md](OPEN-QUESTIONS.md)) | P2 |
 
 ### Routing
 | Feature | 2.0 home | Phase |
@@ -116,14 +118,6 @@ These need Matthew's confirmation (OPEN-QUESTIONS Q1).
 | Council docket | Council screen (cost reconciled this time) | P10 |
 | Council member setup | Council settings | P10 |
 | Council cases and exhibits | Attach repo files to a brief | P10 |
-
-### Voice
-| Feature | 2.0 home | Phase |
-|---|---|---|
-| Push-to-talk and click-to-talk | Global hotkey + mic button on composer | P9 (spike S2) |
-| Local transcription | whisper-cli.exe | P9 (spike S6) |
-| Mic overlay and target ring | Overlay window | P9 (spike S3) |
-| Transcript cleanup | Verbatim / Clean up / Organize | P9 |
 
 ### Measurement
 | Feature | 2.0 home | Phase |
@@ -145,8 +139,8 @@ These need Matthew's confirmation (OPEN-QUESTIONS Q1).
 | Fleet switcher overlay | Always-on-top status strip | P7 (spike S3) |
 | Scrollback search | Raw view search | P7 |
 | Transcript export | Session menu | P7 |
-| Skills framework | Bots (instructions + skill folders) and Automations (app-run work) | P8 |
-| Mission Control board | Overview board; forecasts only after P3 data proves complete | P4, P11 |
+| Skills framework | Bots (instructions + skill folders) and Automations (app-run work) (D31) | P8 |
+| Mission Control board | Overview board; forecasts only after P3 data proves complete (D18) | P4, P11 |
 | Phone relay (Telegram) | Relay using the same action pipeline | P13 |
 
 ### Ship
@@ -154,11 +148,25 @@ These need Matthew's confirmation (OPEN-QUESTIONS Q1).
 |---|---|---|
 | Windows installer | Tauri NSIS, per-user | P0 (spike S8), P14 |
 
-## Undecided
+## Moved to a separate app
+
+Matthew wants dictation in every application, not only in Chorus, so voice becomes a separate,
+system-wide dictation app (D22). Chorus stays compatible with it like any text field: it never steals
+focus, the composer and the Raw terminal accept inserted or pasted text, and nothing it receives is
+auto-submitted (D23).
+
+| Feature | Chorus 1 behaviour, now the dictation app's job |
+|---|---|
+| Push-to-talk and click-to-talk | Global hotkey (Scroll Lock by default) and a click target |
+| Local transcription | `whisper-cli.exe`, downloaded on first use |
+| Mic overlay and target ring | Always-on-top level meter, and a ring on the field that will receive the text |
+| Transcript cleanup | Verbatim / Clean up / Organize, keeping the original |
+
+## Deferred
 
 | Feature | Note |
 |---|---|
-| Pop-out windows | No verdict was recorded in the triage. Recommended: defer (OPEN-QUESTIONS Q5). |
+| Pop-out windows | No verdict in the triage; deferred (D27). Any window can attach to a session, so it can come later. |
 
 ## Discarded
 
@@ -176,5 +184,5 @@ These need Matthew's confirmation (OPEN-QUESTIONS Q1).
 | API chat pane | Never built |
 | Agent messaging UI | Never built |
 | Token reduction | Never built |
-| Cloud speech-to-text | Never built; local whisper stays |
+| Cloud speech-to-text | Never built; dictation now lives in a separate app (D22) |
 | Custom keybindings | Never built |
