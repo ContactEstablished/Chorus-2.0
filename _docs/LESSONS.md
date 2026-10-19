@@ -173,6 +173,24 @@ the old screen, and then the dividing line, into scrollback with Erase in Displa
 on a blank screen. xterm.js 6 keeps erased rows only with `scrollOnEraseInDisplay`, and then only up to
 the last row with text.
 
+**L35 — With `opencode serve` + `attach`, the server's configuration decides a typed prompt's model
+and effort (P2, opencode 1.19.3).** Measured with the TUI attached in Chorus's PTY, on free models:
+- The attached TUI **ignores the model stored on a session** (`POST /session` with `model`). It uses
+  the server's configuration: `model`, and `agent.<name>.variant` beside `agent.<name>.model`. Chorus
+  sets both through `OPENCODE_CONFIG_CONTENT` on the server.
+- Each model has its own variants (`GET /provider` → `all[].models[id].variants`):
+  `glm-5.3-flash-free` has low, high and max; `big-pickle` has none. A variant the model lacks is
+  dropped in silence: the stored message has no variant (L5). Only the read-back shows it
+  (`GET /session/{id}/message` → the user message's `model.variant`).
+- After a prompt, the TUI writes `variant[<provider/model>]` to `opencode/model.json` in its state
+  folder. That remembered choice beats the configuration on the next start (L5), so Chorus deletes the
+  file from the session's own state folder before each run that sets a model or effort.
+- `serve --port 0` tries 4096 first, so the port must be read from its "listening on" line.
+  `GET /session/{id}/message?limit=N` returns the newest N, oldest first; a missing session is 404.
+- Permissions: `permission` is one action (`"allow"`) or one per tool (`edit`, `bash`, `webfetch`,
+  `external_directory`…). With `edit: "ask"` the TUI showed "Permission required" and wrote nothing.
+  `default_agent: "plan"` starts the TUI in its plan agent.
+
 ## Money and models
 
 **L16 — Read-then-revoke under-reports OpenRouter spend.** Reading a capped key's usage right after the

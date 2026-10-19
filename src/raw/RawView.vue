@@ -11,7 +11,7 @@ import KeysPanel from './KeysPanel.vue'
 import { useSessionsStore } from '../stores/sessions'
 import { useKeysStore } from '../stores/keys'
 import { commands, unwrap, type AgentKind, type CreateSession, type SessionSummary } from '../ipc'
-import { optionsText, versionText } from './labels'
+import { observedText, optionsText, versionText } from './labels'
 import { useAgentsStore } from '../stores/agents'
 
 const props = defineProps<{ dev: boolean }>()
@@ -180,6 +180,9 @@ if (props.dev) {
           {{ versionText(current.cliVersion, current.versionFit, agents.byKind.get(current.agent)?.verifiedVersion ?? null) }}
           <template v-if="current.agentSessionId"> · conversation <code :title="current.agentSessionId">{{ current.agentSessionId.slice(0, 8) }}</code>{{ current.resumed ? ' (resumed)' : '' }}</template>
         </p>
+        <p v-if="observedText(current)" class="meta" :class="{ differs: current.observedDiffers.length }">
+          Newest turn ran {{ observedText(current) }}<template v-if="current.observedDiffers.length">, not what was asked: {{ current.observedDiffers.join('; ') }}</template>
+        </p>
         <p v-if="current.note" class="note">{{ current.note }}</p>
         <p v-if="current.scrollbackError" class="note">{{ current.scrollbackError }}</p>
         <p v-if="notice" class="note">{{ notice }}</p>
@@ -314,7 +317,8 @@ h2 {
   color: var(--text-muted);
   font-size: 13px;
 }
-.note {
+.note,
+.meta.differs {
   color: var(--status-needs);
 }
 .error {

@@ -478,6 +478,7 @@ version = "0.1.0"
 dependencies = [
  "chorus-core",
  "portable-pty",
+ "reqwest",
  "rusqlite",
  "serde",
  "serde_json",

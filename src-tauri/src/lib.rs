@@ -65,7 +65,11 @@ pub fn run() {
                     let _ = SessionUpdated { session }.emit(&handle);
                 }),
             );
-            manager.restore()?;
+            // Sessions open now, so views can attach; they relaunch off this thread, because an
+            // opencode session waits for its server.
+            let relaunch = manager.reopen()?;
+            let relaunching = manager.clone();
+            std::thread::Builder::new().name("relaunch".into()).spawn(move || relaunching.relaunch(&relaunch))?;
             // Look for the agent CLIs without holding up the window. Runs relaunched before this
             // finishes get their CLI version filled in afterwards.
             let detecting = manager.clone();

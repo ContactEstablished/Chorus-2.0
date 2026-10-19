@@ -2,7 +2,7 @@
 /**
  * Starts a session: which agent, in which folder, with which of the options that agent declares,
  * and optionally a stored key as a variable. Options an agent lacks are left out with the reason,
- * and each choice shows the exact arguments it adds.
+ * and each choice shows the exact arguments it adds (for opencode, the server configuration).
  */
 import { computed, onMounted, ref, watch } from 'vue'
 import type { AgentKind, CreateSession, CredentialSummary, Effort, Permission } from '../ipc'
@@ -55,7 +55,16 @@ const permissionArgs = computed(() => {
   return info.value?.permissions.find((p) => p.permission === chosen)?.args ?? ''
 })
 
-const canSubmit = computed(() => cwd.value.trim() !== '' && (keyId.value === null || envVar.value.trim() !== ''))
+// opencode applies an effort only to a model named beside it (LESSONS L5); the back end refuses it
+// otherwise, and the form says so first.
+const effortWithoutModel = computed(
+  () => !!info.value?.effortNeedsModel && (effort.value ?? info.value.defaultEffort) !== null && model.value.trim() === '',
+)
+const carrier = computed(() => (info.value?.optionsInConfig ? 'server config: ' : ''))
+
+const canSubmit = computed(
+  () => cwd.value.trim() !== '' && (keyId.value === null || envVar.value.trim() !== '') && !effortWithoutModel.value,
+)
 
 function submit(): void {
   if (!canSubmit.value || props.busy) return
@@ -105,7 +114,8 @@ function submit(): void {
           <option :value="null">Default{{ info.defaultEffort ? ` (${EFFORT_LABELS[info.defaultEffort]})` : ': the CLI decides' }}</option>
           <option v-for="e in info.efforts" :key="e.effort" :value="e.effort">{{ EFFORT_LABELS[e.effort] }}</option>
         </select>
-        <code v-if="effortArgs" class="args">{{ effortArgs }}</code>
+        <code v-if="effortArgs" class="args">{{ carrier }}{{ effortArgs }}</code>
+        <span v-if="effortWithoutModel" class="hint warn">{{ info.displayName }} applies an effort only to a model named below.</span>
       </label>
       <p v-else class="hint">{{ info.displayName }} has no effort setting Chorus can pass at launch yet.</p>
 
@@ -117,13 +127,19 @@ function submit(): void {
           </option>
           <option v-for="p in info.permissions" :key="p.permission" :value="p.permission">{{ PERMISSION_LABELS[p.permission] }}</option>
         </select>
-        <code v-if="permissionArgs" class="args">{{ permissionArgs }}</code>
+        <code v-if="permissionArgs" class="args">{{ carrier }}{{ permissionArgs }}</code>
       </label>
       <p v-else class="hint">{{ info.displayName }} has no permission mode Chorus can pass at launch yet.</p>
 
       <label v-if="info.takesModel">
         <span>Model <em>(optional: the CLI's own default otherwise)</em></span>
-        <input v-model="model" maxlength="200" spellcheck="false" autocomplete="off" />
+        <input
+          v-model="model"
+          maxlength="200"
+          spellcheck="false"
+          autocomplete="off"
+          :placeholder="info.optionsInConfig ? 'provider/model, for example opencode/big-pickle' : ''"
+        />
       </label>
     </template>
 

@@ -8,6 +8,7 @@
 pub mod codex;
 pub mod commands;
 pub mod detect;
+pub mod opencode;
 
 use std::path::{Path, PathBuf};
 
@@ -57,9 +58,10 @@ pub fn resolve(kind: AgentKind, parent_env: &[(String, String)], scratch: &Path)
             Ok(Launch { program, args, additions: vec![] })
         }
         AgentKind::Opencode => {
-            // P3 runs opencode as `serve` + `attach` (ARCHITECTURE §5); until then, its plain TUI.
+            // The session runs `serve` and `attach` with these (ARCHITECTURE §5, `opencode`). Its
+            // conversations live in the session's own data folder, which is how they resume.
             let (program, args) = through_shim(&path, "opencode.cmd")?;
-            let state = scratch.join("xdg-state");
+            let state = opencode::state_home(scratch);
             let data = scratch.join("xdg-data");
             Ok(Launch {
                 program,

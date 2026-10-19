@@ -58,6 +58,8 @@ function session(id: number, over: Partial<SessionSummary> = {}): SessionSummary
     cliVersion: null,
     versionFit: null,
     resumed: false,
+    observed: null,
+    observedDiffers: [],
     ...over,
   }
 }

@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use chorus_core::agent::{AgentKind, Effort, Permission, ResumeKind, Spec};
+use chorus_core::agent::{AgentKind, Carrier, Effort, Permission, ResumeKind, Spec};
 use serde::Serialize;
 use specta::Type;
 use tauri::State;
@@ -15,7 +15,8 @@ use crate::sessions::SessionManager;
 #[serde(rename_all = "camelCase")]
 pub struct EffortChoice {
     pub effort: Effort,
-    /// The arguments it adds, as typed on a command line.
+    /// The arguments it adds, as typed on a command line, or for an agent with
+    /// `optionsInConfig`, the configuration key and value.
     pub args: String,
 }
 
@@ -38,6 +39,10 @@ pub struct AgentInfo {
     pub permissions: Vec<PermissionChoice>,
     pub default_permission: Option<Permission>,
     pub takes_model: bool,
+    /// Options go into the configuration of a server Chorus starts (opencode), not argv.
+    pub options_in_config: bool,
+    /// An effort applies only with a model named beside it (opencode, LESSONS L5).
+    pub effort_needs_model: bool,
     pub resume: ResumeKind,
     /// The CLI version the options were checked against.
     pub verified_version: Option<String>,
@@ -54,6 +59,8 @@ fn info(spec: &Spec, detection: Option<Detection>) -> AgentInfo {
         permissions: spec.permissions.iter().map(|(p, a)| PermissionChoice { permission: *p, args: a.join(" ") }).collect(),
         default_permission: spec.default_permission,
         takes_model: spec.model.is_some(),
+        options_in_config: spec.carrier == Carrier::ServerConfig,
+        effort_needs_model: spec.carrier == Carrier::ServerConfig,
         resume: spec.resume.kind(),
         verified_version: spec.verified.map(str::to_owned),
         detection,

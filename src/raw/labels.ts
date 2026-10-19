@@ -46,3 +46,10 @@ export function optionsText(s: SessionSummary): string {
   if (s.options.model) parts.push(s.options.model)
   return parts.join(' · ')
 }
+
+/** What the newest turn really ran with, read back from the agent: "glm-5.3-flash-free · high · plan agent". */
+export function observedText(s: SessionSummary): string | null {
+  const o = s.observed
+  if (!o) return null
+  return [o.model, o.variant ?? 'default effort', o.agent ? `${o.agent} agent` : null].filter(Boolean).join(' · ')
+}

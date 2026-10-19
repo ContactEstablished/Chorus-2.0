@@ -27,6 +27,7 @@ serde_json = { workspace = true }
 portable-pty = { workspace = true }
 rusqlite = { workspace = true }
 tauri-plugin-single-instance = { workspace = true }
+reqwest = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
 windows = { workspace = true }

@@ -16,7 +16,7 @@ pub mod commands;
 pub mod job;
 pub mod mirror;
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -29,6 +29,7 @@ use chorus_core::batch::{PTY_BATCH, SCRUB_CARRY_RELEASE_MS};
 use chorus_core::cli::{VersionFit, fit, parse_version};
 use chorus_core::conpty::{CURSOR_REPORT, Handshake};
 use chorus_core::env::{ChildEnvInput, compose_child_env, valid_secret_var};
+use chorus_core::opencode::{self as oc, Observed};
 use chorus_core::scrollback::{boundary, exit_line, restart_screen};
 use chorus_core::scrub::{StreamScrubber, builtin_patterns};
 use chorus_core::session::{ExitCause, SessionState, after_exit, classify_exit, clean_name, plan_boot};
@@ -39,6 +40,7 @@ use tauri::ipc::{InvokeResponseBody, IpcResponse};
 use tauri_specta::Event;
 
 use crate::agents::detect::Detector;
+use crate::agents::opencode::{Api, Server};
 use crate::agents::{self, AgentKind};
 use crate::store::sessions::{self as rows, NewRun, NewSession, SessionRow};
 use crate::store::{Store, credentials};
@@ -114,6 +116,10 @@ pub struct SessionSummary {
     pub version_fit: Option<VersionFit>,
     /// The last run continued the agent's conversation rather than starting one.
     pub resumed: bool,
+    /// What the running agent's newest turn really used, read back from the agent (opencode).
+    pub observed: Option<Observed>,
+    /// How that turn differs from `options`, one phrase each; empty when it matches.
+    pub observed_differs: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
@@ -163,6 +169,11 @@ fn check_size(cols: u16, rows: u16) -> Result<PtySize, String> {
         return Err(format!("terminal size {cols}x{rows} is out of range"));
     }
     Ok(PtySize { cols, rows, pixel_width: 0, pixel_height: 0 })
+}
+
+/// A fresh password for a run's opencode server: 24 random bytes as hex.
+fn server_password() -> String {
+    vault::random_bytes(24).iter().map(|b| format!("{b:02x}")).collect()
 }
 
 fn version_note(kind: AgentKind, d: &agents::detect::Detection) -> Option<String> {
@@ -277,6 +288,10 @@ struct Run {
     /// Filled by the exit watcher for the output thread, which writes the exit line last.
     exit: Mutex<Option<(ExitCause, u32)>>,
     finished: (Mutex<bool>, Condvar),
+    /// opencode's server, which ends with the run.
+    server: Option<Server>,
+    /// What the newest turn ran with, read back from the agent.
+    observed: Mutex<Option<Observed>>,
 }
 
 impl Run {
@@ -399,6 +414,7 @@ impl SessionManager {
     fn summary_of(&self, row: &SessionRow) -> SessionSummary {
         let live = self.live.lock().expect("live lock").get(&row.id).cloned();
         let run = live.as_ref().and_then(|l| l.current_run());
+        let observed = run.as_ref().and_then(|r| r.observed.lock().expect("observed lock").clone());
         let last = rows::last_run(&self.store, row.id).ok().flatten();
         let credential_label =
             row.credential_id.and_then(|id| credentials::get(&self.store, id).ok().flatten()).map(|c| c.label);
@@ -426,6 +442,8 @@ impl SessionManager {
             }),
             cli_version: last.as_ref().and_then(|r| r.cli_version.clone()),
             resumed: last.as_ref().is_some_and(|r| r.resumed),
+            observed_differs: observed.as_ref().map(|o| oc::differences(row.agent.spec(), &row.options, o)).unwrap_or_default(),
+            observed,
         }
     }
 
@@ -451,8 +469,17 @@ impl SessionManager {
     }
 
     /// At start-up: close out runs a previous Chorus left open, then relaunch every session that
-    /// should be running.
+    /// should be running. The app does the two halves on different threads.
+    #[cfg(test)]
     pub fn restore(self: &Arc<Self>) -> Result<(), String> {
+        let relaunch = self.reopen()?;
+        self.relaunch(&relaunch);
+        Ok(())
+    }
+
+    /// The first half of [`Self::restore`]: heals the runs a previous Chorus left open and opens
+    /// every session, so views can attach. Returns the sessions to relaunch.
+    pub fn reopen(&self) -> Result<Vec<u32>, String> {
         let open = rows::list_open(&self.store)?;
         let plan = plan_boot(&open.iter().map(|r| (r.id, r.state)).collect::<Vec<_>>(), &rows::open_runs(&self.store)?);
         for run in plan.heal {
@@ -462,14 +489,19 @@ impl SessionManager {
         for row in &open {
             self.live_for(row.id);
         }
-        for row in open.iter().filter(|r| plan.relaunch.contains(&r.id)) {
-            let live = self.live_for(row.id);
+        Ok(open.iter().map(|r| r.id).filter(|id| plan.relaunch.contains(id)).collect())
+    }
+
+    /// The second half: launches each session again. It can take seconds (an opencode session
+    /// waits for its server), so the app calls it off the setup thread.
+    pub fn relaunch(self: &Arc<Self>, ids: &[u32]) {
+        for id in ids {
+            let live = self.live_for(*id);
             live.hub.new_run(BOUNDARY_RELAUNCHED);
             if let Err(e) = self.start_run(&live) {
                 self.record_failure(&live, &e);
             }
         }
-        Ok(())
     }
 
     pub fn create(self: &Arc<Self>, req: CreateSession) -> Result<SessionSummary, String> {
@@ -543,20 +575,37 @@ impl SessionManager {
             (None, Some(_)) => return Err("the key this session uses has been deleted".into()),
             _ => {}
         }
+        let spec = row.agent.spec();
+        // opencode: its server's password, which the server and `attach` both read from the
+        // environment (and which is redacted like a key), and the options as server configuration.
+        let server_password = (row.agent == AgentKind::Opencode).then(server_password);
+        if let Some(p) = &server_password {
+            secrets.push((oc::PASSWORD_VAR.to_owned(), p.clone()));
+            if let Some(config) = oc::config_content(spec, &row.options) {
+                launch.additions.push((oc::CONFIG_VAR, config));
+            }
+        }
         let (mut redact, unreadable) = vault::all_for_scrubbing(&self.store);
         redact.extend(secrets.iter().map(|(_, v)| v.clone().into_bytes()));
         let additions: Vec<(&str, &str)> = launch.additions.iter().map(|(k, v)| (*k, v.as_str())).collect();
         let env = compose_child_env(&ChildEnvInput { parent: &parent, required: &[], additions: &additions, secrets: &secrets });
 
-        // The CLI's own arguments, then the options, then the conversation, which goes last
-        // because for Codex it is a subcommand.
-        let spec = row.agent.spec();
+        let job = Job::new().map_err(|e| format!("creating the job object: {e}"))?;
+        let mut notes: Vec<String> = Vec::new();
         let mut args = launch.args.clone();
-        args.extend(spec.option_args(&row.options));
-        let conversation = row.agent_session_id.as_deref();
-        let exists = conversation.is_some_and(|id| agents::conversation_exists(row.agent, id, &parent));
-        let resumed = exists && spec.resume.kind() != ResumeKind::None;
-        args.extend(spec.conversation_args(conversation, exists));
+        let (server, resumed) = if let Some(password) = &server_password {
+            let (server, conversation, existed) = self.start_opencode(&row, &launch, &env, password, &state_dir, &job, &mut notes)?;
+            args.extend(oc::attach_args(server.url(), &conversation));
+            (Some((server, conversation)), existed)
+        } else {
+            // The CLI's own arguments, then the options, then the conversation, which goes last
+            // because for Codex it is a subcommand.
+            args.extend(spec.option_args(&row.options));
+            let conversation = row.agent_session_id.as_deref();
+            let exists = conversation.is_some_and(|id| agents::conversation_exists(row.agent, id, &parent));
+            args.extend(spec.conversation_args(conversation, exists));
+            (None, exists && spec.resume.kind() != ResumeKind::None)
+        };
         let detected = self.agents.get(row.agent);
         let cli_version = detected.as_ref().and_then(|d| d.version.clone());
 
@@ -568,7 +617,6 @@ impl SessionManager {
             cmd.env(k, v);
         }
 
-        let job = Job::new().map_err(|e| format!("creating the job object: {e}"))?;
         let launched_ms = crate::store::now_ms();
         let pair = native_pty_system().openpty(size).map_err(|e| e.to_string())?;
         let mut child = pair.slave.spawn_command(cmd).map_err(|e| format!("starting {}: {e}", launch.program.display()))?;
@@ -598,7 +646,6 @@ impl SessionManager {
         if let Some(cid) = row.credential_id {
             let _ = credentials::touch(&self.store, cid);
         }
-        let mut notes: Vec<String> = Vec::new();
         if unreadable > 0 {
             notes.push(format!("{unreadable} stored key(s) couldn't be decrypted, so they aren't redacted in this session."));
         }
@@ -607,6 +654,7 @@ impl SessionManager {
         }
         rows::set_note(&self.store, row.id, (!notes.is_empty()).then(|| notes.join(" ")).as_deref())?;
 
+        let (server, conversation) = server.unzip();
         let run = Arc::new(Run {
             id: run_id,
             pid,
@@ -616,14 +664,80 @@ impl SessionManager {
             requested: Mutex::new(None),
             exit: Mutex::new(None),
             finished: (Mutex::new(false), Condvar::new()),
+            server,
+            observed: Mutex::new(None),
         });
         *live.run.lock().expect("run lock") = Some(run.clone());
         if spec.resume.kind() == ResumeKind::Discovered && row.agent_session_id.is_none() {
             self.watch_for_conversation(&row, &run, launched_ms, &parent);
         }
+        if let (Some(server), Some(conversation)) = (&run.server, conversation) {
+            self.watch_opencode(row.id, &run, server.api.clone(), conversation);
+        }
         self.spawn_threads(live.clone(), run, child, reader, StreamScrubber::new(redact, builtin_patterns()));
         self.notify_id(row.id);
         Ok(())
+    }
+
+    /// Starts the run's opencode server and finds the session's conversation in it, or starts one.
+    /// Returns the server, the conversation id, and whether that conversation already existed.
+    #[allow(clippy::too_many_arguments)]
+    fn start_opencode(
+        &self,
+        row: &SessionRow,
+        launch: &agents::Launch,
+        env: &BTreeMap<String, String>,
+        password: &str,
+        state_dir: &Path,
+        job: &Job,
+        notes: &mut Vec<String>,
+    ) -> Result<(Server, String, bool), String> {
+        if row.options.model.is_some() || row.options.effort.is_some() {
+            agents::opencode::forget_tui_choice(state_dir);
+        }
+        let server = Server::start(&launch.program, &launch.args, &row.cwd, env, password, job)?;
+        let existing = match row.agent_session_id.as_deref() {
+            Some(id) if server.api.session_exists(id)? => Some(id.to_owned()),
+            _ => None,
+        };
+        let (conversation, existed) = match existing {
+            Some(id) => (id, true),
+            None => {
+                let id = server.api.create_session(&row.name)?;
+                rows::set_agent_session_id(&self.store, row.id, &id)?;
+                (id, false)
+            }
+        };
+        if let Some(model) = &row.options.model {
+            let wanted = oc::wanted_variant(row.agent.spec(), &row.options);
+            match server.api.check_model(model) {
+                Ok(Some(check)) => notes.extend(oc::model_note(model, wanted.as_deref(), &check)),
+                Ok(None) => notes.push("opencode's model list isn't in the shape Chorus checked, so the model wasn't checked.".into()),
+                Err(e) => notes.push(format!("Chorus couldn't check the model with opencode: {e}")),
+            }
+        }
+        Ok((server, conversation, existed))
+    }
+
+    /// What each new opencode turn ran with, read back every few seconds while the run lives
+    /// (P3 moves this onto the server's events).
+    fn watch_opencode(self: &Arc<Self>, session_id: u32, run: &Arc<Run>, api: Api, conversation: String) {
+        let name = format!("opencode-watch-{}", run.id);
+        let (m, run) = (self.clone(), run.clone());
+        let _ = std::thread::Builder::new().name(name).spawn(move || {
+            while !run.wait_finished(agents::opencode::POLL) {
+                let Ok(Some(seen)) = api.latest_user_turn(&conversation) else { continue };
+                let changed = {
+                    let mut slot = run.observed.lock().expect("observed lock");
+                    let changed = slot.as_ref() != Some(&seen);
+                    *slot = Some(seen);
+                    changed
+                };
+                if changed {
+                    m.notify_id(session_id);
+                }
+            }
+        });
     }
 
     /// Codex names its conversation once the first prompt is sent. Look for it every few seconds

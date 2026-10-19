@@ -73,6 +73,10 @@ export type AgentInfo = {
 	permissions: PermissionChoice[],
 	defaultPermission: Permission | null,
 	takesModel: boolean,
+	/**  Options go into the configuration of a server Chorus starts (opencode), not argv. */
+	optionsInConfig: boolean,
+	/**  An effort applies only with a model named beside it (opencode, LESSONS L5). */
+	effortNeedsModel: boolean,
 	resume: ResumeKind,
 	/**  The CLI version the options were checked against. */
 	verifiedVersion: string | null,
@@ -150,7 +154,10 @@ export type Effort = "fast" | "balanced" | "deep" | "max";
 
 export type EffortChoice = {
 	effort: Effort,
-	/**  The arguments it adds, as typed on a command line. */
+	/**
+	 *  The arguments it adds, as typed on a command line, or for an agent with
+	 *  `optionsInConfig`, the configuration key and value.
+	 */
 	args: string,
 };
 
@@ -201,6 +208,14 @@ export type LeakReport = {
 	/**  Every file under the data folder with any run of the key, and the longest run in it. */
 	files: FileLeak[],
 	filesScanned: number,
+};
+
+/**  What a turn really ran with, read back from opencode's stored message. */
+export type Observed = {
+	/**  `provider/model`. */
+	model: string,
+	variant: string | null,
+	agent: string | null,
 };
 
 /**  How much the agent may do without asking. */
@@ -273,6 +288,10 @@ export type SessionSummary = {
 	versionFit: VersionFit | null,
 	/**  The last run continued the agent's conversation rather than starting one. */
 	resumed: boolean,
+	/**  What the running agent's newest turn really used, read back from the agent (opencode). */
+	observed: Observed | null,
+	/**  How that turn differs from `options`, one phrase each; empty when it matches. */
+	observedDiffers: string[],
 };
 
 export type SessionUpdated = {

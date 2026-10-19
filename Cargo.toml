@@ -23,6 +23,9 @@ portable-pty = "0.9"
 # SQLite with the library compiled in (ARCHITECTURE §7, §10).
 rusqlite = { version = "0.40", features = ["bundled"] }
 tauri-plugin-single-instance = "2"
+# Loopback calls to opencode's server now; OpenRouter later (ARCHITECTURE §10). Tauri already builds
+# 0.13 with these features, so this adds no crate.
+reqwest = { version = "0.13", default-features = false, features = ["json"] }
 windows = { version = "0.62", features = [
   "Win32_Foundation",
   "Win32_Security",

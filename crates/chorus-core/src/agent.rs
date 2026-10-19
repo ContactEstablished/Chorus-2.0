@@ -138,6 +138,18 @@ pub enum ModelArg {
     Flag(&'static str),
     /// `-c <key>="<name>"`, Codex's config override.
     CodexConfig(&'static str),
+    /// In the configuration Chorus gives the agent's server (`crate::opencode`).
+    ServerConfig,
+}
+
+/// How the declared options reach the agent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Carrier {
+    /// On the command line: each table entry is the arguments.
+    Argv,
+    /// In the configuration of a server Chorus starts for the run: each table entry is a key and
+    /// its JSON value (`crate::opencode::config_content`).
+    ServerConfig,
 }
 
 /// What an agent declares, and the arguments behind each declared option.
@@ -146,6 +158,7 @@ pub struct Spec {
     pub kind: AgentKind,
     /// The CLI version these arguments were checked against.
     pub verified: Option<&'static str>,
+    pub carrier: Carrier,
     pub efforts: &'static [(Effort, &'static [&'static str])],
     pub default_effort: Option<Effort>,
     pub permissions: &'static [(Permission, &'static [&'static str])],
@@ -157,6 +170,7 @@ pub struct Spec {
 const SHELL: Spec = Spec {
     kind: AgentKind::Shell,
     verified: None,
+    carrier: Carrier::Argv,
     efforts: &[],
     default_effort: None,
     permissions: &[],
@@ -170,6 +184,7 @@ const SHELL: Spec = Spec {
 const CLAUDE: Spec = Spec {
     kind: AgentKind::Claude,
     verified: Some("2.1.300"),
+    carrier: Carrier::Argv,
     efforts: &[
         (Effort::Fast, &["--effort", "medium"]),
         (Effort::Balanced, &["--effort", "high"]),
@@ -194,6 +209,7 @@ const CLAUDE: Spec = Spec {
 const CODEX: Spec = Spec {
     kind: AgentKind::Codex,
     verified: Some("0.162.1"),
+    carrier: Carrier::Argv,
     efforts: &[
         (Effort::Fast, &["-c", "model_reasoning_effort=\"low\""]),
         (Effort::Balanced, &["-c", "model_reasoning_effort=\"medium\""]),
@@ -213,15 +229,31 @@ const CODEX: Spec = Spec {
     resume: Resume::Discovered { subcommand: "resume" },
 };
 
-/// opencode runs as a server plus an attached TUI; its options are set through the server.
+/// opencode 1.19.3 runs as a server plus an attached TUI, and its options are the server's
+/// configuration. An effort is a model "variant", which opencode applies only to the model named
+/// beside it and otherwise ignores in silence (LESSONS L5), so an effort needs a model. Each model
+/// has its own variants (`glm-5.3-flash-free` has low, high and max), and the run checks the
+/// chosen one against the server's list. Permissions are its `permission` rules and its built-in
+/// `plan` agent; it has nothing like Claude's Auto.
 const OPENCODE: Spec = Spec {
     kind: AgentKind::Opencode,
     verified: Some("1.19.3"),
-    efforts: &[],
+    carrier: Carrier::ServerConfig,
+    efforts: &[
+        (Effort::Fast, &["variant", "\"low\""]),
+        (Effort::Balanced, &["variant", "\"medium\""]),
+        (Effort::Deep, &["variant", "\"high\""]),
+        (Effort::Max, &["variant", "\"max\""]),
+    ],
     default_effort: None,
-    permissions: &[],
+    permissions: &[
+        (Permission::Manual, &["permission", r#"{"edit":"ask","bash":"ask","webfetch":"ask","external_directory":"ask"}"#]),
+        (Permission::AcceptEdits, &["permission", r#"{"edit":"allow","bash":"ask","webfetch":"ask","external_directory":"ask"}"#]),
+        (Permission::Plan, &["default_agent", "\"plan\""]),
+        (Permission::FullAccess, &["permission", "\"allow\""]),
+    ],
     default_permission: None,
-    model: None,
+    model: Some(ModelArg::ServerConfig),
     resume: Resume::Server,
 };
 
@@ -231,6 +263,7 @@ const OPENCODE: Spec = Spec {
 const GROK: Spec = Spec {
     kind: AgentKind::Grok,
     verified: Some("1.0.62"),
+    carrier: Carrier::Argv,
     efforts: &[
         (Effort::Fast, &["--reasoning-effort", "low"]),
         (Effort::Balanced, &["--reasoning-effort", "medium"]),
@@ -307,15 +340,24 @@ impl Spec {
             None => None,
             Some(_) if self.model.is_none() => return Err(format!("{name} doesn't take a model at launch")),
             Some(m) if !valid_model(m) => return Err(format!("{m:?} is not a model name Chorus can pass on")),
+            Some(m) if self.carrier == Carrier::ServerConfig && !is_provider_model(m) => {
+                return Err(format!("{name} takes a model as provider/model, for example opencode/big-pickle"));
+            }
             Some(m) => Some(m.to_owned()),
         };
+        if self.carrier == Carrier::ServerConfig && effort.is_some() && model.is_none() {
+            return Err(format!("{name} applies an effort only to a model named beside it: choose one as provider/model"));
+        }
         Ok(LaunchOptions { effort, permission, model })
     }
 
     /// The arguments for options already passed through [`Spec::resolve`]: effort, permission,
-    /// then model.
+    /// then model. None for an agent whose options travel in its server's configuration.
     pub fn option_args(&self, resolved: &LaunchOptions) -> Vec<String> {
         let mut out: Vec<String> = Vec::new();
+        if self.carrier != Carrier::Argv {
+            return out;
+        }
         if let Some(a) = resolved.effort.and_then(|e| self.effort_args(e)) {
             out.extend(a.iter().map(|s| (*s).to_owned()));
         }
@@ -344,6 +386,12 @@ impl Spec {
             _ => Vec::new(),
         }
     }
+}
+
+/// `provider/model` with both parts present (in `openrouter/x-ai/grok-4` the model part has a
+/// slash of its own).
+pub fn is_provider_model(name: &str) -> bool {
+    name.split_once('/').is_some_and(|(p, m)| !p.is_empty() && !m.is_empty())
 }
 
 /// A UUID in its 8-4-4-4-12 hex form.
@@ -414,6 +462,13 @@ mod tests {
             {
                 expected.extend(a.iter().map(|x| (*x).to_owned()));
             }
+            if s.carrier == Carrier::ServerConfig {
+                // A server configuration entry is a key and its JSON value, and never argv.
+                for a in s.efforts.iter().map(|(_, a)| a).chain(s.permissions.iter().map(|(_, a)| a)) {
+                    assert!(a.len() == 2 && serde_json::from_str::<serde_json::Value>(a[1]).is_ok(), "{k:?} {a:?}");
+                }
+                expected.clear();
+            }
             assert_eq!(s.option_args(&defaults), expected, "{k:?}");
         }
     }
@@ -431,6 +486,17 @@ mod tests {
         // A blank model is no model.
         let asked = LaunchOptions { model: Some("  ".into()), ..Default::default() };
         assert_eq!(AgentKind::Claude.spec().resolve(&asked).unwrap().model, None);
+        // opencode: provider/model, and an effort only with a model.
+        let opencode = AgentKind::Opencode.spec();
+        let asked = LaunchOptions { model: Some("big-pickle".into()), ..Default::default() };
+        assert!(opencode.resolve(&asked).unwrap_err().contains("provider/model"));
+        let asked = LaunchOptions { effort: Some(Effort::Deep), ..Default::default() };
+        assert!(opencode.resolve(&asked).unwrap_err().contains("model named beside it"));
+        let asked = LaunchOptions { effort: Some(Effort::Deep), model: Some("opencode/glm-5.3-flash-free".into()), ..Default::default() };
+        let resolved = opencode.resolve(&asked).unwrap();
+        assert!(opencode.option_args(&resolved).is_empty());
+        let asked = LaunchOptions { permission: Some(Permission::Auto), ..Default::default() };
+        assert!(opencode.resolve(&asked).unwrap_err().contains("Auto"));
     }
 
     #[test]

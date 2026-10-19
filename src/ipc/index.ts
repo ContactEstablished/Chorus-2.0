@@ -17,6 +17,7 @@ export type {
   Flavor,
   LaunchOptions,
   LeakReport,
+  Observed,
   Permission,
   PermissionChoice,
   ResumeKind,
