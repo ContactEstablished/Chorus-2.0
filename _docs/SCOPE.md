@@ -101,7 +101,7 @@ From the Harness mockups, confirmed as the UI direction (D9), plus one setup aid
 | Model catalog and shortlist | Settings → Providers | P2 |
 | OpenRouter capped keys | Per launch | P2 |
 | Repo secret scanner | Script + CI | P0 |
-| JEV AI key | Settings → Providers: a stored key with a connection test; its purpose is still open ([OPEN-QUESTIONS.md](OPEN-QUESTIONS.md)) | P2 |
+| JEV AI key | Settings → Providers: a stored key for TypeSafe's Jev API (typed decisions, not text) with a connection test (D40) | P2 |
 
 ### Routing
 | Feature | 2.0 home | Phase |

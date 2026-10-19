@@ -7,7 +7,8 @@ did, and what to do next.
 Chorus 2.0 is a ground-up rebuild of Chorus on **Tauri 2 (Rust)** with a **Vue 3** web UI. Windows only
 for now. Bring your own keys: Chorus itself only talks to the providers you configure.
 
-**Status:** Phase 0 (foundations and spikes). The app builds and opens an empty window.
+**Status:** Phase 1 (session engine). Phase 0 closed on 2026-10-19: the app builds, launches and
+installs, and every spike has a written result in [`_docs/spikes/`](_docs/spikes/README.md).
 
 ## Docs
 

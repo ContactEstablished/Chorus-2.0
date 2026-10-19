@@ -5,11 +5,6 @@ gets a row in the resolved table below. Each has a default that stands if he doe
 
 ## Still open
 
-**Q7b — What is the JEV AI key (TypeSafe) for?** It was carried over from Chorus 1 without a stated
-purpose. If it is an LLM gateway, it could also serve the narrator or day summaries. *Until Matthew
-says: it stays a stored key in Settings → Providers, with a connection test, and nothing else uses it.*
-Blocks: nothing before P2.
-
 **Q18 — How should Chorus read Grok's state?** (From spike S5.) Grok 1.0.62 has Claude-style hooks
 but loads them only from global files (`~/.grok/hooks/*.json`, `~/.claude/settings.json`, its
 `config.toml`), not per launch; structured approval exists only over ACP (`grok agent stdio`), which
@@ -47,7 +42,7 @@ dictation app (D22, D23).
 | Q4 Where do filmstrip and grid go? | Session strip, and a Wall layout under Sessions | D26 |
 | Q5 Pop-out windows | Deferred | D27 |
 | Q6 What to keep of responses | Final message per turn, tool-call list, asks with their answers; transcripts stay in the agents' files with paths recorded | D7 |
-| Q7 The narrator | A cheap OpenRouter model chosen in Settings, on by default, switchable off per project. The JEV half is still open (Q7b above) | D28 |
+| Q7 The narrator | A cheap OpenRouter model chosen in Settings, on by default, switchable off per project. The JEV half is Q7b | D28 |
 | Q8 Approving from 2.0 | Yes, if spike S5 proves it reliable; the agent's own prompt is the fallback | D29 |
 | Q9 Dependencies | ARCHITECTURE §10 approved, minus the voice items | D30 (and D4, D12) |
 | Q10 Mission Control | Overview board replaces it; forecasts only after turn capture is ≥95% complete | D18 |
@@ -58,3 +53,9 @@ dictation app (D22, D23).
 | Q15 Import projects from Chorus 1? | Yes: one-time and read-only, a small P4 task | D33 |
 | Q16 Automation triggers | Schedules first; GitHub triggers later via `gh` polling | D34 |
 | Q17 Remote control alternatives | Noted; decided at P13 | D35 |
+
+## Resolved 2026-10-19
+
+| Question | Answer | Decision |
+|---|---|---|
+| Q7b What is the JEV AI key for? | TypeSafe's Jev API: typed decisions with calibrated probabilities, not text. Stored with a connection test in P2; uses decided per phase | D40 |
