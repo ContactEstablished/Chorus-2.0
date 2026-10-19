@@ -1,0 +1,29 @@
+[package]
+name = "chorus"
+description = "Chorus 2.0: supervise AI coding agents running in real terminals"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+default-run = "chorus"
+
+[lib]
+# The `_lib` suffix avoids a Windows name clash between the lib and the bin (cargo#8519).
+name = "chorus_lib"
+crate-type = ["rlib"]
+
+[build-dependencies]
+tauri-build = { workspace = true }
+
+[dependencies]
+chorus-core = { workspace = true }
+tauri = { workspace = true }
+specta = { workspace = true }
+specta-typescript = { workspace = true }
+tauri-specta = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

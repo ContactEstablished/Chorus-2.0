@@ -1,0 +1,24 @@
+# chorus-core is pure (ARCHITECTURE §2, D11). These lints catch the common IO entry points;
+# tests/purity.rs is the stricter check and forbids std::fs, std::process, std::net and std::env
+# anywhere in src/.
+disallowed-types = [
+  { path = "std::fs::File", reason = "chorus-core does no IO; do it in src-tauri" },
+  { path = "std::fs::OpenOptions", reason = "chorus-core does no IO; do it in src-tauri" },
+  { path = "std::process::Command", reason = "chorus-core spawns nothing; do it in src-tauri" },
+  { path = "std::net::TcpListener", reason = "chorus-core does no networking" },
+  { path = "std::net::TcpStream", reason = "chorus-core does no networking" },
+  { path = "std::net::UdpSocket", reason = "chorus-core does no networking" },
+  { path = "std::time::SystemTime", reason = "chorus-core takes time as an input, never reads the clock" },
+  { path = "std::time::Instant", reason = "chorus-core takes time as an input, never reads the clock" },
+]
+disallowed-methods = [
+  { path = "std::fs::read", reason = "chorus-core does no IO" },
+  { path = "std::fs::read_to_string", reason = "chorus-core does no IO" },
+  { path = "std::fs::write", reason = "chorus-core does no IO" },
+  { path = "std::fs::create_dir_all", reason = "chorus-core does no IO" },
+  { path = "std::fs::remove_file", reason = "chorus-core does no IO" },
+  { path = "std::env::var", reason = "chorus-core takes configuration as input" },
+  { path = "std::env::var_os", reason = "chorus-core takes configuration as input" },
+  { path = "std::env::vars", reason = "chorus-core takes configuration as input" },
+  { path = "std::env::current_dir", reason = "chorus-core takes paths as input" },
+]

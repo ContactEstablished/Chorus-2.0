@@ -1,0 +1,29 @@
+[workspace]
+resolver = "3"
+members = ["src-tauri", "crates/chorus-core"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.90"
+license = "MIT"
+publish = false
+
+[workspace.dependencies]
+# Tauri is pinned to 2.x (D4); 3.0 is in alpha.
+tauri = "2.12"
+tauri-build = "2.7"
+# tauri-specta and specta are release candidates; pin them exactly, as their docs require.
+specta = { version = "=2.0.0-rc.25", features = ["derive"] }
+specta-typescript = "=0.0.12"
+tauri-specta = { version = "=2.0.0-rc.25", features = ["derive", "typescript"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+chorus-core = { path = "crates/chorus-core" }
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }

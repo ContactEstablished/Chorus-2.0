@@ -79,6 +79,12 @@ An over-broad allow-list leaks ambient credentials into agents.
 databases (including one shadowed by another app's container) and dev worktrees silently sharing one,
 where migration numbers collided. Separate identifiers, and show the live DB path in the app.
 
+**L21 — 2.0's binary name matches Chorus 1's for any name-based query.** Windows process names are
+case-insensitive, so `Win32_Process` filtered by `Name='chorus.exe'` returns 2.0's dev build *and*
+Chorus 1's `Chorus.exe` (five processes on this machine, 2026-10-18). Never kill or inspect "Chorus" by
+name: filter by `ExecutablePath` or by a PID recorded at launch, and refuse any tree that contains a
+process under Chorus 1's install folder.
+
 ## Money and models
 
 **L16 — Read-then-revoke under-reports OpenRouter spend.** Reading a capped key's usage right after the

@@ -1,0 +1,66 @@
+/* Design tokens (design/DESIGN.md). Glacier is the default theme (D25); Dusk lands in P4. */
+
+:root {
+  --bg: #0a0f16;
+  --bg-sidebar: #0d131c;
+  --surface: #111925;
+  --surface-raised: #151e2c;
+  --surface-chip: #182231;
+  --border: #1d2a3a;
+  --border-strong: #2a3a50;
+
+  --text: #edf2f8;
+  --text-2: #b4c0d0;
+  --text-muted: #7d8ba0;
+
+  --accent: #1ec8f0;
+  --accent-hover: #4dd6f5;
+  --on-accent: #03202a;
+  --accent-soft: rgb(30 200 240 / 0.12);
+  --accent-line: rgb(30 200 240 / 0.35);
+
+  --status-needs: #ffc400;
+  --status-approval: #ffc400;
+  --status-input: #ffc400;
+  --status-working: #4d7cff;
+  --status-ready: #00e676;
+  --status-failed: #ff3d5a;
+  --status-done: #3a4a60;
+
+  /* The seven-bar mark's three neutral steps, darkest at the outside (DESIGN.md "Logo"). */
+  --logo-bar-low: #3e4650;
+  --logo-bar-mid: #4a535e;
+  --logo-bar-high: #5a646f;
+
+  --radius-card: 14px;
+  --radius-control: 9px;
+  --radius-pill: 999px;
+
+  /* Fonts are bundled in P4; until then the system fallbacks apply. */
+  --font-heading: 'Bricolage Grotesque', 'Segoe UI', system-ui, sans-serif;
+  --font-ui: 'Instrument Sans', 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Cascadia Mono', Consolas, monospace;
+
+  color-scheme: dark;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+
+#app {
+  height: 100%;
+}

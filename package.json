@@ -1,0 +1,36 @@
+{
+  "name": "chorus",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Chorus 2.0: supervise AI coding agents running in real terminals",
+  "type": "module",
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "dev": "tauri dev --config src-tauri/tauri.dev.conf.json",
+    "build": "tauri build",
+    "web:dev": "vite",
+    "web:build": "vue-tsc --noEmit && vite build",
+    "typecheck": "vue-tsc --noEmit",
+    "test": "vitest run",
+    "test:rust": "cargo test --workspace",
+    "lint:rust": "cargo clippy --workspace --all-targets -- -D warnings",
+    "grep:secrets": "node scripts/secret-grep.mjs",
+    "bindings": "node scripts/update-bindings.mjs",
+    "check": "npm run typecheck && npm run test && npm run test:rust && npm run lint:rust && npm run grep:secrets"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.12.4",
+    "pinia": "^4.1.0",
+    "vue": "^3.5.44"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.12.3",
+    "@vitejs/plugin-vue": "^6.0.10",
+    "typescript": "~6.0.3",
+    "vite": "^8.3.4",
+    "vitest": "^5.0.5",
+    "vue-tsc": "^3.3.13"
+  }
+}

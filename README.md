@@ -7,7 +7,7 @@ did, and what to do next.
 Chorus 2.0 is a ground-up rebuild of Chorus on **Tauri 2 (Rust)** with a **Vue 3** web UI. Windows only
 for now. Bring your own keys: Chorus itself only talks to the providers you configure.
 
-**Status:** planning. Development starts with Phase 0 (foundations and spikes).
+**Status:** Phase 0 (foundations and spikes). The app builds and opens an empty window.
 
 ## Docs
 
@@ -19,4 +19,16 @@ for now. Bring your own keys: Chorus itself only talks to the providers you conf
 
 ## Development
 
-Set up in Phase 0. Expected toolchain: Rust (stable, MSVC), Node 22, WebView2 (ships with Windows 11).
+Toolchain: Rust (stable, MSVC), Node 22.12 or later, WebView2 (ships with Windows 11). Versions verified
+so far are in [_docs/spikes/README.md](_docs/spikes/README.md).
+
+```sh
+npm install
+npm run dev        # dev build: identifier com.contactestablished.chorus2.dev, its own data directory
+npm run build      # release build and per-user NSIS installer
+npm run check      # typecheck, vitest, cargo test, clippy -D warnings, secret scan
+npm run bindings   # regenerate src/ipc/bindings.ts from the Rust IPC types
+```
+
+Layout: `src/` is the Vue front end, `src-tauri/` the Tauri app crate (IO and wiring),
+`crates/chorus-core/` the pure logic (no IO; enforced by `tests/purity.rs` and `clippy.toml`).

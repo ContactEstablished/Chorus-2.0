@@ -1,0 +1,16 @@
+[package]
+name = "chorus-core"
+description = "Chorus 2.0 pure logic: no IO, no Tauri, no filesystem, no network, no SQLite"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+# Only pure crates belong here. tests/purity.rs fails the build if anything else is added
+# (ARCHITECTURE §2, D11).
+[dependencies]
+serde = { workspace = true }
+
+[lints]
+workspace = true
