@@ -1,0 +1,115 @@
+# Chorus 2.0 — Design
+
+Source of truth: the **Harness** mockups in `_assets/Harness UI mockups.zip` (`Harness.dc.html` in the
+Glacier theme, `Harness (Dusk).dc.html`, and `uploads/glacier-theme.css`). Screenshots of every screen are
+in `_assets/mockup-screens/`. Where this file and the mockup disagree, the mockup wins, except for the
+product name and logo (OPEN-QUESTIONS Q2).
+
+## Screens
+
+| Screen | Screenshot | What it does |
+|---|---|---|
+| Overview | `glacier-overview.png`, `dusk-overview.png` | Headline ("3 sessions need you · 1 working · 6 total"); status filter pills; project tag chips (+ New tag); Group by Status / Project / None; cards in **Needs you**, **In flight** and **Finished** groups |
+| Sessions | `glacier-sessions.png` | Searchable list of every session |
+| Session — Friendly | `glacier-session-review.png`, `-answer`, `-choose`, `-watch`, `-recover`; `dusk-session-friendly.png` | Header (agent chip, name, project, dir, branch, agent / model, status pill, Friendly/Raw toggle); Now / Blocker / Up next; timeline; composer; right panel with readiness, **Next steps**, **Done — won't be suggested again**, and session facts |
+| Session — Raw | `glacier-session-raw.png` | Terminal with "attached · pty 0 · 118×38 · scrollback 10k", buttons ^C / clear / wrap; same right panel |
+| Bots | `glacier-bots.png` | Cards: agent, model, description, tags, usage, Edit, Start session |
+| Automations | `glacier-automations.png` | Rows: name, bot · schedule or trigger · outcome, last run |
+| Documents | `glacier-documents.png` | Project-tagged rows linked to the session that produced each one |
+| Notes | `glacier-notes.png` | Project-tagged (or "All projects") notes; pinned notes first |
+| Settings | `glacier-settings.png` | Providers (connection state), notifications, appearance |
+
+**Rail:** logo + name, Overview (badge = sessions needing you), Sessions, Bots, Automations, Documents,
+Notes, Settings; then **Projects** (colour dot, session count, attention dot, +); **New session** pinned at
+the bottom. It collapses to icons under 720 px wide.
+
+## Status vocabulary
+
+| State | Label | Card CTA | Readiness panel |
+|---|---|---|---|
+| `approval` | Awaiting approval | Review request → | **Waiting on you.** The agent asked permission for a consequential action. Approve or deny to continue — nothing runs until then. |
+| `input` | Needs your answer | Answer → | **Waiting on you.** The agent asked a question and is paused. Answer here or type your own reply. |
+| `failed` | Failed | Recover → | **Agent stopped.** The process exited. History is intact — choose how to recover. |
+| `working` | Working (pulsing dot) | Watch → | **Agent is busy.** Instructions you send now are queued and delivered at the next pause. |
+| `ready` | Ready for next step | Choose next step → | **Ready for the next step.** Work from the previous phase is complete. Pick a step or write your own instruction. |
+| `done` | Completed | Open → | **Session finished.** You can still ask follow-ups; the agent will resume in the same context. |
+
+Urgency order: approval, input, failed, working, ready, done. **Needs you** = approval + input + failed.
+
+**Composer placeholder by state:** approval "Or reply to the request in your own words…", input "Type your
+answer, or ask a follow-up…", ready "Write your own instruction…", working "Queue an instruction for the
+next pause…", done "Ask a follow-up in the same context…", failed "Tell the agent how to recover…".
+
+**Action kinds:** CONTINUE (accent) "Send to session", ANSWER (needs) "Send answer", APPROVE (approval)
+"Approve & run", DENY (muted) "Send denial", RETRY (failed) "Retry". Each action shows *what it does*,
+*what it sends* (verbatim) and an ETA. A blocked action says why ("Blocked — resolve the approval first").
+
+## Tokens
+
+### Glacier (from `glacier-theme.css`)
+
+| Token | Value | | Token | Value |
+|---|---|---|---|---|
+| `--bg` | `#0a0f16` | | `--text` | `#edf2f8` |
+| `--bg-sidebar` | `#0d131c` | | `--text-2` | `#b4c0d0` |
+| `--surface` | `#111925` | | `--text-muted` | `#7d8ba0` |
+| `--surface-raised` | `#151e2c` | | `--accent` | `#1ec8f0` |
+| `--surface-chip` | `#182231` | | `--accent-hover` | `#4dd6f5` |
+| `--border` | `#1d2a3a` | | `--on-accent` | `#03202a` |
+| `--border-strong` | `#2a3a50` | | `--accent-soft` / `--accent-line` | accent at 12% / 35% |
+| `--status-needs` | `#ffc400` | | `--status-working` | `#4d7cff` |
+| `--status-ready` | `#00e676` | | `--status-failed` | `#ff3d5a` |
+| `--status-done` | `#3a4a60` | | status `-soft` tints | each at 12% |
+| `--tag-pink` | `#f472b6` | | `--tag-tan` | `#e0a96d` |
+| `--tag-lavender` | `#a5b4fc` | | `--tag-lime` | `#c4e05a` |
+| `--radius-card` | 14px | | `--radius-control` / `--radius-pill` | 9px / 999px |
+
+### Dusk (derived from `Harness (Dusk).dc.html`; there is no Dusk CSS file yet)
+
+| Token | Value | | Token | Value |
+|---|---|---|---|---|
+| `--bg` | `#1b1e25` | | `--text` | `#e9ebf1` |
+| `--bg-sidebar` | `#171a20` | | `--text-2` | `#a3aabb` (body text `#c3c8d4`) |
+| `--surface` | `#22262e` | | `--text-muted` | `#6f7789` (dim `#5a6273`) |
+| `--surface-chip` | `#2a2f39` | | `--accent` | `#4f8cff` |
+| `--border` | `rgba(255,255,255,.06)` | | `--accent-hover` | `#8db5ff` |
+| `--status-working` | `#5ccfdc` | | `--status-needs` (question) | `#e9b85b` |
+| `--status-approval` | `#f09a86` | | `--status-ready` | `#86d4a4` |
+| `--status-done` | `#a3aabb` | | `--status-failed` | `#ef7a7a` |
+| `--tag-pink` | `#e39ac0` | | `--tag-tan` | `#c9a77a` |
+| `--tag-lavender` | `#9ea4f5` | | `--tag-lime` | `#b9c46e` |
+
+**Note:** Dusk gives *approval* its own colour; Glacier uses `--status-needs` for both. 2.0 defines
+`--status-approval` and `--status-input` in both themes (in Glacier both are `#ffc400`).
+
+### Agent chips (both themes)
+Claude Code `CC` `#e7c3a4` · Codex `CX` `#a9c4ee` · opencode `OR` `#c9b6f2`, each on its colour at 14%. Grok,
+Shell and later agents need chips in the same family.
+
+### Type
+Headings **Bricolage Grotesque** 500–700 · UI **Instrument Sans** 400–600 · code and terminal
+**JetBrains Mono** 400–600. Bundled with the app, never fetched at runtime.
+
+### Motion
+Working dot pulse (1.6 s), "SUMMARY UPDATING" shimmer (1.8 s), cards and toasts rise in 250 ms. All motion
+respects `prefers-reduced-motion`.
+
+## Startup splash
+
+Matthew's brief: *"more exciting, 3D, and more engaging. Still only a few seconds but make it eye
+catching."*
+
+Working concept, to prototype in spike S7 and show him before building:
+
+- **Voices converging.** Particles (one stream per session being restored, coloured by project) sweep in
+  from depth and condense into the logo mark, which then turns in 3D under soft bloom.
+- **Real information.** "Restoring 6 sessions" counts up as each session actually comes back, so the
+  animation is honest about what the app is doing.
+- **Budget.** First frame under ~300 ms, done in ≤3 s, skippable with any key or click; reduced-motion
+  users get a short static version. The splash never delays restore; it runs while restore happens.
+
+## Logo
+
+Chorus 1's official mark is the **seven-bar symmetric mark** (bars 6 px on a 13 px pitch, heights
+28/44/62/76/62/44/28, the centre bar in the accent colour). The mockup draws a placeholder rotated-square
+glyph next to "Harness". Which name and mark 2.0 uses is OPEN-QUESTIONS Q2.
