@@ -18,10 +18,12 @@ pub enum AgentKind {
     Opencode,
     Grok,
     Gemini,
+    Aider,
 }
 
 impl AgentKind {
-    pub const ALL: [AgentKind; 6] = [Self::Shell, Self::Claude, Self::Codex, Self::Opencode, Self::Grok, Self::Gemini];
+    pub const ALL: [AgentKind; 7] =
+        [Self::Shell, Self::Claude, Self::Codex, Self::Opencode, Self::Grok, Self::Gemini, Self::Aider];
 
     /// The stored and serialised name.
     pub fn as_str(self) -> &'static str {
@@ -32,6 +34,7 @@ impl AgentKind {
             Self::Opencode => "opencode",
             Self::Grok => "grok",
             Self::Gemini => "gemini",
+            Self::Aider => "aider",
         }
     }
 
@@ -48,6 +51,7 @@ impl AgentKind {
             Self::Opencode => "opencode",
             Self::Grok => "Grok",
             Self::Gemini => "Gemini CLI",
+            Self::Aider => "Aider",
         }
     }
 
@@ -59,6 +63,7 @@ impl AgentKind {
             Self::Opencode => &OPENCODE,
             Self::Grok => &GROK,
             Self::Gemini => &GEMINI,
+            Self::Aider => &AIDER,
         }
     }
 }
@@ -167,6 +172,8 @@ pub struct Spec {
     /// file. Without one a session is only "Running" (D47), and the UI says so in those words. A new
     /// agent is `false` until its channel is built, so nothing has to remember to change a list.
     pub has_event_channel: bool,
+    /// Each level and the arguments it adds. An empty list means the agent's own behaviour is
+    /// already that level (aider asks before each edit with no flag of its own).
     pub efforts: &'static [(Effort, &'static [&'static str])],
     pub default_effort: Option<Effort>,
     pub permissions: &'static [(Permission, &'static [&'static str])],
@@ -343,6 +350,31 @@ const GEMINI: Spec = Spec {
     partner_rank: Some(4),
 };
 
+/// Aider 0.86.2: `--model provider/name` (it speaks OpenRouter natively, so `openrouter/<id>`), and
+/// `--reasoning-effort` for the effort. It has no permission modes: it asks before each edit, which
+/// is Manual with no arguments, and `--yes-always` accepts everything. Auto mode is the same level
+/// as Full access here, and there is no plan mode, so neither is declared. It has no conversation
+/// id either: `--restore-chat-history` (passed by the launch) reloads the folder's chat history, and
+/// resume is `None`. No event channel: `--notifications-command` runs a command line whose token
+/// would have to travel in argv, which the secret rules forbid.
+const AIDER: Spec = Spec {
+    kind: AgentKind::Aider,
+    verified: Some("0.86.2"),
+    carrier: Carrier::Argv,
+    has_event_channel: false,
+    efforts: &[
+        (Effort::Fast, &["--reasoning-effort", "low"]),
+        (Effort::Balanced, &["--reasoning-effort", "medium"]),
+        (Effort::Deep, &["--reasoning-effort", "high"]),
+    ],
+    default_effort: None,
+    permissions: &[(Permission::Manual, &[]), (Permission::FullAccess, &["--yes-always"])],
+    default_permission: Some(Permission::Manual),
+    model: Some(ModelArg::Flag("--model")),
+    resume: Resume::None,
+    partner_rank: Some(5),
+};
+
 pub const MAX_MODEL_CHARS: usize = 200;
 
 /// A model name safe to pass as an argument and inside a TOML string: letters, digits and
@@ -506,11 +538,12 @@ mod tests {
             // Defaults are declared options.
             assert!(s.default_effort.is_none_or(|e| s.effort_args(e).is_some()), "{k:?} default effort");
             assert!(s.default_permission.is_none_or(|p| s.permission_args(p).is_some()), "{k:?} default permission");
-            // Each declared level gives arguments of its own, declared once.
+            // Each declared level gives arguments of its own (an empty list means the agent
+            // already behaves that way), declared once.
             let mut seen = Vec::new();
             for e in EFFORTS {
                 if let Some(a) = s.effort_args(e) {
-                    assert!(!a.is_empty() && !seen.contains(&a), "{k:?} {e:?}");
+                    assert!(!seen.contains(&a), "{k:?} {e:?}");
                     assert_eq!(s.efforts.iter().filter(|(x, _)| *x == e).count(), 1);
                     seen.push(a);
                 }
@@ -518,7 +551,7 @@ mod tests {
             let mut seen = Vec::new();
             for p in PERMISSIONS {
                 if let Some(a) = s.permission_args(p) {
-                    assert!(!a.is_empty() && !seen.contains(&a), "{k:?} {p:?}");
+                    assert!(!seen.contains(&a), "{k:?} {p:?}");
                     assert_eq!(s.permissions.iter().filter(|(x, _)| *x == p).count(), 1);
                     seen.push(a);
                 }
@@ -577,6 +610,12 @@ mod tests {
         // A session asks for no effort at launch, so the CLI's default stands.
         let asked = LaunchOptions { permission: Some(Permission::Auto), ..Default::default() };
         assert!(gemini.resolve(&asked).unwrap_err().contains("Auto"));
+        // Aider has three efforts, and only Manual and Full access.
+        let aider = AgentKind::Aider.spec();
+        let asked = LaunchOptions { effort: Some(Effort::Max), ..Default::default() };
+        assert_eq!(aider.resolve(&asked).unwrap_err(), "Aider has no Max effort setting");
+        let asked = LaunchOptions { permission: Some(Permission::Plan), ..Default::default() };
+        assert!(aider.resolve(&asked).unwrap_err().contains("Plan"));
     }
 
     #[test]
@@ -613,6 +652,18 @@ mod tests {
         assert_eq!(gemini.option_args(&gemini.resolve(&opts).unwrap()), ["--approval-mode", "plan", "--model", "gemini-3-pro-preview"]);
         // A user's settings can default Gemini to auto_edit or plan, so a mode is always passed.
         assert_eq!(gemini.option_args(&gemini.resolve(&LaunchOptions::default()).unwrap()), ["--approval-mode", "default"]);
+        let aider = AgentKind::Aider.spec();
+        let opts = LaunchOptions {
+            effort: Some(Effort::Deep),
+            permission: Some(Permission::FullAccess),
+            model: Some("openrouter/deepseek/deepseek-v4.1-flash:free".into()),
+        };
+        assert_eq!(
+            aider.option_args(&aider.resolve(&opts).unwrap()),
+            ["--reasoning-effort", "high", "--yes-always", "--model", "openrouter/deepseek/deepseek-v4.1-flash:free"]
+        );
+        // Manual is what aider does on its own: it asks before each edit, with no flag.
+        assert!(aider.option_args(&aider.resolve(&LaunchOptions::default()).unwrap()).is_empty());
     }
 
     #[test]
@@ -633,6 +684,8 @@ mod tests {
         assert!(claude.conversation_args(Some(""), true).is_empty());
         assert!(claude.conversation_args(Some("--last"), true).is_empty());
         assert!(AgentKind::Shell.spec().conversation_args(Some(id), true).is_empty());
+        // Aider has no id: its history file is what a restart reloads.
+        assert!(AgentKind::Aider.spec().conversation_args(Some(id), true).is_empty());
     }
 
     #[test]

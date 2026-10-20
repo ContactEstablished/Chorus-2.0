@@ -42,6 +42,7 @@
   --agent-opencode: #c9b6f2;
   --agent-grok: #b7d9c3;
   --agent-gemini: #8fc7e8;
+  --agent-aider: #d8c38a;
   --agent-shell: #c3cad6;
 
   /* The seven-bar mark's three neutral steps, darkest at the outside (DESIGN.md "Logo"). */
@@ -278,6 +279,9 @@ button:focus-visible {
 }
 .agent-gemini {
   --agent: var(--agent-gemini);
+}
+.agent-aider {
+  --agent: var(--agent-aider);
 }
 .agent-shell {
   --agent: var(--agent-shell);

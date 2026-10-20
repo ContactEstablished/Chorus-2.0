@@ -39,6 +39,7 @@ import codexLogo from '../../assets/agents/codex.png'
 import opencodeLogo from '../../assets/agents/opencode.png'
 import grokLogo from '../../assets/agents/grok.png'
 import geminiLogo from '../../assets/agents/gemini.png'
+import aiderLogo from '../../assets/agents/aider.png'
 import shellLogo from '../../assets/agents/shell.png'
 
 const props = defineProps<{ keys: CredentialSummary[]; busy: boolean; initialProject: number | null }>()
@@ -50,9 +51,9 @@ const profiles = useProfilesStore()
 const projects = useProjectsStore()
 
 // Drawn in the theme's colours: each logo is a mask.
-const LOGOS: Record<AgentKind, string> = { claude: claudeLogo, codex: codexLogo, opencode: opencodeLogo, grok: grokLogo, gemini: geminiLogo, shell: shellLogo }
+const LOGOS: Record<AgentKind, string> = { claude: claudeLogo, codex: codexLogo, opencode: opencodeLogo, grok: grokLogo, gemini: geminiLogo, aider: aiderLogo, shell: shellLogo }
 // The program each agent runs, for the summary's command line.
-const PROGRAMS: Record<AgentKind, string> = { claude: 'claude', codex: 'codex', opencode: 'opencode', grok: 'grok', gemini: 'gemini', shell: 'cmd' }
+const PROGRAMS: Record<AgentKind, string> = { claude: 'claude', codex: 'codex', opencode: 'opencode', grok: 'grok', gemini: 'gemini', aider: 'aider', shell: 'cmd' }
 // What each agent runs on when no provider or key is chosen.
 const SIGN_IN: Record<AgentKind, string> = {
   claude: 'your Claude subscription',
@@ -60,10 +61,11 @@ const SIGN_IN: Record<AgentKind, string> = {
   opencode: "opencode's own configuration",
   grok: "Grok's own sign-in",
   gemini: 'your Google sign-in or a Gemini key',
+  aider: "a key: Aider runs on an API key only",
   shell: 'no key: a plain terminal',
 }
 const SHORT_MODE: Record<Preset, string> = { solo: 'Solo', pair: 'Pair', workbench: 'Bench', swarm: 'Swarm' }
-const AGENT_ORDER: AgentKind[] = ['claude', 'codex', 'opencode', 'gemini', 'grok', 'shell']
+const AGENT_ORDER: AgentKind[] = ['claude', 'codex', 'opencode', 'gemini', 'aider', 'grok', 'shell']
 const AGENT_KEY = 'chorus.newSession.agent'
 
 function storedAgent(): AgentKind | null {

@@ -66,6 +66,18 @@ pub fn resolve(kind: AgentKind, parent_env: &[(String, String)], scratch: &Path)
             args.push("--skip-trust".into());
             Ok(Launch { program, args, additions: vec![] })
         }
+        AgentKind::Aider => Ok(Launch {
+            // `uv` installs a launcher executable, not an npm shim (LESSONS: aider on Windows).
+            program: find_on_path(&path, "aider.exe").ok_or("aider.exe not found on PATH")?,
+            args: vec![
+                // 0.86.2 checks for a new version on every launch unless told not to (L7).
+                "--no-check-update".into(),
+                // Aider has no conversation id; this reloads the folder's chat history, so a
+                // restarted session continues where it left off.
+                "--restore-chat-history".into(),
+            ],
+            additions: vec![],
+        }),
         AgentKind::Opencode => {
             // The session runs `serve` and `attach` with these (ARCHITECTURE §5, `opencode`). Its
             // conversations live in the session's own data folder, which is how they resume.
@@ -198,14 +210,15 @@ pub fn claude_trust_folder(parent_env: &[(String, String)], folder: &str) -> Res
 /// Whether the agent has recorded the conversation `id`, so the next run resumes it instead of
 /// starting it. Claude Code writes `<config>/projects/<folder>/<id>.jsonl` once the conversation has
 /// a message; Grok keeps `~/.grok/sessions/<folder>/<id>/` (its bundled docs, unverified while Grok
-/// isn't signed in). The folder part is derived from the working directory, so every folder is
-/// searched rather than re-deriving its name. Codex's ids are only known once it has written them.
+/// isn't signed in); Gemini CLI names its chats `session-<ms>-<id's first 8>.jsonl`. The folder part
+/// is derived from the working directory, so every folder is searched rather than re-deriving its
+/// name. Codex's ids are only known once it has written them.
 pub fn conversation_exists(kind: AgentKind, id: &str, parent_env: &[(String, String)]) -> bool {
     let home = || env_value(parent_env, "USERPROFILE").map(PathBuf::from);
     if kind == AgentKind::Gemini {
-        // Gemini CLI 0.64.0 writes `<home>\.gemini\tmp\<project>\chats\session-<ms>-<id's first
-        // 8>.jsonl`. The project folder is derived from the working directory, so every one is
-        // searched. `--session-id` refuses an id that already exists, which is why this matters.
+        // `<home>\.gemini\tmp\<project>\chats\session-<ms>-<id's first 8>.jsonl`. The project
+        // folder is derived from the working directory, so every one is searched. `--session-id`
+        // refuses an id that already exists, which is why this matters.
         let Some(short) = id.get(..8) else { return false };
         let Some(tmp) = home().map(|h| h.join(".gemini").join("tmp")) else { return false };
         let suffix = format!("-{short}.jsonl");
@@ -224,8 +237,8 @@ pub fn conversation_exists(kind: AgentKind, id: &str, parent_env: &[(String, Str
         }
         AgentKind::Grok => (home().map(|h| h.join(".grok").join("sessions")), id.to_owned()),
         AgentKind::Codex => return true,
-        // Gemini is handled above.
-        AgentKind::Gemini | AgentKind::Shell | AgentKind::Opencode => return false,
+        // Gemini is handled above. Aider has no conversation id to look for.
+        AgentKind::Aider | AgentKind::Gemini | AgentKind::Shell | AgentKind::Opencode => return false,
     };
     let Some(Ok(folders)) = root.map(std::fs::read_dir) else {
         return false;

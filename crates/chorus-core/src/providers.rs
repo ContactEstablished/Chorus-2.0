@@ -90,6 +90,10 @@ pub fn route_support(agent: AgentKind, kind: ProviderKind) -> Result<(), String>
         (AgentKind::Opencode, ProviderKind::Gateway) => {
             Err("Chorus routes opencode through OpenRouter only for now, not a gateway.".into())
         }
+        (AgentKind::Aider, ProviderKind::Openrouter) => Ok(()),
+        (AgentKind::Aider, ProviderKind::Gateway) => {
+            Err("Chorus routes aider through OpenRouter only for now, not a gateway.".into())
+        }
         (AgentKind::Claude, _) => Err(
             "Claude Code runs on your Claude login or an Anthropic key (Key below); Chorus doesn't route it through other providers yet."
                 .into(),
@@ -163,6 +167,11 @@ pub fn route(
             }
             let args = overrides.into_iter().flat_map(|a| ["-c".to_owned(), a]).collect();
             Ok(Route { key_var, args, model: model.to_owned(), opencode_provider: None })
+        }
+        AgentKind::Aider => {
+            // Aider (litellm) knows OpenRouter by name: `openrouter/<id>` plus OPENROUTER_API_KEY,
+            // which the route already puts in the environment. No base URL and no arguments.
+            Ok(Route { key_var, args: Vec::new(), model: format!("openrouter/{model}"), opencode_provider: None })
         }
         AgentKind::Opencode => {
             let mut entry = serde_json::Map::new();
@@ -480,8 +489,10 @@ mod tests {
         use ProviderKind::*;
         assert!(route_support(AgentKind::Codex, Openrouter).is_ok() && route_support(AgentKind::Codex, Gateway).is_ok());
         assert!(route_support(AgentKind::Opencode, Openrouter).is_ok());
+        assert!(route_support(AgentKind::Aider, Openrouter).is_ok());
         for (agent, kind) in [
             (AgentKind::Opencode, Gateway),
+            (AgentKind::Aider, Gateway),
             (AgentKind::Claude, Openrouter),
             (AgentKind::Grok, Openrouter),
             (AgentKind::Gemini, Openrouter),
@@ -490,6 +501,15 @@ mod tests {
         ] {
             assert!(!route_support(agent, kind).unwrap_err().is_empty(), "{agent:?} {kind:?}");
         }
+    }
+
+    #[test]
+    fn aider_names_its_route_model_for_openrouter() {
+        let r = route(AgentKind::Aider, ProviderKind::Openrouter, "OpenRouter", "", "deepseek/deepseek-v4.1-flash:free", None).unwrap();
+        assert_eq!(r.key_var, "OPENROUTER_API_KEY");
+        // litellm splits on the first slash: provider `openrouter`, model `deepseek/…`.
+        assert_eq!(r.model, "openrouter/deepseek/deepseek-v4.1-flash:free");
+        assert!(r.args.is_empty() && r.opencode_provider.is_none());
     }
 
     #[test]

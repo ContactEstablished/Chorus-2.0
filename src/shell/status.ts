@@ -14,7 +14,7 @@ export const ATTENTION: Record<Attention, { label: string; cta: string }> = {
 /** Most urgent first (matches the back end's order). */
 export const URGENCY: Attention[] = ['approval', 'input', 'failed', 'working', 'ready', 'running', 'done']
 
-export const AGENT_CHIPS: Record<AgentKind, string> = { claude: 'CC', codex: 'CX', opencode: 'OR', grok: 'GK', gemini: 'GM', shell: 'SH' }
+export const AGENT_CHIPS: Record<AgentKind, string> = { claude: 'CC', codex: 'CX', opencode: 'OR', grok: 'GK', gemini: 'GM', aider: 'AD', shell: 'SH' }
 
 export type StatusFilter = 'all' | 'needs' | 'working' | 'ready' | 'failed'
 

@@ -7,6 +7,7 @@ export const AGENT_LABELS: Record<AgentKind, string> = {
   opencode: 'opencode',
   grok: 'Grok',
   gemini: 'Gemini CLI',
+  aider: 'Aider',
 }
 
 export const KIND_LABELS: Record<ProviderKind, string> = {

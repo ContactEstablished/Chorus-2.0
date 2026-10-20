@@ -172,7 +172,7 @@ export type AgentInfo = {
 	detection: Detection | null,
 };
 
-export type AgentKind = "shell" | "claude" | "codex" | "opencode" | "grok" | "gemini";
+export type AgentKind = "shell" | "claude" | "codex" | "opencode" | "grok" | "gemini" | "aider";
 
 /**  Whether an agent can run on the provider; `reason` says why not. */
 export type AgentRoute = {
