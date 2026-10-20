@@ -6,6 +6,8 @@ mod events;
 mod fleet;
 mod ipc;
 mod lock;
+mod prefs;
+mod projects;
 mod providers;
 mod sessions;
 mod splash;
@@ -89,6 +91,11 @@ pub fn run() {
                 detecting.refresh_agents();
                 detecting.notify_all();
             })?;
+            // The stored zoom, before the window shows anything. A failure is shown in Settings,
+            // where the zoom can be set again.
+            if let Err(e) = prefs::apply_zoom(app.handle(), prefs::load(manager.store()).zoom) {
+                eprintln!("{e}");
+            }
             app.manage(manager);
             app::start_pulse(app.handle().clone());
             Ok(())

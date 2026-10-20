@@ -8,6 +8,25 @@ import * as __TAURI_EVENT from "@tauri-apps/api/event";
 /** Commands */
 export const commands = {
 	appInfo: () => __TAURI_INVOKE<AppInfo>("app_info"),
+	prefsGet: () => __TAURI_INVOKE<Prefs>("prefs_get"),
+	/**  Stores the preferences, with anything out of range brought back in, and applies the zoom. */
+	prefsSet: (prefs: Prefs) => typedError<Prefs, string>(__TAURI_INVOKE("prefs_set", { prefs })),
+	projectsList: () => typedError<Project[], string>(__TAURI_INVOKE("projects_list")),
+	/**  Adds a project, or with `id` edits one. Returns every project. */
+	projectSave: (id: number | null, project: ProjectInput) => typedError<Project[], string>(__TAURI_INVOKE("project_save", { id, project })),
+	projectSetState: (id: number, projectState: ProjectState) => typedError<Project[], string>(__TAURI_INVOKE("project_set_state", { id, projectState })),
+	/**  Puts projects in this order (the rail's, top first). */
+	projectsReorder: (ids: number[]) => typedError<Project[], string>(__TAURI_INVOKE("projects_reorder", { ids })),
+	/**  Deletes a project. Its sessions keep running, in no project. */
+	projectDelete: (id: number) => typedError<Project[], string>(__TAURI_INVOKE("project_delete", { id })),
+	sessionSetProject: (sessionId: number, projectId: number | null) => typedError<SessionSummary, string>(__TAURI_INVOKE("session_set_project", { sessionId, projectId })),
+	/**  Whether a Chorus 1 database is there to import from. */
+	chorus1ImportAvailable: () => __TAURI_INVOKE<boolean>("chorus1_import_available"),
+	/**
+	 *  Copies Chorus 1's projects (name, folder, colour, order, state) in, once each. Chorus 1's
+	 *  database is opened read only and never written (D33).
+	 */
+	chorus1Import: () => typedError<ImportReport, string>(__TAURI_INVOKE("chorus1_import")),
 	/**
 	 *  Every agent and what it declares. With `refresh`, looks for each CLI again first (a second or
 	 *  two); otherwise returns what the last detection found.
@@ -208,6 +227,8 @@ export type CreateSession = {
 	providerId?: number | null,
 	/**  What the session is for, shown on its card and header. */
 	description?: string | null,
+	/**  The project it belongs to; left out, the project whose folder holds `cwd`, if any. */
+	projectId?: number | null,
 };
 
 export type CredentialSummary = {
@@ -278,6 +299,15 @@ export type FleetProbe = {
 	foregroundHwnd: string,
 };
 
+export type GroupBy = "status" | "project" | "none";
+
+export type ImportReport = {
+	added: number,
+	/**  Already here, from an earlier import or with the same folder. */
+	skipped: number,
+	projects: Project[],
+};
+
 /**
  *  What a session asks for. An empty field means the agent's declared default, or for the model,
  *  the CLI's own choice.
@@ -337,6 +367,15 @@ export type PermissionChoice = {
 	args: string,
 };
 
+export type Prefs = {
+	theme?: Theme,
+	/**  The whole window's zoom, 0.8 to 1.6. */
+	zoom?: number | null,
+	groupBy?: GroupBy,
+	/**  Whether the session view shows the strip of other sessions. */
+	sessionStrip?: boolean,
+};
+
 export type Preset = 
 /**  One agent. */
 "solo" | 
@@ -380,6 +419,30 @@ export type ProfileSummary = {
 	credential: CredentialUse | null,
 	updatedAtSecs: number,
 };
+
+export type Project = {
+	id: number,
+	name: string,
+	folder: string | null,
+	colour: string,
+	state: ProjectState,
+	/**  `chorus1` when it came from the import. */
+	importedFrom: string | null,
+};
+
+export type ProjectInput = {
+	name: string,
+	folder?: string | null,
+	/**  Left out, the next colour in the palette. */
+	colour?: string | null,
+};
+
+/**  Where a project is in its life. */
+export type ProjectState = "active" | 
+/**  Out of the rail, but its sessions still show. */
+"hidden" | 
+/**  Finished with: out of the rail and the Overview's chips. */
+"archived";
 
 export type ProviderKind = 
 /**  OpenRouter: one key for many models, and a management key that mints capped keys. */
@@ -505,6 +568,11 @@ export type SessionSummary = {
 	providerName: string | null,
 	/**  The newest run's minted OpenRouter key, if it had one. */
 	cappedKey: CappedKeyInfo | null,
+	projectId: number | null,
+	/**  The newest turn's final message, else its prompt, already scrubbed; shown on cards. */
+	latest: string | null,
+	/**  When that turn started, or 0. */
+	latestAtSecs: number,
 };
 
 export type SessionUpdated = {
@@ -519,6 +587,8 @@ export type Slot = {
 	agent: AgentKind,
 	role: Role | null,
 };
+
+export type Theme = "glacier" | "dusk";
 
 export type ToolEntry = {
 	tool: string,

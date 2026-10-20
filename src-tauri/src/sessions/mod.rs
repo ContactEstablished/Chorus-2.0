@@ -35,6 +35,7 @@ use chorus_core::conpty::{CURSOR_REPORT, Handshake};
 use chorus_core::env::{ChildEnvInput, compose_child_env, valid_secret_var};
 use chorus_core::launch::{self as launch_rules, Preset, Role, Slot};
 use chorus_core::opencode::{self as oc, Observed};
+use chorus_core::projects::ProjectState;
 use chorus_core::providers::{self as prov, ProviderKind};
 use chorus_core::scrollback::{boundary, exit_line, restart_screen};
 use chorus_core::scrub::{StreamScrubber, builtin_patterns};
@@ -51,6 +52,7 @@ use crate::agents::{self, AgentKind};
 use crate::events::recorder::Recorder;
 use crate::events::{HookRefused, same_token};
 use crate::store::history;
+use crate::store::projects as project_rows;
 use crate::store::providers as provider_rows;
 use crate::store::sessions::{self as rows, NewRun, NewSession, SessionRow};
 use crate::store::{Store, credentials};
@@ -141,6 +143,11 @@ pub struct SessionSummary {
     pub provider_name: Option<String>,
     /// The newest run's minted OpenRouter key, if it had one.
     pub capped_key: Option<CappedKeyInfo>,
+    pub project_id: Option<u32>,
+    /// The newest turn's final message, else its prompt, already scrubbed; shown on cards.
+    pub latest: Option<String>,
+    /// When that turn started, or 0.
+    pub latest_at_secs: u32,
 }
 
 /// A key minted for one run (`providers::keys`). The key itself is never shown or kept.
@@ -180,6 +187,9 @@ pub struct CreateSession {
     /// What the session is for, shown on its card and header.
     #[serde(default)]
     pub description: Option<String>,
+    /// The project it belongs to; left out, the project whose folder holds `cwd`, if any.
+    #[serde(default)]
+    pub project_id: Option<u32>,
 }
 
 /// Starts the sessions a preset makes. `session` is the first; the others are derived from it.
@@ -610,6 +620,7 @@ impl SessionManager {
         let last = rows::last_run(&self.store, row.id).ok().flatten();
         let credential_label =
             row.credential_id.and_then(|id| credentials::get(&self.store, id).ok().flatten()).map(|c| c.label);
+        let latest = history::latest(&self.store, row.id).ok().flatten();
         SessionSummary {
             id: row.id,
             name: row.name.clone(),
@@ -652,6 +663,9 @@ impl SessionManager {
                 note: k.cost_note,
             }),
             observed,
+            project_id: row.project_id,
+            latest_at_secs: latest.as_ref().map_or(0, |(_, at)| vault::commands::secs(*at)),
+            latest: latest.map(|(text, _)| text),
         }
     }
 
@@ -753,6 +767,7 @@ impl SessionManager {
             (spec.resume.kind() == ResumeKind::Assigned).then(|| uuid_v4(vault::random_bytes(16).try_into().expect("16 bytes")));
         let fallback = format!("{} {}", req.agent.display_name(), rows::count_by_agent(&self.store, req.agent)? + 1);
         let name = clean_name(req.name.as_deref(), &fallback)?;
+        let project_id = self.project_for(req.project_id, &cwd)?;
         let id = rows::insert(
             &self.store,
             &NewSession {
@@ -767,6 +782,7 @@ impl SessionManager {
                 agent_session_id: conversation.as_deref(),
                 provider_id: req.provider_id,
                 description: description.as_deref(),
+                project_id,
             },
         )?;
         let live = self.live_for(id);
@@ -1407,6 +1423,7 @@ impl SessionManager {
                 options: LaunchOptions::default(),
                 provider_id: None,
                 description: launch_rules::slot_description(&first.name, slot.role),
+                project_id: first.project_id,
             };
             let (session, error) = match self.create(derived) {
                 Ok(s) => (Some(s), None),
@@ -1431,6 +1448,41 @@ impl SessionManager {
     pub fn set_description(&self, id: u32, text: Option<&str>) -> Result<SessionSummary, String> {
         self.row(id)?;
         rows::set_description(&self.store, id, launch_rules::clean_description(text)?.as_deref())?;
+        let summary = self.summary(id)?;
+        (self.notify)(summary.clone());
+        Ok(summary)
+    }
+
+    /// The project a new session joins: the one asked for, which must exist and not be archived,
+    /// else the closest project whose folder holds `cwd`.
+    fn project_for(&self, asked: Option<u32>, cwd: &str) -> Result<Option<u32>, String> {
+        if let Some(id) = asked {
+            return match project_rows::get(&self.store, id)? {
+                Some(p) if p.state != ProjectState::Archived => Ok(Some(id)),
+                Some(p) => Err(format!("{} is archived; restore it before adding sessions.", p.name)),
+                None => Err(format!("no project {id}")),
+            };
+        }
+        let projects = project_rows::list(&self.store)?;
+        Ok(chorus_core::projects::project_for_folder(
+            projects.iter().filter(|p| p.state != ProjectState::Archived).filter_map(|p| p.folder.as_deref().map(|f| (p.id, f))),
+            cwd,
+        ))
+    }
+
+    /// Moves a session into a project, or out of any with `None`.
+    pub fn set_project(&self, id: u32, project_id: Option<u32>) -> Result<SessionSummary, String> {
+        self.row(id)?;
+        if let Some(pid) = project_id {
+            match project_rows::get(&self.store, pid)? {
+                Some(p) if p.state == ProjectState::Archived => {
+                    return Err(format!("{} is archived; restore it before adding sessions.", p.name));
+                }
+                Some(_) => {}
+                None => return Err(format!("no project {pid}")),
+            }
+        }
+        rows::set_project(&self.store, id, project_id)?;
         let summary = self.summary(id)?;
         (self.notify)(summary.clone());
         Ok(summary)

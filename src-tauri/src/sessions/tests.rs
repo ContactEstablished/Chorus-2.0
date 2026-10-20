@@ -35,6 +35,7 @@ impl Fixture {
             options: Default::default(),
             provider_id: None,
             description: None,
+            project_id: None,
         };
         let s = self.manager.create(req).unwrap();
         assert!(s.live, "shell should be running: {:?}", s.note);
@@ -250,6 +251,7 @@ fn bad_input_is_refused_at_the_boundary() {
         options: Default::default(),
         provider_id: None,
         description: None,
+        project_id: None,
     };
     assert!(f.manager.create(req.clone()).unwrap_err().contains("full path"));
     req.cwd = f.dir.join("missing").display().to_string();
@@ -278,6 +280,7 @@ fn a_preset_launch_names_and_notes_its_sessions() {
         options: Default::default(),
         provider_id: None,
         description: Some("  Ticket 42  ".into()),
+        project_id: None,
     };
     // A shell can't build: Workbench and Pair say so, and nothing starts.
     let refused = f.manager.launch(LaunchRequest { preset: Preset::Workbench, session: session.clone() }).unwrap_err();

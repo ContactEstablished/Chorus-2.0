@@ -219,6 +219,20 @@ pub fn turn_counts(store: &Store, session_id: u32) -> Result<(u32, u32, u32), St
     })
 }
 
+/// What a session last said or was asked: its newest turn's final message, else that turn's
+/// prompt, with when the turn started (ms). Shown on Overview cards.
+pub fn latest(store: &Store, session_id: u32) -> Result<Option<(String, i64)>, String> {
+    store.with(|c| {
+        c.query_row(
+            "SELECT COALESCE(t.final_message, p.text), t.started_at FROM turns t LEFT JOIN prompts p ON p.id = t.prompt_id
+             WHERE t.session_id = ?1 AND COALESCE(t.final_message, p.text) IS NOT NULL ORDER BY t.id DESC LIMIT 1",
+            [session_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()
+    })
+}
+
 /// The prompt text recorded for a turn, if any (tests and checks).
 #[cfg_attr(not(test), allow(dead_code, reason = "used by tests"))]
 pub fn prompt_of_turn(store: &Store, turn_id: i64) -> Result<Option<String>, String> {
@@ -248,6 +262,7 @@ mod tests {
                 agent_session_id: None,
                 provider_id: None,
                 description: None,
+                project_id: None,
             },
         )
         .unwrap()

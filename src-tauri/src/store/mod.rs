@@ -6,6 +6,7 @@
 pub mod credentials;
 pub mod history;
 pub mod profiles;
+pub mod projects;
 pub mod providers;
 pub mod sessions;
 pub mod settings;
@@ -24,6 +25,7 @@ const MIGRATION_FILES: &[(&str, &str)] = &[
     ("0004_launch.sql", include_str!("../../migrations/0004_launch.sql")),
     ("0005_history.sql", include_str!("../../migrations/0005_history.sql")),
     ("0006_transcripts.sql", include_str!("../../migrations/0006_transcripts.sql")),
+    ("0007_projects.sql", include_str!("../../migrations/0007_projects.sql")),
 ];
 
 pub struct Store {

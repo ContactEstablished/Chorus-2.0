@@ -239,6 +239,7 @@ mod tests {
                 agent_session_id: None,
                 provider_id: None,
                 description: None,
+                project_id: None,
             },
         )
         .unwrap();
