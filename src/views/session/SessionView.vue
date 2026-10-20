@@ -201,17 +201,17 @@ async function send(bytes: string): Promise<void> {
           {{ s.locked ? 'Unlock' : 'Lock' }}
         </button>
         <button class="quiet" :disabled="busy || s.locked" :title="s.locked ? 'Unlock it first' : 'End this run and start it again'" @click="restart">Restart</button>
-        <template v-if="confirmingClose">
-          <span class="ask">{{ closeQuestion }}</span>
-          <template v-if="canRemoveWorktree">
-            <button class="danger" :disabled="busy" :title="`Removes ${closeWorktree?.path}; the branch ${closeWorktree?.branch} is kept`" @click="close(true)">Close and remove worktree</button>
-            <button :disabled="busy" @click="close(false)">Close, keep worktree</button>
-          </template>
-          <button v-else class="danger" :disabled="busy" @click="close(false)">Close</button>
-          <button class="quiet" @click="confirmingClose = false">Keep</button>
-        </template>
-        <button v-else class="quiet danger" :disabled="busy || s.locked" :title="s.locked ? 'Unlock it first' : 'End the session'" @click="askClose">Close</button>
+        <button class="quiet danger" :disabled="busy || s.locked || confirmingClose" :title="s.locked ? 'Unlock it first' : 'End the session'" @click="askClose">Close</button>
       </div>
+    </div>
+    <div v-if="confirmingClose" class="confirm" role="alertdialog" aria-label="Close the session">
+      <span class="ask">{{ closeQuestion }}</span>
+      <template v-if="canRemoveWorktree">
+        <button class="danger" :disabled="busy" :title="`Removes ${closeWorktree?.path}; the branch ${closeWorktree?.branch} is kept`" @click="close(true)">Close and remove worktree</button>
+        <button :disabled="busy" @click="close(false)">Close, keep worktree</button>
+      </template>
+      <button v-else class="danger" :disabled="busy" @click="close(false)">Close</button>
+      <button class="quiet" @click="confirmingClose = false">Keep</button>
     </div>
 
     <div class="body">
@@ -416,10 +416,26 @@ async function send(bytes: string): Promise<void> {
   width: 100px;
   padding: 4px 8px;
 }
+.confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  margin: 0 20px 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius-control);
+  border: 1px solid var(--border-strong);
+  background: var(--surface-raised);
+}
+.confirm button {
+  padding: 4px 10px;
+  font-size: 13px;
+}
 .ask {
+  margin-right: auto;
   font-size: 12.5px;
   color: var(--text-2);
-  margin: 0 4px;
 }
 .body {
   flex: 1;
