@@ -216,6 +216,11 @@ function showFolderEnd(): void {
   if (el && document.activeElement !== el) el.scrollLeft = el.scrollWidth
 }
 watch(cwd, () => void nextTick(showFolderEnd))
+// Again once the monospace font has loaded and the dialog has finished rising: both change widths.
+onMounted(() => {
+  void document.fonts?.ready.then(showFolderEnd)
+  setTimeout(showFolderEnd, 300)
+})
 
 async function browse(): Promise<void> {
   const picked = await commands.folderPick(cwd.value.trim() || null).catch(() => null)
@@ -566,6 +571,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
         <span class="small">{{ modelUpFront ? 'Server config' : 'Command' }}</span>
         <div class="command mono">
           <span class="program">{{ PROGRAMS[agent] }}</span>{{ args.length ? ` ${args.join(' ')}` : '' }}
+          <span v-if="!args.length" class="muted">{{ ' (its own defaults)' }}</span>
           <span v-if="provider" class="muted">{{ ` + ${provider.name}'s settings` }}</span>
         </div>
       </div>
@@ -873,7 +879,7 @@ em {
   background: var(--surface);
   line-height: 1.6;
   color: var(--text-2);
-  word-break: break-all;
+  overflow-wrap: anywhere;
 }
 .program {
   color: var(--accent);
