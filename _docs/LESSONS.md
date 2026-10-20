@@ -258,7 +258,25 @@ but the API moved under `/api/` and wraps answers in `{"data": …}`: `POST /api
 while `POST /session` is now the web app's route and answers 405, so every opencode launch failed with
 "opencode answered 405 when asked to start a session". `attach` is gone: the terminal UI connects with
 `opencode --server <url> --session <id>`, and by default opencode uses a shared background service
-(`--standalone` gives a private one). `/api/provider` and the event stream's shapes are not yet checked.
+(`--standalone` gives a private one). Then measured with its free models (D58):
+- The API's own description is at `/openapi.json` (every other GET answers the web app's HTML).
+- `POST /api/session` takes `{title, location: {directory}, model: {providerID, id, variant}}`. The
+  variant only takes effect there: `"model": "provider/model#high"` in the configuration starts the
+  turn without one.
+- Configuration keys are renamed: `permissions` is a list of `{action, resource, effect}` rules
+  (actions such as `shell`, `edit`, `read`, `webfetch`, `external_directory`, `question`; the
+  configuration's rules win over the agent's), `providers` replaces `provider`, a model's `variants`
+  is a list of `{id, body}`, and extra request fields go in the model's `body`. An OpenRouter model
+  pinned through `body.provider` to a tag that doesn't exist fails its turn with "No endpoints
+  found", so opencode does send the body.
+- A new server answers `GET /api/provider` with an empty list for about three seconds while it loads.
+- Events arrive as `data: {id, type, data}` with `: heartbeat` comments. A turn: `session.inbox.enqueued`
+  (the prompt), `session.inbox.delivered`, `session.step.started` (agent and model with its variant),
+  `session.text.ended`, `session.tool.input.started`/`called`/`success`/`failed`,
+  `session.execution.succeeded`/`failed`/`interrupted`. Approvals are `permission.asked`
+  `{id, action, resources}` and `permission.replied` `{requestID, reply}` (replying takes
+  `{decision: once|always|reject}`); questions are forms, `form.created` `{form: {id, fields}}` and
+  `form.replied` `{id, answer}`. A shell command runs through Git Bash on this machine.
 
 ## Money and models
 

@@ -131,6 +131,11 @@ the caveats). *(docs)* marks what could only be read, not run.
 | Queue a message for the next pause | the TUI queues typed prompts natively; 2.0 can also hold and write after `Stop` | `codex queue --thread <id> --message <text>` (works on embedded sessions) | `prompt_async` (queued while busy) | hold until PTY-silent | hold |
 | Resume | `--resume <id>` | `codex resume <id>` | via server session (`attach --session`) | `--resume <id>` | — |
 
+*opencode is now 2.1.1 (D58, LESSONS L41): its column describes 1.18.34. In 2.x the TUI connects with
+`opencode --server <url> --session <id>`, the API is under `/api/`, turns run from `session.inbox.delivered`
+to `session.execution.succeeded`, questions are forms (`form.created`), and approvals are
+`permission.asked`, answered with `{decision}`.*
+
 **Fallbacks are explicit.** If a CLI update breaks a parser, the adapter reports "Friendly view
 unavailable for codex 0.170: unrecognised rollout format" in the session header, and Raw keeps working.
 Parsers are tested against **recorded fixtures per CLI version**, and an unknown version is *tried* and

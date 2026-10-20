@@ -74,7 +74,7 @@ From the Harness mockups, confirmed as the UI direction (D9), plus one setup aid
 |---|---|---|
 | Claude Code | Adapter | P2 |
 | Codex | Adapter | P2 |
-| opencode | Adapter (server + attach) | P2 |
+| opencode | Adapter (server + a TUI connected to it; 2.x since D58) | P2 |
 | Grok | Adapter | P2 |
 | CLI detection | Settings → Agents | P2 |
 | Capability-driven adapters | Adapter declarations + conformance test | P2 |
