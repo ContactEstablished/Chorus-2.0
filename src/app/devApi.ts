@@ -29,8 +29,17 @@ export function installDevApi(): void {
 
   const api = {
     list: () => plain(sessions.list),
-    create: async (request: Omit<CreateSession, 'options' | 'projectId'> & Partial<Pick<CreateSession, 'options' | 'projectId'>>) => {
-      const s = await sessions.create({ ...request, projectId: request.projectId ?? null, options: request.options ?? { effort: null, permission: null, model: null } })
+    create: async (
+      request: Omit<CreateSession, 'options' | 'projectId' | 'tags' | 'workspace'> &
+        Partial<Pick<CreateSession, 'options' | 'projectId' | 'tags' | 'workspace'>>,
+    ) => {
+      const s = await sessions.create({
+        ...request,
+        projectId: request.projectId ?? null,
+        tags: request.tags ?? [],
+        workspace: request.workspace ?? 'here',
+        options: request.options ?? { effort: null, permission: null, model: null },
+      })
       if (s) view.openSession(s.id)
       return plain(s)
     },
@@ -46,7 +55,7 @@ export function installDevApi(): void {
     screen: (id?: number) => terminalFor(target(id))?.screenText() ?? '',
     buffer: (id?: number) => terminalFor(target(id))?.bufferText() ?? '',
     restart: (id: number) => sessions.restart(id),
-    close: (id: number) => sessions.close(id),
+    close: (id: number, removeWorktree = false) => sessions.close(id, removeWorktree),
     lock: (id: number, locked: boolean, pin: string | null = null) => sessions.setLocked(id, locked, pin),
     launch: (request: LaunchRequest) => sessions.launch(request).then(plain),
     presets: (agent: AgentKind) => commands.launchPresets(agent).then(plain),

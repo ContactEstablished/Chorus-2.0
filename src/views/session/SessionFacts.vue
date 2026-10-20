@@ -1,10 +1,12 @@
 <script setup lang="ts">
 /**
- * The session facts panel (glacier-session-raw.png, "SESSION"): project (changeable), agent,
- * options, provider, key, conversation, CLI version and folder. Anything degraded says why.
+ * The session facts panel (glacier-session-raw.png, "SESSION"): project and tags (changeable),
+ * agent, options, provider, key, conversation, CLI version, worktree and folder. Anything degraded
+ * says why.
  */
-import { computed } from 'vue'
-import type { SessionSummary } from '../../ipc'
+import { computed, onMounted, ref } from 'vue'
+import { commands, type SessionSummary } from '../../ipc'
+import TagInput from '../../components/TagInput.vue'
 import { useProjectsStore } from '../../stores/projects'
 import { useSessionsStore } from '../../stores/sessions'
 import { useAgentsStore } from '../../stores/agents'
@@ -32,6 +34,15 @@ const capped = computed(() => {
 async function move(value: string): Promise<void> {
   await sessions.setProject(s.value.id, value === '' ? null : Number(value))
 }
+
+const knownTags = ref<string[]>([])
+onMounted(async () => {
+  const r = await commands.tagsKnown().catch(() => null)
+  if (r?.status === 'ok') knownTags.value = r.data.map((t) => t.tag)
+})
+async function retag(tags: string[]): Promise<void> {
+  await sessions.setTags(s.value.id, tags)
+}
 </script>
 
 <template>
@@ -45,6 +56,8 @@ async function move(value: string): Promise<void> {
           <option v-for="p in projectChoices" :key="p.id" :value="p.id">{{ p.name }}{{ p.state === 'archived' ? ' (archived)' : '' }}</option>
         </select>
       </dd>
+      <dt>Tags</dt>
+      <dd class="tags"><TagInput :model-value="s.tags" :known="knownTags" @update:model-value="retag" /></dd>
       <dt>Agent</dt>
       <dd>{{ AGENT_LABELS[s.agent] }}</dd>
       <template v-if="s.agent !== 'shell'">
@@ -80,6 +93,13 @@ async function move(value: string): Promise<void> {
       <template v-if="s.pid">
         <dt>Process</dt>
         <dd>pid {{ s.pid }}</dd>
+      </template>
+      <template v-if="s.worktree">
+        <dt>Worktree</dt>
+        <dd :title="s.worktree.path">
+          <code>{{ s.worktree.branch }}</code>
+          <span class="sub">{{ s.worktree.removed ? 'removed; the branch is kept' : `from ${s.worktree.baseBranch ?? 'a detached HEAD'}` }}</span>
+        </dd>
       </template>
       <dt>Folder</dt>
       <dd><code class="path" :title="s.cwd">{{ s.cwd }}</code></dd>
@@ -127,5 +147,18 @@ code {
   display: block;
   font-size: 11.5px;
   color: var(--text-2);
+}
+.sub {
+  display: block;
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+dd.tags {
+  text-align: left;
+}
+dd.tags :deep(.tags) {
+  min-height: 30px;
+  padding: 2px 4px;
+  font-size: 12.5px;
 }
 </style>

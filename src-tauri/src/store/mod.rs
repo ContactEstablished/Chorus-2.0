@@ -10,6 +10,8 @@ pub mod projects;
 pub mod providers;
 pub mod sessions;
 pub mod settings;
+pub mod tags;
+pub mod worktrees;
 
 use std::path::Path;
 use std::sync::Mutex;
@@ -27,6 +29,7 @@ const MIGRATION_FILES: &[(&str, &str)] = &[
     ("0006_transcripts.sql", include_str!("../../migrations/0006_transcripts.sql")),
     ("0007_projects.sql", include_str!("../../migrations/0007_projects.sql")),
     ("0008_projects_no_import.sql", include_str!("../../migrations/0008_projects_no_import.sql")),
+    ("0009_tags_worktrees.sql", include_str!("../../migrations/0009_tags_worktrees.sql")),
 ];
 
 pub struct Store {

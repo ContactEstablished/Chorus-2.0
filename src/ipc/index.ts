@@ -13,6 +13,7 @@ export type {
   CappedKeyInfo,
   CatalogEntry,
   CatalogModel,
+  CloseCheck,
   CloseReport,
   CreateSession,
   CredentialSummary,
@@ -22,6 +23,8 @@ export type {
   EffortChoice,
   Flavor,
   FleetClick,
+  FolderCheck,
+  GitFolder,
   GroupBy,
   LaunchOptions,
   LaunchOutcome,
@@ -47,11 +50,16 @@ export type {
   SessionHistory,
   SessionStatus,
   SessionSummary,
+  SharingSession,
   Slot,
+  TagUse,
   Theme,
   ToolEntry,
   TurnEntry,
   VersionFit,
+  Workspace,
+  WorktreeClose,
+  WorktreeInfo,
 } from './bindings'
 
 /** The result shape of every fallible generated command. */

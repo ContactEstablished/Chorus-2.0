@@ -16,7 +16,7 @@ pub enum Preset {
     Pair,
     /// An agent plus a shell in the same folder.
     Workbench,
-    /// Several agents, each in its own worktree (P5).
+    /// Several agents of one kind, each in its own worktree (D53).
     Swarm,
 }
 
@@ -30,6 +30,10 @@ pub enum Role {
 }
 
 pub const PRESETS: [Preset; 4] = [Preset::Solo, Preset::Pair, Preset::Workbench, Preset::Swarm];
+
+/// How many agents a Swarm can start (Chorus 1 offered up to six).
+pub const SWARM_MIN: u8 = 2;
+pub const SWARM_MAX: u8 = 6;
 
 impl Preset {
     pub fn label(self) -> &'static str {
@@ -55,7 +59,8 @@ impl Preset {
         match self {
             Self::Pair => Some("Both agents can write the same files: the reviewer is a role, not a sandbox."),
             Self::Workbench => Some("The shell is a plain terminal: Chorus never hands it a key."),
-            Self::Solo | Self::Swarm => None,
+            Self::Swarm => Some("Each agent gets its own worktree and branch, made from the folder's current branch."),
+            Self::Solo => None,
         }
     }
 }
@@ -78,20 +83,19 @@ pub struct Slot {
     pub role: Option<Role>,
 }
 
-/// The sessions `preset` makes for `agent`, or why it can't.
-pub fn plan(preset: Preset, agent: AgentKind, installed: &[AgentKind]) -> Result<Vec<Slot>, String> {
+/// The sessions `preset` makes for `agent`, or why it can't. `count` is a Swarm's size.
+pub fn plan(preset: Preset, agent: AgentKind, installed: &[AgentKind], count: u8) -> Result<Vec<Slot>, String> {
     let builder = Slot { agent, role: Some(Role::Builder) };
     match preset {
         Preset::Solo => Ok(vec![Slot { agent, role: None }]),
-        _ if agent == AgentKind::Shell && preset != Preset::Swarm => {
-            Err(format!("{} needs an agent to build: choose one other than Shell.", preset.label()))
-        }
+        _ if agent == AgentKind::Shell => Err(format!("{} needs an agent: choose one other than Shell.", preset.label())),
         Preset::Pair => match partner_for(agent, installed) {
             Some(partner) => Ok(vec![builder, Slot { agent: partner, role: Some(Role::Reviewer) }]),
             None => Err(format!("Pair needs a second agent CLI, and only {} was found.", agent.display_name())),
         },
         Preset::Workbench => Ok(vec![builder, Slot { agent: AgentKind::Shell, role: Some(Role::Shell) }]),
-        Preset::Swarm => Err("Swarm waits for worktrees, which arrive in phase 5.".into()),
+        Preset::Swarm if (SWARM_MIN..=SWARM_MAX).contains(&count) => Ok(vec![Slot { agent, role: None }; count as usize]),
+        Preset::Swarm => Err(format!("A Swarm is {SWARM_MIN} to {SWARM_MAX} agents.")),
     }
 }
 
@@ -135,28 +139,30 @@ mod tests {
 
     #[test]
     fn solo_is_one_session() {
-        assert_eq!(plan(Preset::Solo, Codex, &[]).unwrap(), [Slot { agent: Codex, role: None }]);
-        assert_eq!(plan(Preset::Solo, Shell, &[]).unwrap().len(), 1);
+        assert_eq!(plan(Preset::Solo, Codex, &[], 1).unwrap(), [Slot { agent: Codex, role: None }]);
+        assert_eq!(plan(Preset::Solo, Shell, &[], 1).unwrap().len(), 1);
     }
 
     #[test]
     fn pair_finds_a_reviewer_in_order() {
         let all = [Shell, Claude, Codex, Opencode, Grok];
-        let reviewer = |builder| plan(Preset::Pair, builder, &all).unwrap()[1].agent;
+        let reviewer = |builder| plan(Preset::Pair, builder, &all, 1).unwrap()[1].agent;
         assert_eq!((reviewer(Codex), reviewer(Claude), reviewer(Opencode)), (Claude, Codex, Claude));
         // Grok not installed: Claude's reviewer skips it.
         assert_eq!(partner_for(Claude, &[Shell, Claude, Opencode]), Some(Opencode));
-        assert!(plan(Preset::Pair, Claude, &[Shell, Claude]).unwrap_err().contains("only Claude Code was found"));
-        assert!(plan(Preset::Pair, Shell, &all).unwrap_err().contains("other than Shell"));
+        assert!(plan(Preset::Pair, Claude, &[Shell, Claude], 1).unwrap_err().contains("only Claude Code was found"));
+        assert!(plan(Preset::Pair, Shell, &all, 1).unwrap_err().contains("other than Shell"));
     }
 
     #[test]
-    fn workbench_adds_a_shell_and_swarm_waits_for_worktrees() {
+    fn workbench_adds_a_shell_and_swarm_repeats_the_agent() {
         assert_eq!(
-            plan(Preset::Workbench, Claude, &[]).unwrap(),
+            plan(Preset::Workbench, Claude, &[], 1).unwrap(),
             [Slot { agent: Claude, role: Some(Role::Builder) }, Slot { agent: Shell, role: Some(Role::Shell) }]
         );
-        assert!(plan(Preset::Swarm, Codex, &[Codex]).unwrap_err().contains("worktrees"));
+        assert_eq!(plan(Preset::Swarm, Codex, &[Codex], 3).unwrap(), vec![Slot { agent: Codex, role: None }; 3]);
+        assert!(plan(Preset::Swarm, Codex, &[Codex], 1).is_err() && plan(Preset::Swarm, Codex, &[Codex], 7).is_err());
+        assert!(plan(Preset::Swarm, Shell, &[], 2).unwrap_err().contains("other than Shell"));
         assert!(Preset::Pair.note().unwrap().contains("not a sandbox"));
     }
 

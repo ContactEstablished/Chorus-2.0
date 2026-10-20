@@ -1,23 +1,20 @@
 <script setup lang="ts">
 /**
- * New session, in the shell: the launch form (agent, folder, options, provider, key, preset) in a
- * dialog, plus which project the session joins. Starting opens the first session; any that
- * couldn't start are reported.
+ * New session, in the shell: the launch form in a dialog. Starting opens the first session; any
+ * that couldn't start are reported.
  */
 import { nextTick, onMounted, onUnmounted, ref } from 'vue'
 import Icon from '../components/Icon.vue'
-import NewSessionForm from '../raw/NewSessionForm.vue'
+import NewSessionForm from './newSession/NewSessionForm.vue'
 import type { LaunchRequest } from '../ipc'
 import { useSessionsStore } from '../stores/sessions'
 import { useKeysStore } from '../stores/keys'
-import { useProjectsStore } from '../stores/projects'
 import { useViewStore } from '../stores/view'
 import { useNoticesStore } from '../stores/notices'
 import { AGENT_LABELS } from '../raw/labels'
 
 const sessions = useSessionsStore()
 const keys = useKeysStore()
-const projects = useProjectsStore()
 const view = useViewStore()
 const notices = useNoticesStore()
 
@@ -25,8 +22,8 @@ const busy = ref(false)
 const dialog = ref<HTMLElement | null>(null)
 // Focus goes to the first field, and back where it was when the dialog closes.
 const before = document.activeElement instanceof HTMLElement ? document.activeElement : null
-/** null: the project whose folder holds the session's folder, if any. */
-const projectId = ref<number | null>(view.name === 'overview' ? view.projectFilter : null)
+// Opened over a project's Overview, the session starts in that project.
+const initialProject = view.name === 'overview' ? view.projectFilter : null
 
 function close(): void {
   view.newSessionOpen = false
@@ -39,7 +36,7 @@ onMounted(async () => {
   void keys.load()
   window.addEventListener('keydown', onKey)
   await nextTick()
-  dialog.value?.querySelector<HTMLElement>('.panel select, .panel input')?.focus()
+  dialog.value?.querySelector<HTMLElement>('[role=radio][tabindex="0"], input')?.focus()
 })
 onUnmounted(() => {
   window.removeEventListener('keydown', onKey)
@@ -48,7 +45,7 @@ onUnmounted(() => {
 
 async function launch(request: LaunchRequest): Promise<void> {
   busy.value = true
-  const out = await sessions.launch({ ...request, session: { ...request.session, projectId: projectId.value } })
+  const out = await sessions.launch(request)
   busy.value = false
   if (!out) return // The store's error is shown as a notice.
   const first = out[0]?.session
@@ -67,17 +64,8 @@ async function launch(request: LaunchRequest): Promise<void> {
 <template>
   <div class="backdrop" @mousedown.self="!busy && close()">
     <div ref="dialog" class="dialog scroll" role="dialog" aria-modal="true" aria-label="New session">
-      <div class="top">
-        <label class="project">
-          <span>Project</span>
-          <select v-model="projectId">
-            <option :value="null">By folder</option>
-            <option v-for="p in projects.usable" :key="p.id" :value="p.id">{{ p.name }}</option>
-          </select>
-        </label>
-        <button class="quiet x" aria-label="Close" title="Close (Esc)" :disabled="busy" @click="close"><Icon name="close" :size="16" /></button>
-      </div>
-      <NewSessionForm :keys="keys.keys" :busy="busy" @launch="launch" @cancel="close" />
+      <button class="quiet x" aria-label="Close" title="Close (Esc)" :disabled="busy" @click="close"><Icon name="close" :size="16" /></button>
+      <NewSessionForm :keys="keys.keys" :busy="busy" :initial-project="initialProject" @launch="launch" @cancel="close" />
     </div>
   </div>
 </template>
@@ -100,7 +88,7 @@ async function launch(request: LaunchRequest): Promise<void> {
 }
 .dialog {
   position: relative;
-  width: min(600px, 100%);
+  width: min(680px, 100%);
   max-height: calc(100vh - 48px);
   padding: 20px 24px 24px;
   border-radius: 16px;
@@ -115,34 +103,12 @@ async function launch(request: LaunchRequest): Promise<void> {
     transform: translateY(10px);
   }
 }
-.top {
+.x {
   position: absolute;
   top: 16px;
   right: 16px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
   z-index: 1;
-}
-.project {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12.5px;
-  color: var(--text-muted);
-}
-.project select {
-  padding: 4px 8px;
-  font-size: 13px;
-}
-.x {
   padding: 5px;
   display: grid;
-}
-.dialog :deep(.panel) {
-  max-width: none;
-  border: 0;
-  padding: 0;
-  background: transparent;
 }
 </style>

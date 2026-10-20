@@ -68,6 +68,8 @@ function session(id: number, over: Partial<SessionSummary> = {}): SessionSummary
     noSignal: false,
     attention: 'running',
     projectId: null,
+    tags: [],
+    worktree: null,
     latest: null,
     latestAtSecs: 0,
     ...over,

@@ -52,7 +52,8 @@ const timing = computed(() => {
     </h3>
     <p class="where">
       <span v-if="project" class="project-tag" :style="{ '--tag': project.colour }">{{ project.name }}</span>
-      <code :title="s.cwd">{{ shortPath(s.cwd, home) }}</code>
+      <span v-for="t in s.tags" :key="t" class="tag">{{ t }}</span>
+      <code :title="s.worktree ? `${s.cwd}\nworktree on ${s.worktree.branch}` : s.cwd">{{ shortPath(s.cwd, home) }}</code>
     </p>
     <p class="body">{{ body }}</p>
     <footer class="foot">
@@ -145,6 +146,14 @@ const timing = computed(() => {
   align-items: center;
   gap: 10px;
   min-width: 0;
+}
+.tag {
+  padding: 1px 8px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border-strong);
+  font-size: 11.5px;
+  color: var(--text-2);
+  white-space: nowrap;
 }
 .where code {
   font-size: 12.5px;

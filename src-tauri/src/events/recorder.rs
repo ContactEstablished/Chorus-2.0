@@ -240,6 +240,7 @@ mod tests {
                 provider_id: None,
                 description: None,
                 project_id: None,
+                worktree_id: None,
             },
         )
         .unwrap();

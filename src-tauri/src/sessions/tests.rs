@@ -36,6 +36,8 @@ impl Fixture {
             provider_id: None,
             description: None,
             project_id: None,
+            tags: Vec::new(),
+            workspace: Default::default(),
         };
         let s = self.manager.create(req).unwrap();
         assert!(s.live, "shell should be running: {:?}", s.note);
@@ -161,12 +163,12 @@ fn restart_and_close_are_refused_while_locked() {
     let f = Fixture::new("lock");
     let id = f.shell(None);
     f.manager.set_locked(id, true, None).unwrap();
-    assert!(f.manager.close(id).unwrap_err().contains("locked"));
+    assert!(f.manager.close(id, false).unwrap_err().contains("locked"));
     assert!(f.manager.restart(id).unwrap_err().contains("locked"));
     crate::lock::set_pin(f.manager.store(), "4321").unwrap();
     assert!(f.manager.set_locked(id, false, Some("0000")).is_err());
     f.manager.set_locked(id, false, Some("4321")).unwrap();
-    let report = f.manager.close(id).unwrap();
+    let report = f.manager.close(id, false).unwrap();
     assert!(report.killed >= 1);
     assert_eq!(rows::get(f.manager.store(), id).unwrap().unwrap().state, SessionState::Closed);
     assert!(!f.dir.join("scrollback").join(format!("{id}.log")).exists(), "mirror outlived Close");
@@ -252,6 +254,8 @@ fn bad_input_is_refused_at_the_boundary() {
         provider_id: None,
         description: None,
         project_id: None,
+        tags: Vec::new(),
+        workspace: Default::default(),
     };
     assert!(f.manager.create(req.clone()).unwrap_err().contains("full path"));
     req.cwd = f.dir.join("missing").display().to_string();
@@ -281,15 +285,17 @@ fn a_preset_launch_names_and_notes_its_sessions() {
         provider_id: None,
         description: Some("  Ticket 42  ".into()),
         project_id: None,
+        tags: Vec::new(),
+        workspace: Default::default(),
     };
     // A shell can't build: Workbench and Pair say so, and nothing starts.
-    let refused = f.manager.launch(LaunchRequest { preset: Preset::Workbench, session: session.clone() }).unwrap_err();
+    let refused = f.manager.launch(LaunchRequest { preset: Preset::Workbench, session: session.clone(), count: None }).unwrap_err();
     assert!(refused.contains("other than Shell"), "{refused}");
     assert!(f.manager.list().unwrap().is_empty());
     let swarm = f.manager.presets(AgentKind::Codex).into_iter().find(|p| p.preset == Preset::Swarm).unwrap();
-    assert!(swarm.slots.is_empty() && swarm.reason.unwrap().contains("worktree"));
+    assert!(swarm.reason.is_none() && swarm.slots.len() == launch_rules::SWARM_MIN as usize);
 
-    let out = f.manager.launch(LaunchRequest { preset: Preset::Solo, session }).unwrap();
+    let out = f.manager.launch(LaunchRequest { preset: Preset::Solo, session, count: None }).unwrap();
     assert_eq!(out.len(), 1);
     let s = out[0].session.clone().unwrap();
     assert_eq!((s.name.as_str(), s.description.as_deref()), ("Fix login", Some("Ticket 42")));
@@ -299,4 +305,77 @@ fn a_preset_launch_names_and_notes_its_sessions() {
     assert!(f.manager.rename(s.id, "  ").is_err());
     assert_eq!(f.manager.set_description(s.id, None).unwrap().description, None);
     assert!(f.manager.set_description(s.id, Some(&"x".repeat(501))).is_err());
+}
+
+/// Runs git for a test repository, with an identity so commits work anywhere.
+fn git_in(dir: &Path, args: &[&str]) -> String {
+    let out = std::process::Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(["-c", "user.name=Chorus test", "-c", "user.email=test@example.invalid"])
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+    String::from_utf8_lossy(&out.stdout).into_owned()
+}
+
+#[test]
+fn a_session_can_work_in_a_worktree_of_its_own() {
+    let f = Fixture::new("worktree");
+    let repo = f.dir.join("ledger");
+    std::fs::create_dir_all(repo.join("web")).unwrap();
+    std::fs::write(repo.join("web").join("index.txt"), "hello").unwrap();
+    git_in(&repo, &["init", "-q", "-b", "main"]);
+    git_in(&repo, &["add", "."]);
+    git_in(&repo, &["commit", "-q", "-m", "first"]);
+    let folder = repo.join("web").display().to_string();
+    let request = CreateSession {
+        agent: AgentKind::Shell,
+        cwd: folder.clone(),
+        name: None,
+        credential: None,
+        cols: 100,
+        rows: 30,
+        options: Default::default(),
+        provider_id: None,
+        description: None,
+        project_id: None,
+        tags: vec!["Spike".into(), "spike".into(), "review".into()],
+        workspace: Workspace::Here,
+    };
+    let first = f.manager.create(request.clone()).unwrap();
+    assert_eq!(first.tags, ["spike", "review"]);
+    assert_eq!(f.manager.known_tags().unwrap().iter().map(|t| t.tag.as_str()).collect::<Vec<_>>(), ["review", "spike"]);
+
+    // A second session for that folder hears who's already there.
+    let check = f.manager.check_folder(&folder);
+    let git = check.git.unwrap();
+    assert_eq!((git.branch.as_deref(), git.repo.as_str(), git.in_worktree), (Some("main"), "ledger", false));
+    assert!(git.new_branch.unwrap().starts_with("chorus2/ledger/"));
+    assert_eq!(check.sharing.iter().map(|s| s.id).collect::<Vec<_>>(), [first.id]);
+
+    let second = f.manager.create(CreateSession { workspace: Workspace::NewWorktree, tags: Vec::new(), ..request }).unwrap();
+    let wt = second.worktree.clone().unwrap();
+    assert!(wt.branch.starts_with("chorus2/ledger/") && wt.base_branch.as_deref() == Some("main"), "{wt:?}");
+    let beside = f.dir.join(".chorus2").join("ledger").display().to_string();
+    assert!(second.cwd.starts_with(&beside) && second.cwd.ends_with(r"\web"), "{}", second.cwd);
+    assert!(second.live, "{:?}", second.note);
+    let inside = f.manager.check_folder(&second.cwd);
+    assert!(inside.git.unwrap().in_worktree);
+    assert_eq!(inside.sharing.iter().map(|s| s.id).collect::<Vec<_>>(), [second.id], "the first session isn't in this tree");
+
+    // Uncommitted work is never removed.
+    let draft = Path::new(&wt.path).join("notes.txt");
+    std::fs::write(&draft, "draft").unwrap();
+    assert_eq!(f.manager.close_check(second.id).unwrap().worktree.unwrap().clean, Some(false));
+    std::fs::remove_file(&draft).unwrap();
+    let check = f.manager.close_check(second.id).unwrap().worktree.unwrap();
+    assert_eq!((check.clean, check.others), (Some(true), 0));
+    let note = f.manager.close(second.id, true).unwrap().worktree_note.unwrap();
+    assert!(note.contains("Removed"), "{note}");
+    assert!(!Path::new(&wt.path).exists());
+    assert!(f.manager.summary(second.id).unwrap().worktree.unwrap().removed);
+    assert!(git_in(&repo, &["branch", "--list", &wt.branch]).contains(&wt.branch), "the branch is kept");
+    assert_eq!(f.manager.recent_folders(), [folder]);
 }

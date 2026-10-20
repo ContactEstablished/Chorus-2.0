@@ -10,7 +10,7 @@ import SessionTerminal from '../../raw/SessionTerminal.vue'
 import SessionStrip from './SessionStrip.vue'
 import SessionFacts from './SessionFacts.vue'
 import PromptHistory from './PromptHistory.vue'
-import { commands, type Attention, type SessionSummary } from '../../ipc'
+import { commands, type Attention, type SessionSummary, type WorktreeClose } from '../../ipc'
 import { terminalFor } from '../../components/terminals'
 import { useSessionsStore } from '../../stores/sessions'
 import { useProjectsStore } from '../../stores/projects'
@@ -73,6 +73,8 @@ async function saveNote(): Promise<void> {
 // Controls.
 const busy = ref(false)
 const confirmingClose = ref(false)
+// What Close would do to the session's worktree, fetched when Close is asked for (D53).
+const closeWorktree = ref<WorktreeClose | null>(null)
 const askingPin = ref(false)
 const pin = ref('')
 async function restart(): Promise<void> {
@@ -81,16 +83,40 @@ async function restart(): Promise<void> {
   await sessions.restart(s.value.id)
   busy.value = false
 }
-async function close(): Promise<void> {
+async function askClose(): Promise<void> {
+  const x = s.value
+  if (!x) return
+  closeWorktree.value = null
+  if (x.worktree && !x.worktree.removed) {
+    busy.value = true
+    const r = await commands.sessionCloseCheck(x.id).catch(() => null)
+    busy.value = false
+    closeWorktree.value = r?.status === 'ok' ? r.data.worktree : null
+  }
+  confirmingClose.value = true
+}
+// Removal is offered only when nothing would be lost and no other session works there.
+const canRemoveWorktree = computed(() => closeWorktree.value?.clean === true && closeWorktree.value.others === 0)
+const closeQuestion = computed(() => {
+  const w = closeWorktree.value
+  const base = `Close ${s.value?.name}? Its process ends.`
+  if (!w) return base
+  if (w.others) return `${base} Its worktree stays: ${w.others === 1 ? 'another session works' : `${w.others} other sessions work`} in it.`
+  if (w.clean === false) return `${base} Its worktree has uncommitted changes, so it stays.`
+  if (w.clean === null) return `${base} Its worktree stays (${w.note ?? 'git couldn’t check it'}).`
+  return `${base} Its worktree has nothing uncommitted.`
+})
+async function close(removeWorktree = false): Promise<void> {
   if (!s.value) return
   const name = s.value.name
   busy.value = true
   confirmingClose.value = false
-  const report = await sessions.close(s.value.id)
+  const report = await sessions.close(s.value.id, removeWorktree)
   busy.value = false
   if (report) {
     const spared = report.spared ? ` ${report.spared} windowed process${report.spared === 1 ? ' was' : 'es were'} left open (for example a browser it opened).` : ''
-    notices.info(`Closed ${name}.${spared}`)
+    const worktree = report.worktreeNote ? ` ${report.worktreeNote}` : ''
+    notices.info(`Closed ${name}.${spared}${worktree}`)
   }
 }
 async function toggleLock(): Promise<void> {
@@ -176,11 +202,15 @@ async function send(bytes: string): Promise<void> {
         </button>
         <button class="quiet" :disabled="busy || s.locked" :title="s.locked ? 'Unlock it first' : 'End this run and start it again'" @click="restart">Restart</button>
         <template v-if="confirmingClose">
-          <span class="ask">Close {{ s.name }}? Its process ends.</span>
-          <button class="danger" :disabled="busy" @click="close">Close</button>
+          <span class="ask">{{ closeQuestion }}</span>
+          <template v-if="canRemoveWorktree">
+            <button class="danger" :disabled="busy" :title="`Removes ${closeWorktree?.path}; the branch ${closeWorktree?.branch} is kept`" @click="close(true)">Close and remove worktree</button>
+            <button :disabled="busy" @click="close(false)">Close, keep worktree</button>
+          </template>
+          <button v-else class="danger" :disabled="busy" @click="close(false)">Close</button>
           <button class="quiet" @click="confirmingClose = false">Keep</button>
         </template>
-        <button v-else class="quiet danger" :disabled="busy || s.locked" :title="s.locked ? 'Unlock it first' : 'End the session'" @click="confirmingClose = true">Close</button>
+        <button v-else class="quiet danger" :disabled="busy || s.locked" :title="s.locked ? 'Unlock it first' : 'End the session'" @click="askClose">Close</button>
       </div>
     </div>
 

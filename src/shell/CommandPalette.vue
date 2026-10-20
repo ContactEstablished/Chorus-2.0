@@ -39,7 +39,7 @@ const sessionItems = computed<PaletteItem[]>(() =>
       group: 'Sessions',
       label: s.name,
       hint: [AGENT_LABELS[s.agent], ATTENTION[s.attention].label, p?.name].filter(Boolean).join(' · '),
-      keywords: `${s.cwd} ${s.description ?? ''} ${AGENT_CHIPS[s.agent]}`,
+      keywords: `${s.cwd} ${s.description ?? ''} ${AGENT_CHIPS[s.agent]} ${s.tags.join(' ')} ${s.worktree?.branch ?? ''}`,
       run: () => view.openSession(s.id),
     }
   }),
@@ -68,7 +68,7 @@ const placeItems = computed<PaletteItem[]>(() => [
   { id: 'go-sessions', group: 'Go to', label: 'Sessions', run: () => ((view.sessionsLayout = 'list'), view.go('sessions')) },
   { id: 'go-wall', group: 'Go to', label: 'Wall of live terminals', keywords: 'sessions grid', run: () => ((view.sessionsLayout = 'wall'), view.go('sessions')) },
   { id: 'go-appearance', group: 'Go to', label: 'Settings: Appearance', keywords: 'theme zoom', run: () => view.openSettings('appearance') },
-  { id: 'go-projects', group: 'Go to', label: 'Settings: Projects', keywords: 'import chorus 1', run: () => view.openSettings('projects') },
+  { id: 'go-projects', group: 'Go to', label: 'Settings: Projects', keywords: 'colours folders', run: () => view.openSettings('projects') },
   { id: 'go-providers', group: 'Go to', label: 'Settings: Providers', keywords: 'openrouter jev gateway models', run: () => view.openSettings('providers') },
   { id: 'go-keys', group: 'Go to', label: 'Settings: Keys and lock', keywords: 'api key pin vault', run: () => view.openSettings('keys') },
   { id: 'go-agents', group: 'Go to', label: 'Settings: Agents', keywords: 'cli version', run: () => view.openSettings('agents') },

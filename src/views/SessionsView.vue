@@ -29,7 +29,7 @@ const order = ref<'urgency' | 'recent' | 'name'>('urgency')
 
 function haystack(s: SessionSummary): string {
   const project = s.projectId === null ? '' : (projects.byId.get(s.projectId)?.name ?? '')
-  return [s.name, s.description, s.cwd, AGENT_LABELS[s.agent], s.providerName, project, ATTENTION[s.attention].label, s.latest]
+  return [s.name, s.description, s.cwd, AGENT_LABELS[s.agent], s.providerName, project, ATTENTION[s.attention].label, s.latest, ...s.tags, s.worktree?.branch]
     .filter(Boolean)
     .join('\n')
     .toLowerCase()
@@ -59,7 +59,7 @@ const project = (s: SessionSummary) => (s.projectId === null ? null : (projects.
       <div class="tools">
         <label class="search">
           <Icon name="search" :size="15" />
-          <input v-model="query" type="search" placeholder="Search name, folder, project, agent…" aria-label="Search sessions" spellcheck="false" />
+          <input v-model="query" type="search" placeholder="Search name, folder, project, tag, agent…" aria-label="Search sessions" spellcheck="false" />
         </label>
         <select v-if="view.sessionsLayout === 'list'" v-model="order" aria-label="Order">
           <option value="urgency">Most urgent</option>

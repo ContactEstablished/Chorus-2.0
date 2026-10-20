@@ -106,13 +106,20 @@ export const useSessionsStore = defineStore('sessions', () => {
     if (s) apply(s)
   }
 
-  async function close(id: number): Promise<CloseReport | null> {
-    const report = await attempt(() => unwrap(commands.sessionClose(id)))
+  /** With `removeWorktree`, its worktree goes too when nothing would be lost (D53). */
+  async function close(id: number, removeWorktree = false): Promise<CloseReport | null> {
+    const report = await attempt(() => unwrap(commands.sessionClose(id, removeWorktree)))
     if (report) {
       const s = byId.value[id]
       if (s) apply({ ...s, status: 'closed' })
     }
     return report
+  }
+
+  async function setTags(id: number, tags: string[]): Promise<boolean> {
+    const s = await attempt(() => unwrap(commands.sessionSetTags(id, tags)))
+    if (s) apply(s)
+    return s !== null
   }
 
   async function setLocked(id: number, locked: boolean, pin: string | null = null): Promise<boolean> {
@@ -138,5 +145,6 @@ export const useSessionsStore = defineStore('sessions', () => {
     restart,
     close,
     setLocked,
+    setTags,
   }
 })

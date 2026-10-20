@@ -9,7 +9,11 @@ use chorus_core::agent::AgentKind;
 use tauri::State;
 use tauri::ipc::Channel;
 
+use super::workspace::{CloseCheck, FolderCheck, TagUse};
 use super::{CloseReport, CreateSession, LaunchOutcome, LaunchRequest, PresetChoice, PtyBytes, SessionManager, SessionSummary};
+
+/// How many names a suggestion may be asked to skip.
+const MAX_SKIP: usize = 64;
 
 pub type Manager<'a> = State<'a, Arc<SessionManager>>;
 
@@ -67,8 +71,73 @@ pub async fn session_restart(state: Manager<'_>, session_id: u32) -> Result<Sess
 
 #[tauri::command]
 #[specta::specta]
-pub async fn session_close(state: Manager<'_>, session_id: u32) -> Result<CloseReport, String> {
-    blocking(&state, move |m| m.close(session_id)).await
+pub async fn session_close(state: Manager<'_>, session_id: u32, remove_worktree: bool) -> Result<CloseReport, String> {
+    blocking(&state, move |m| m.close(session_id, remove_worktree)).await
+}
+
+/// What closing would do to the session's worktree, if it has one: asked before Close.
+#[tauri::command]
+#[specta::specta]
+pub async fn session_close_check(state: Manager<'_>, session_id: u32) -> Result<CloseCheck, String> {
+    blocking(&state, move |m| m.close_check(session_id)).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn session_set_tags(state: Manager<'_>, session_id: u32, tags: Vec<String>) -> Result<SessionSummary, String> {
+    state.set_tags(session_id, &tags)
+}
+
+/// Every tag used before, the most used first: New session's suggestions.
+#[tauri::command]
+#[specta::specta]
+pub fn tags_known(state: Manager<'_>) -> Result<Vec<TagUse>, String> {
+    state.known_tags()
+}
+
+/// A name for a new session that no open session has, nor any in `skip`.
+#[tauri::command]
+#[specta::specta]
+pub fn session_suggest_name(state: Manager<'_>, skip: Vec<String>) -> String {
+    let skip: Vec<String> = skip.into_iter().take(MAX_SKIP).collect();
+    state.suggest_name(&skip)
+}
+
+/// What New session shows about a folder: whether it can be used, its git branch, and running
+/// sessions already working there.
+#[tauri::command]
+#[specta::specta]
+pub async fn folder_check(state: Manager<'_>, folder: String) -> Result<FolderCheck, String> {
+    blocking(&state, move |m| Ok(m.check_folder(&folder))).await
+}
+
+/// Recently used folders that still exist, newest first.
+#[tauri::command]
+#[specta::specta]
+pub fn folders_recent(state: Manager<'_>) -> Vec<String> {
+    state.recent_folders()
+}
+
+/// Windows' folder picker, over the main window, starting at `start` if it exists. None when
+/// the user cancels.
+#[tauri::command]
+#[specta::specta]
+pub async fn folder_pick(app: tauri::AppHandle, start: Option<String>) -> Option<String> {
+    use tauri::Manager as _;
+    use tauri_plugin_dialog::DialogExt;
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut dialog = app.dialog().file().set_title("Choose the session's folder");
+        if let Some(start) = start.filter(|s| std::path::Path::new(s).is_dir()) {
+            dialog = dialog.set_directory(start);
+        }
+        if let Some(window) = app.get_webview_window("main") {
+            dialog = dialog.set_parent(&window);
+        }
+        dialog.blocking_pick_folder().and_then(|p| p.into_path().ok()).map(|p| p.display().to_string())
+    })
+    .await
+    .ok()
+    .flatten()
 }
 
 /// Locking never asks for the PIN; unlocking does when one is set.

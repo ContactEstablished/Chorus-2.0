@@ -4,6 +4,7 @@ mod agents;
 mod app;
 mod events;
 mod fleet;
+mod git;
 mod ipc;
 mod lock;
 mod prefs;
@@ -37,6 +38,8 @@ pub fn run() {
                 let _ = window.set_focus();
             }
         }))
+        // New session's folder picker, used from Rust only: the front end gets no dialog permissions.
+        .plugin(tauri_plugin_dialog::init())
         .invoke_handler(builder.invoke_handler())
         .setup(move |app| {
             builder.mount_events(app);

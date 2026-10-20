@@ -59,7 +59,26 @@ export const commands = {
 	sessionWrite: (sessionId: number, data: string) => typedError<null, string>(__TAURI_INVOKE("session_write", { sessionId, data })),
 	sessionResize: (sessionId: number, cols: number, rows: number) => typedError<null, string>(__TAURI_INVOKE("session_resize", { sessionId, cols, rows })),
 	sessionRestart: (sessionId: number) => typedError<SessionSummary, string>(__TAURI_INVOKE("session_restart", { sessionId })),
-	sessionClose: (sessionId: number) => typedError<CloseReport, string>(__TAURI_INVOKE("session_close", { sessionId })),
+	sessionClose: (sessionId: number, removeWorktree: boolean) => typedError<CloseReport, string>(__TAURI_INVOKE("session_close", { sessionId, removeWorktree })),
+	/**  What closing would do to the session's worktree, if it has one: asked before Close. */
+	sessionCloseCheck: (sessionId: number) => typedError<CloseCheck, string>(__TAURI_INVOKE("session_close_check", { sessionId })),
+	sessionSetTags: (sessionId: number, tags: string[]) => typedError<SessionSummary, string>(__TAURI_INVOKE("session_set_tags", { sessionId, tags })),
+	/**  Every tag used before, the most used first: New session's suggestions. */
+	tagsKnown: () => typedError<TagUse[], string>(__TAURI_INVOKE("tags_known")),
+	/**  A name for a new session that no open session has, nor any in `skip`. */
+	sessionSuggestName: (skip: string[]) => __TAURI_INVOKE<string>("session_suggest_name", { skip }),
+	/**
+	 *  What New session shows about a folder: whether it can be used, its git branch, and running
+	 *  sessions already working there.
+	 */
+	folderCheck: (folder: string) => typedError<FolderCheck, string>(__TAURI_INVOKE("folder_check", { folder })),
+	/**  Recently used folders that still exist, newest first. */
+	foldersRecent: () => __TAURI_INVOKE<string[]>("folders_recent"),
+	/**
+	 *  Windows' folder picker, over the main window, starting at `start` if it exists. None when
+	 *  the user cancels.
+	 */
+	folderPick: (start: string | null) => __TAURI_INVOKE<string | null>("folder_pick", { start }),
 	/**  Locking never asks for the PIN; unlocking does when one is set. */
 	sessionSetLocked: (sessionId: number, locked: boolean, pin: string | null) => typedError<SessionSummary, string>(__TAURI_INVOKE("session_set_locked", { sessionId, locked, pin })),
 	lockPinStatus: () => typedError<boolean, string>(__TAURI_INVOKE("lock_pin_status")),
@@ -222,10 +241,17 @@ export type CatalogModel = {
 	free: boolean,
 };
 
+/**  What closing a session would do to its worktree. */
+export type CloseCheck = {
+	worktree: WorktreeClose | null,
+};
+
 export type CloseReport = {
 	killed: number,
 	/**  Windowed processes (a browser the agent opened) left running. */
 	spared: number,
+	/**  What happened to the session's worktree, when it had one and its removal was asked for. */
+	worktreeNote: string | null,
 };
 
 export type CreateSession = {
@@ -247,6 +273,9 @@ export type CreateSession = {
 	description?: string | null,
 	/**  The project it belongs to; left out, the project whose folder holds `cwd`, if any. */
 	projectId?: number | null,
+	tags?: string[],
+	/**  In `cwd`, or in a new worktree of its repository. */
+	workspace?: Workspace,
 };
 
 export type CredentialSummary = {
@@ -317,6 +346,34 @@ export type FleetProbe = {
 	foregroundHwnd: string,
 };
 
+/**  What New session learns about a folder as it's typed or picked. */
+export type FolderCheck = {
+	/**  Why a session can't start there, in words to show; none when it can. */
+	problem: string | null,
+	git: GitFolder | null,
+	/**  Why git couldn't say anything (not installed, an unsafe repository…). The folder still works. */
+	gitNote: string | null,
+	/**  Running sessions already working in the same tree, on the same branch. */
+	sharing: SharingSession[],
+	/**  The project a session here joins when none is chosen. */
+	projectId: number | null,
+};
+
+export type GitFolder = {
+	/**  The working tree the folder is in. */
+	topLevel: string,
+	/**  The repository's name (its main folder's). */
+	repo: string,
+	/**  The checked-out branch; none on a detached HEAD. */
+	branch: string | null,
+	/**  The folder is in one of the repository's worktrees, not its main tree. */
+	inWorktree: boolean,
+	/**  What a new worktree's branch looks like (`chorus2/<repo>/…`). */
+	newBranch: string | null,
+	/**  Why a worktree can't be made here. */
+	worktreeProblem: string | null,
+};
+
 export type GroupBy = "status" | "project" | "none";
 
 /**
@@ -342,6 +399,8 @@ export type LaunchOutcome = {
 export type LaunchRequest = {
 	preset: Preset,
 	session: CreateSession,
+	/**  How many agents a Swarm starts. */
+	count?: number | null,
 };
 
 export type LeakReport = {
@@ -396,7 +455,7 @@ export type Preset =
 "pair" | 
 /**  An agent plus a shell in the same folder. */
 "workbench" | 
-/**  Several agents, each in its own worktree (P5). */
+/**  Several agents of one kind, each in its own worktree (D53). */
 "swarm";
 
 /**  A preset as the launch form shows it for one agent. */
@@ -590,6 +649,10 @@ export type SessionSummary = {
 	/**  The newest run's minted OpenRouter key, if it had one. */
 	cappedKey: CappedKeyInfo | null,
 	projectId: number | null,
+	/**  Free-form labels beside the project (D52), in the order given. */
+	tags: string[],
+	/**  The worktree New session made for it (D53), if any. */
+	worktree: WorktreeInfo | null,
 	/**  The newest turn's final message, else its prompt, already scrubbed; shown on cards. */
 	latest: string | null,
 	/**  When that turn started, or 0. */
@@ -600,6 +663,12 @@ export type SessionUpdated = {
 	session: SessionSummary,
 };
 
+export type SharingSession = {
+	id: number,
+	name: string,
+	agent: AgentKind,
+};
+
 /**
  *  One session a launch makes. The first slot is the session the user set up; the others are
  *  derived from it.
@@ -607,6 +676,12 @@ export type SessionUpdated = {
 export type Slot = {
 	agent: AgentKind,
 	role: Role | null,
+};
+
+export type TagUse = {
+	tag: string,
+	/**  How many sessions have it, closed ones included. */
+	sessions: number,
 };
 
 export type Theme = "glacier" | "dusk";
@@ -635,6 +710,33 @@ export type TurnEntry = {
 export type VersionFit = "verified" | "newer" | "older" | 
 /**  The CLI ran but printed no version Chorus could read. */
 "unreadable";
+
+/**  Where a new session works. */
+export type Workspace = 
+/**  In the folder as chosen. */
+"here" | 
+/**  In a new worktree of the folder's repository, on a branch of its own. */
+"new-worktree";
+
+export type WorktreeClose = {
+	branch: string,
+	path: string,
+	/**  Nothing uncommitted; none when git couldn't tell (see `note`). */
+	clean: boolean | null,
+	note: string | null,
+	/**  Other open sessions working in it (a Pair's reviewer, a Workbench's shell). */
+	others: number,
+};
+
+/**  A session's worktree, as the UI shows it. */
+export type WorktreeInfo = {
+	branch: string,
+	path: string,
+	/**  The branch it was made from; none if that was a detached HEAD. */
+	baseBranch: string | null,
+	/**  Chorus removed it. Its branch is kept. */
+	removed: boolean,
+};
 
 /* Tauri Specta runtime */
 async function typedError<T, E>(result: Promise<T>): Promise<{ status: "ok"; data: T } | { status: "error"; error: E }> {

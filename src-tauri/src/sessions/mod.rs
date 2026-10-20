@@ -16,6 +16,7 @@ pub mod commands;
 pub mod job;
 pub mod mirror;
 pub mod profiles;
+pub mod workspace;
 
 use std::collections::{BTreeMap, HashMap};
 use std::io::{Read, Write};
@@ -55,11 +56,13 @@ use crate::events::{HookRefused, same_token};
 use crate::store::history;
 use crate::store::projects as project_rows;
 use crate::store::providers as provider_rows;
+use crate::store::tags as tag_rows;
 use crate::store::sessions::{self as rows, NewRun, NewSession, SessionRow};
 use crate::store::{Store, credentials};
 use crate::vault;
 use job::Job;
 use mirror::Mirror;
+use workspace::Workspace;
 
 /// Raw PTY output for an attached view. Sent as bytes, so the webview gets an `ArrayBuffer`.
 pub struct PtyBytes(pub Vec<u8>);
@@ -147,6 +150,10 @@ pub struct SessionSummary {
     /// The newest run's minted OpenRouter key, if it had one.
     pub capped_key: Option<CappedKeyInfo>,
     pub project_id: Option<u32>,
+    /// Free-form labels beside the project (D52), in the order given.
+    pub tags: Vec<String>,
+    /// The worktree New session made for it (D53), if any.
+    pub worktree: Option<workspace::WorktreeInfo>,
     /// The newest turn's final message, else its prompt, already scrubbed; shown on cards.
     pub latest: Option<String>,
     /// When that turn started, or 0.
@@ -193,6 +200,11 @@ pub struct CreateSession {
     /// The project it belongs to; left out, the project whose folder holds `cwd`, if any.
     #[serde(default)]
     pub project_id: Option<u32>,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    /// In `cwd`, or in a new worktree of its repository.
+    #[serde(default)]
+    pub workspace: workspace::Workspace,
 }
 
 /// Starts the sessions a preset makes. `session` is the first; the others are derived from it.
@@ -201,6 +213,9 @@ pub struct CreateSession {
 pub struct LaunchRequest {
     pub preset: Preset,
     pub session: CreateSession,
+    /// How many agents a Swarm starts.
+    #[serde(default)]
+    pub count: Option<u8>,
 }
 
 /// One session a launch tried to start.
@@ -240,6 +255,8 @@ pub struct CloseReport {
     pub killed: u32,
     /// Windowed processes (a browser the agent opened) left running.
     pub spared: u32,
+    /// What happened to the session's worktree, when it had one and its removal was asked for.
+    pub worktree_note: Option<String>,
 }
 
 const MAX_WRITE_BYTES: usize = 1 << 20;
@@ -691,6 +708,8 @@ impl SessionManager {
             }),
             observed,
             project_id: row.project_id,
+            tags: tag_rows::get(&self.store, row.id).unwrap_or_default(),
+            worktree: row.worktree_id.and_then(|w| self.worktree_info(w)),
             latest_at_secs: latest.as_ref().map_or(0, |(_, at)| vault::commands::secs(*at)),
             latest: latest.map(|(text, _)| text),
         }
@@ -790,10 +809,18 @@ impl SessionManager {
     }
 
     pub fn create(self: &Arc<Self>, req: CreateSession) -> Result<SessionSummary, String> {
+        self.create_in(req, None)
+    }
+
+    /// Creates a session. `join` is a worktree an earlier session of the same launch made, which
+    /// this one works in too (its `cwd` is already inside it). Everything is checked before a new
+    /// worktree is made, so a refused request leaves nothing behind.
+    fn create_in(self: &Arc<Self>, req: CreateSession, join: Option<u32>) -> Result<SessionSummary, String> {
         check_size(req.cols, req.rows)?;
-        let cwd = check_cwd(&req.cwd)?;
+        let asked = check_cwd(&req.cwd)?;
         let options = self.check_settings(req.agent, &req.options, req.provider_id, req.credential.as_ref())?;
         let description = launch_rules::clean_description(req.description.as_deref())?;
+        let tags = chorus_core::tags::clean_tags(&req.tags)?;
         let spec = req.agent.spec();
         // Chorus names the conversation up front where the agent lets it, so every later run can
         // resume it.
@@ -801,8 +828,13 @@ impl SessionManager {
             (spec.resume.kind() == ResumeKind::Assigned).then(|| uuid_v4(vault::random_bytes(16).try_into().expect("16 bytes")));
         let fallback = format!("{} {}", req.agent.display_name(), rows::count_by_agent(&self.store, req.agent)? + 1);
         let name = clean_name(req.name.as_deref(), &fallback)?;
-        let project_id = self.project_for(req.project_id, &cwd)?;
-        let id = rows::insert(
+        let project_id = self.project_for(req.project_id, &asked)?;
+        let made = match (join, req.workspace) {
+            (None, Workspace::NewWorktree) => Some(self.make_worktree(&asked)?),
+            _ => None,
+        };
+        let cwd = made.as_ref().map_or_else(|| asked.clone(), |m| m.cwd.clone());
+        let inserted = rows::insert(
             &self.store,
             &NewSession {
                 name: &name,
@@ -817,8 +849,22 @@ impl SessionManager {
                 provider_id: req.provider_id,
                 description: description.as_deref(),
                 project_id,
+                worktree_id: join.or(made.as_ref().map(|m| m.id)),
             },
-        )?;
+        );
+        let id = match inserted {
+            Ok(id) => id,
+            Err(e) => {
+                if let Some(m) = &made {
+                    self.forget_worktree(m);
+                }
+                return Err(e);
+            }
+        };
+        tag_rows::set(&self.store, id, &tags)?;
+        if join.is_none() {
+            self.remember_folder(&asked);
+        }
         let live = self.live_for(id);
         if let Err(e) = self.start_run(&live) {
             self.record_failure(&live, &e);
@@ -1383,7 +1429,8 @@ impl SessionManager {
         outcome
     }
 
-    pub fn close(&self, id: u32) -> Result<CloseReport, String> {
+    /// Closes a session; with `remove_worktree`, also its worktree when nothing would be lost.
+    pub fn close(&self, id: u32, remove_worktree: bool) -> Result<CloseReport, String> {
         let row = self.row(id)?;
         self.refuse_if_locked(&row, "close")?;
         let outcome = self.open_live(id).map(|live| self.end_run_for(&live, ExitCause::UserClose)).unwrap_or_default();
@@ -1392,8 +1439,9 @@ impl SessionManager {
             live.hub.remove();
         }
         let _ = std::fs::remove_dir_all(self.state_dir(id));
+        let worktree_note = row.worktree_id.filter(|_| remove_worktree).and_then(|w| self.retire_worktree(id, w));
         self.notify_id(id);
-        Ok(CloseReport { killed: outcome.killed.len() as u32, spared: outcome.spared.len() as u32 })
+        Ok(CloseReport { killed: outcome.killed.len() as u32, spared: outcome.spared.len() as u32, worktree_note })
     }
 
     pub fn restart(self: &Arc<Self>, id: u32) -> Result<SessionSummary, String> {
@@ -1426,7 +1474,7 @@ impl SessionManager {
         launch_rules::PRESETS
             .iter()
             .map(|p| {
-                let plan = launch_rules::plan(*p, agent, &installed);
+                let plan = launch_rules::plan(*p, agent, &installed, launch_rules::SWARM_MIN);
                 PresetChoice {
                     preset: *p,
                     label: p.label().to_owned(),
@@ -1440,16 +1488,21 @@ impl SessionManager {
     }
 
     /// Starts the sessions `preset` makes. The first is `session` as given; a reviewer or a shell
-    /// is derived from it (same folder, its agent's defaults, no key). If the first can't be
-    /// created nothing is; a later one that fails is reported and the others stay.
+    /// is derived from it (same folder or worktree, its agent's defaults, no key), and each of a
+    /// Swarm's agents gets a worktree and a name of its own. If the first can't be created nothing
+    /// is; a later one that fails is reported and the others stay.
     pub fn launch(self: &Arc<Self>, req: LaunchRequest) -> Result<Vec<LaunchOutcome>, String> {
-        let slots = launch_rules::plan(req.preset, req.session.agent, &self.installed())?;
+        let slots = launch_rules::plan(req.preset, req.session.agent, &self.installed(), req.count.unwrap_or(1))?;
+        if req.preset == Preset::Swarm {
+            return self.launch_swarm(&req.session, &slots);
+        }
         let first = self.create(req.session.clone())?;
         let mut out = vec![LaunchOutcome { agent: first.agent, role: slots[0].role, session: Some(first.clone()), error: None }];
+        let worktree = self.row(first.id)?.worktree_id;
         for slot in &slots[1..] {
             let derived = CreateSession {
                 agent: slot.agent,
-                cwd: req.session.cwd.clone(),
+                cwd: first.cwd.clone(),
                 name: Some(launch_rules::slot_name(&first.name, slot.role)),
                 credential: None,
                 cols: req.session.cols,
@@ -1458,12 +1511,36 @@ impl SessionManager {
                 provider_id: None,
                 description: launch_rules::slot_description(&first.name, slot.role),
                 project_id: first.project_id,
+                tags: first.tags.clone(),
+                workspace: Workspace::Here,
             };
-            let (session, error) = match self.create(derived) {
+            let (session, error) = match self.create_in(derived, worktree) {
                 Ok(s) => (Some(s), None),
                 Err(e) => (None, Some(e)),
             };
             out.push(LaunchOutcome { agent: slot.agent, role: slot.role, session, error });
+        }
+        Ok(out)
+    }
+
+    /// A Swarm: the same agent and settings in each slot, each in a new worktree; the first keeps
+    /// the name given, the others get names from the pool.
+    fn launch_swarm(self: &Arc<Self>, session: &CreateSession, slots: &[Slot]) -> Result<Vec<LaunchOutcome>, String> {
+        let mut out = Vec::new();
+        let mut named: Vec<String> = Vec::new();
+        for (i, slot) in slots.iter().enumerate() {
+            let mut req = CreateSession { workspace: Workspace::NewWorktree, ..session.clone() };
+            if i > 0 {
+                req.name = Some(self.suggest_name(&named));
+            }
+            match self.create(req) {
+                Ok(s) => {
+                    named.push(s.name.clone());
+                    out.push(LaunchOutcome { agent: slot.agent, role: slot.role, session: Some(s), error: None });
+                }
+                Err(e) if i == 0 => return Err(e),
+                Err(e) => out.push(LaunchOutcome { agent: slot.agent, role: slot.role, session: None, error: Some(e) }),
+            }
         }
         Ok(out)
     }
