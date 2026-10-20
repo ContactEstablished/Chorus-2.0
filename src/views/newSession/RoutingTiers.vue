@@ -191,7 +191,7 @@ const rows = computed<Row[]>(() => {
 })
 const chosen = computed(() => (props.modelValue === 'budget' || props.modelValue === 'balanced' || props.modelValue === 'fast' ? result.value?.tiers[props.modelValue] ?? null : null))
 const refreshTitle =
-  'Fetches the endpoint list and checks what your account allows (both free), then may spend up to about $0.05 of OpenRouter credit testing prompt caching. The estimate is shown before anything is spent.'
+  'Fetches the endpoint list and checks what your account allows (both free), then may spend up to about $0.05 of OpenRouter credit testing prompt caching.'
 const spentText = computed(() => {
   const r = refreshed.value
   if (!r) return null
@@ -220,6 +220,7 @@ const spentText = computed(() => {
     <p v-else-if="view?.problem && !result" class="small warn">{{ view.problem }}</p>
     <p v-else-if="busy" class="small">Fetching endpoints, checking the account, then testing prompt caching (at most $0.05)…</p>
     <p v-else-if="spentText" class="small">{{ spentText }}</p>
+    <p v-for="n in refreshed?.notes ?? []" :key="n" class="small warn">{{ n }}</p>
     <p v-if="view?.preselectHint && !touched" class="small">{{ view.preselectHint }}</p>
 
     <div class="rows" role="radiogroup" aria-label="Routing tier">
