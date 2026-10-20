@@ -4,7 +4,7 @@
  * dialog, plus which project the session joins. Starting opens the first session; any that
  * couldn't start are reported.
  */
-import { onMounted, onUnmounted, ref } from 'vue'
+import { nextTick, onMounted, onUnmounted, ref } from 'vue'
 import Icon from '../components/Icon.vue'
 import NewSessionForm from '../raw/NewSessionForm.vue'
 import type { LaunchRequest } from '../ipc'
@@ -22,6 +22,9 @@ const view = useViewStore()
 const notices = useNoticesStore()
 
 const busy = ref(false)
+const dialog = ref<HTMLElement | null>(null)
+// Focus goes to the first field, and back where it was when the dialog closes.
+const before = document.activeElement instanceof HTMLElement ? document.activeElement : null
 /** null: the project whose folder holds the session's folder, if any. */
 const projectId = ref<number | null>(view.name === 'overview' ? view.projectFilter : null)
 
@@ -32,11 +35,16 @@ function close(): void {
 function onKey(e: KeyboardEvent): void {
   if (e.key === 'Escape' && !busy.value) close()
 }
-onMounted(() => {
+onMounted(async () => {
   void keys.load()
   window.addEventListener('keydown', onKey)
+  await nextTick()
+  dialog.value?.querySelector<HTMLElement>('.panel select, .panel input')?.focus()
 })
-onUnmounted(() => window.removeEventListener('keydown', onKey))
+onUnmounted(() => {
+  window.removeEventListener('keydown', onKey)
+  if (before?.isConnected && !dialog.value?.isConnected) before.focus()
+})
 
 async function launch(request: LaunchRequest): Promise<void> {
   busy.value = true
@@ -58,7 +66,7 @@ async function launch(request: LaunchRequest): Promise<void> {
 
 <template>
   <div class="backdrop" @mousedown.self="!busy && close()">
-    <div class="dialog scroll" role="dialog" aria-modal="true" aria-label="New session">
+    <div ref="dialog" class="dialog scroll" role="dialog" aria-modal="true" aria-label="New session">
       <div class="top">
         <label class="project">
           <span>Project</span>
