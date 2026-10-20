@@ -4,6 +4,17 @@
     "beforeBuildCommand": "node scripts/build-hook.mjs && npm run web:build"
   },
   "bundle": {
-    "externalBin": ["binaries/chorus-hook"]
+    "externalBin": ["binaries/chorus-hook"],
+    "windows": {
+      "nsis": {
+        "installerIcon": "icons/icon.ico",
+        "uninstallerIcon": "icons/icon.ico",
+        "languages": ["English"],
+        "customLanguageFiles": {
+          "English": "windows/English.nsh"
+        },
+        "installerHooks": "windows/hooks.nsh"
+      }
+    }
   }
 }
