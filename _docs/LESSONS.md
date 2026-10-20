@@ -236,8 +236,10 @@ ships it beside `chorus.exe` as `chorus-hook.exe`. Dev builds keep building it b
 forward slashes (`C:/work/ledger`); `--git-common-dir` is relative unless `--path-format=absolute`
 (git 2.31+) comes first, and with it one call gives the tree, the repository's `.git` and, with
 `--abbrev-ref HEAD`, the branch (`HEAD` when detached). `git worktree remove` without `--force` refuses
-untracked files as well as changes, and works a moment after the session's process tree ends. A new
-worktree is a folder Claude Code hasn't been told to trust, so its trust prompt appears every time.
+untracked files as well as changes, and works a moment after the session's process tree ends; for a
+worktree whose folder was deleted by hand it just clears git's record of that one worktree (no
+`prune`, which would clear every stale one). A new worktree is a folder Claude Code hasn't been told
+to trust, so its trust prompt appeared every time until D55.
 
 ## Money and models
 

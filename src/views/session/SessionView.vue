@@ -95,13 +95,18 @@ async function askClose(): Promise<void> {
   }
   confirmingClose.value = true
 }
-// Removal is offered only when nothing would be lost and no other session works there.
-const canRemoveWorktree = computed(() => closeWorktree.value?.clean === true && closeWorktree.value.others === 0)
+// Removal is offered only when nothing would be lost and no other session works there. A folder
+// deleted outside Chorus has nothing left to lose: removing it clears git's record of it.
+const canRemoveWorktree = computed(() => {
+  const w = closeWorktree.value
+  return !!w && (w.clean === true || w.gone) && w.others === 0
+})
 const closeQuestion = computed(() => {
   const w = closeWorktree.value
   const base = `Close ${s.value?.name}? Its process ends.`
   if (!w) return base
   if (w.others) return `${base} Its worktree stays: ${w.others === 1 ? 'another session works' : `${w.others} other sessions work`} in it.`
+  if (w.gone) return `${base} Its worktree's folder is already gone; removing it clears git's record of it.`
   if (w.clean === false) return `${base} Its worktree has uncommitted changes, so it stays.`
   if (w.clean === null) return `${base} Its worktree stays (${w.note ?? 'git couldn’t check it'}).`
   return `${base} Its worktree has nothing uncommitted.`

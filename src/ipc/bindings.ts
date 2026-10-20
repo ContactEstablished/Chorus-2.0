@@ -723,6 +723,8 @@ export type WorktreeClose = {
 	path: string,
 	/**  Nothing uncommitted; none when git couldn't tell (see `note`). */
 	clean: boolean | null,
+	/**  Its folder was deleted outside Chorus: removing it only clears git's record of it. */
+	gone: boolean,
 	note: string | null,
 	/**  Other open sessions working in it (a Pair's reviewer, a Workbench's shell). */
 	others: number,

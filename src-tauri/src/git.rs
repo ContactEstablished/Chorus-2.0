@@ -15,9 +15,12 @@ use crate::sessions::job::Job;
 
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const MAX_OUTPUT_BYTES: u64 = 256 * 1024;
-const QUICK: Duration = Duration::from_secs(10);
-/// Checking out a large repository into a new worktree can take a while.
-const SLOW: Duration = Duration::from_secs(180);
+/// Queries whose time doesn't grow with the repository (rev-parse, status): past this, git is stuck.
+const QUICK: Duration = Duration::from_secs(15);
+/// Making or removing a worktree writes or deletes every tracked file. Chorus 1 measured a 7,000-file
+/// repository with Defender scanning run well past 15 s cold, and a kill mid-checkout leaves a
+/// half-made folder and a stray branch; this is a backstop against a stuck git, not a budget.
+const SLOW: Duration = Duration::from_secs(600);
 
 struct Ran {
     ok: bool,
@@ -114,7 +117,8 @@ pub fn delete_merged_branch(main_root: &Path, branch: &str) -> Result<(), String
 }
 
 /// Removes a worktree. Without `--force`, so git itself refuses if anything uncommitted is there.
-/// Its branch stays.
+/// Its branch stays. A worktree whose folder is already gone just has git's record of it cleared
+/// (git 2.50).
 pub fn remove_worktree(main_root: &Path, path: &str) -> Result<(), String> {
     let r = run(main_root, &["worktree", "remove", path], SLOW)?;
     if r.ok { Ok(()) } else { Err(complaint(&r.stderr)) }

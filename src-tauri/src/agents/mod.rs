@@ -128,17 +128,62 @@ fn short_path(path: &Path) -> Option<PathBuf> {
 /// Claude Code's config, which has grown past a megabyte on a busy machine.
 const MAX_CLAUDE_CONFIG_BYTES: u64 = 64 * 1024 * 1024;
 
-/// Whether Claude Code trusts `cwd` or a folder above it, from its own config
-/// (`$CLAUDE_CONFIG_DIR/.claude.json`, else `~/.claude.json`), read only. `None` when unreadable.
-pub fn claude_folder_trusted(parent_env: &[(String, String)], cwd: &str) -> Option<bool> {
-    let path = env_value(parent_env, "CLAUDE_CONFIG_DIR")
-        .map(PathBuf::from)
-        .or_else(|| env_value(parent_env, "USERPROFILE").map(PathBuf::from))?
-        .join(".claude.json");
-    if std::fs::metadata(&path).ok()?.len() > MAX_CLAUDE_CONFIG_BYTES {
+/// Claude Code's config: `$CLAUDE_CONFIG_DIR/.claude.json`, else `~/.claude.json`.
+fn claude_config_path(parent_env: &[(String, String)]) -> Option<PathBuf> {
+    Some(
+        env_value(parent_env, "CLAUDE_CONFIG_DIR")
+            .map(PathBuf::from)
+            .or_else(|| env_value(parent_env, "USERPROFILE").map(PathBuf::from))?
+            .join(".claude.json"),
+    )
+}
+
+fn read_claude_config(path: &Path) -> Option<String> {
+    if std::fs::metadata(path).ok()?.len() > MAX_CLAUDE_CONFIG_BYTES {
         return None;
     }
-    chorus_core::claude::folder_trusted(&std::fs::read_to_string(&path).ok()?, cwd)
+    std::fs::read_to_string(path).ok()
+}
+
+/// Whether Claude Code trusts `cwd` or a folder above it, from its own config, read only. `None`
+/// when unreadable.
+pub fn claude_folder_trusted(parent_env: &[(String, String)], cwd: &str) -> Option<bool> {
+    chorus_core::claude::folder_trusted(&read_claude_config(&claude_config_path(parent_env)?)?, cwd)
+}
+
+/// Records in Claude Code's config that it trusts `folder` (D55): the only write Chorus makes
+/// there. The config is read again just before, written to a file beside it and renamed over it,
+/// so Claude Code never reads half a file, then read back. A config that isn't there yet is left
+/// alone (Claude Code makes it on first run). Returns whether anything changed.
+pub fn claude_trust_folder(parent_env: &[(String, String)], folder: &str) -> Result<bool, String> {
+    let path = claude_config_path(parent_env).ok_or("no home folder for Claude Code's config")?;
+    if !path.is_file() {
+        return Ok(false);
+    }
+    let config = read_claude_config(&path).ok_or("Claude Code's config couldn't be read")?;
+    if chorus_core::claude::folder_trusted(&config, folder) == Some(true) {
+        return Ok(false);
+    }
+    let updated = chorus_core::claude::with_folder_trusted(&config, folder).ok_or("Claude Code's config isn't in the shape Chorus knows")?;
+    let temp = path.with_file_name(format!(".claude.json.chorus2-{}.tmp", std::process::id()));
+    std::fs::write(&temp, updated).map_err(|e| format!("writing {}: {e}", temp.display()))?;
+    // Claude Code may hold the file open for a moment.
+    let mut renamed = std::fs::rename(&temp, &path);
+    for _ in 0..4 {
+        if renamed.is_ok() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        renamed = std::fs::rename(&temp, &path);
+    }
+    if let Err(e) = renamed {
+        let _ = std::fs::remove_file(&temp);
+        return Err(format!("replacing Claude Code's config: {e}"));
+    }
+    match read_claude_config(&path).and_then(|c| chorus_core::claude::folder_trusted(&c, folder)) {
+        Some(true) => Ok(true),
+        _ => Err("Claude Code rewrote its config at the same moment, so the trust didn't stick".into()),
+    }
 }
 
 /// Whether the agent has recorded the conversation `id`, so the next run resumes it instead of
@@ -161,4 +206,30 @@ pub fn conversation_exists(kind: AgentKind, id: &str, parent_env: &[(String, Str
         return false;
     };
     folders.flatten().any(|f| f.path().join(&file).exists())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn trusting_a_folder_rewrites_claude_codes_config_in_place() {
+        let dir = std::env::temp_dir().join(format!("chorus-claude-trust-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let env = vec![("CLAUDE_CONFIG_DIR".to_owned(), dir.display().to_string())];
+        let home = dir.join(".chorus2").join("ledger").display().to_string();
+        assert_eq!(claude_trust_folder(&env, &home), Ok(false), "no config yet: Claude Code makes it, not Chorus");
+        assert!(!dir.join(".claude.json").exists());
+
+        std::fs::write(dir.join(".claude.json"), r#"{"numStartups":3,"projects":{}}"#).unwrap();
+        std::fs::create_dir_all(dir.join(".chorus2")).unwrap();
+        assert_eq!(claude_trust_folder(&env, &home), Ok(true));
+        let worktree = dir.join(".chorus2").join("ledger").join("1a2b3c4d").join("web");
+        assert_eq!(claude_folder_trusted(&env, &worktree.display().to_string()), Some(true));
+        assert_eq!(claude_trust_folder(&env, &home), Ok(false), "already trusted: nothing written");
+        let left: Vec<_> = std::fs::read_dir(&dir).unwrap().flatten().map(|e| e.file_name()).collect();
+        assert_eq!(left.len(), 2, "the config and the worktree folder only, no temp file: {left:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

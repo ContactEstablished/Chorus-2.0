@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 
 use super::{SessionManager, SessionSummary, check_cwd};
+use crate::agents;
 use crate::git;
 use crate::store::worktrees::{self as worktree_rows, NewWorktree};
 use crate::store::{sessions as rows, settings, tags as tag_rows};
@@ -102,6 +103,8 @@ pub struct WorktreeClose {
     pub path: String,
     /// Nothing uncommitted; none when git couldn't tell (see `note`).
     pub clean: Option<bool>,
+    /// Its folder was deleted outside Chorus: removing it only clears git's record of it.
+    pub gone: bool,
     pub note: Option<String>,
     /// Other open sessions working in it (a Pair's reviewer, a Workbench's shell).
     pub others: u32,
@@ -170,7 +173,12 @@ impl SessionManager {
             if Path::new(&plan.path).exists() {
                 continue;
             }
-            git::add_worktree(Path::new(&facts.main_root), &plan.path, &plan.branch, facts.branch.as_deref())?;
+            match git::add_worktree(Path::new(&facts.main_root), &plan.path, &plan.branch, facts.branch.as_deref()) {
+                Ok(()) => {}
+                // That branch or folder name is taken (Chorus 1 retries the same way).
+                Err(e) if e.contains("already exists") => continue,
+                Err(e) => return Err(e),
+            }
             let new = NewWorktree { repo_root: &facts.main_root, path: &plan.path, branch: &plan.branch, base_branch: facts.branch.as_deref() };
             let made = Made { id: 0, cwd: String::new(), repo_root: facts.main_root.clone(), path: plan.path.clone(), branch: plan.branch.clone() };
             let row_id = match worktree_rows::insert(&self.store, &new) {
@@ -196,6 +204,25 @@ impl SessionManager {
         }
         if made.id != 0 {
             let _ = worktree_rows::delete(&self.store, made.id);
+        }
+    }
+
+    /// Claude Code asks to trust every new folder (LESSONS L33), and a worktree is always new. When
+    /// it already trusts `source` (the folder the session was asked for) or the repository, Chorus
+    /// records the same trust for the folder that holds the repository's worktrees,
+    /// `<parent>\.chorus2\<repo>`, which covers this one and the next (D55). A folder the user
+    /// hasn't trusted through its repository stays untrusted, and Claude Code asks as usual.
+    pub(super) fn trust_worktree_for_claude(&self, worktree_id: u32, source: &str) {
+        let Some(w) = worktree_rows::get(&self.store, worktree_id).ok().flatten() else { return };
+        let Some(home) = Path::new(&w.path).parent().map(|p| p.display().to_string()) else { return };
+        let env: Vec<(String, String)> = std::env::vars().collect();
+        let trusted = |folder: &str| agents::claude_folder_trusted(&env, folder) == Some(true);
+        if trusted(&w.path) || !(trusted(source) || trusted(&w.repo_root)) {
+            return;
+        }
+        if let Err(e) = agents::claude_trust_folder(&env, &home) {
+            // The session still starts; Claude Code then asks, and the session says so.
+            eprintln!("chorus: couldn't record Claude Code's trust for {home}: {e}");
         }
     }
 
@@ -248,15 +275,16 @@ impl SessionManager {
             return Ok(CloseCheck { worktree: None });
         };
         let others = worktree_rows::other_open_sessions(&self.store, w.id, id)?;
-        let (clean, note) = if !Path::new(&w.path).is_dir() {
-            (None, Some("Its folder is gone.".to_owned()))
+        let gone = !Path::new(&w.path).is_dir();
+        let (clean, note) = if gone {
+            (None, Some("Its folder is already gone.".to_owned()))
         } else {
             match git::is_clean(Path::new(&w.path)) {
                 Ok(c) => (Some(c), None),
                 Err(e) => (None, Some(e)),
             }
         };
-        Ok(CloseCheck { worktree: Some(WorktreeClose { branch: w.branch, path: w.path, clean, note, others }) })
+        Ok(CloseCheck { worktree: Some(WorktreeClose { branch: w.branch, path: w.path, clean, gone, note, others }) })
     }
 
     /// After Close: removes the session's worktree if nothing would be lost and no other session
@@ -265,6 +293,15 @@ impl SessionManager {
         let w = worktree_rows::get(&self.store, worktree_id).ok().flatten().filter(|w| !w.removed)?;
         if worktree_rows::other_open_sessions(&self.store, w.id, session_id).unwrap_or(0) > 0 {
             return Some("Kept the worktree: another session still works in it.".into());
+        }
+        if !Path::new(&w.path).is_dir() {
+            return Some(match git::remove_worktree(Path::new(&w.repo_root), &w.path) {
+                Ok(()) => {
+                    let _ = worktree_rows::set_removed(&self.store, w.id);
+                    format!("The worktree's folder was already gone, so git's record of it is cleared. Its branch {} is kept.", w.branch)
+                }
+                Err(e) => format!("The worktree's folder is gone, but git's record of it couldn't be cleared: {e}"),
+            });
         }
         Some(match git::is_clean(Path::new(&w.path)) {
             Ok(true) => match git::remove_worktree(Path::new(&w.repo_root), &w.path) {

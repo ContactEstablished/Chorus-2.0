@@ -865,6 +865,11 @@ impl SessionManager {
         if join.is_none() {
             self.remember_folder(&asked);
         }
+        if req.agent == AgentKind::Claude
+            && let Some(w) = join.or(made.as_ref().map(|m| m.id))
+        {
+            self.trust_worktree_for_claude(w, &asked);
+        }
         let live = self.live_for(id);
         if let Err(e) = self.start_run(&live) {
             self.record_failure(&live, &e);

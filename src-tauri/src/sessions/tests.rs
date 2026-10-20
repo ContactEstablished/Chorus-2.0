@@ -355,7 +355,7 @@ fn a_session_can_work_in_a_worktree_of_its_own() {
     assert!(git.new_branch.unwrap().starts_with("chorus2/ledger/"));
     assert_eq!(check.sharing.iter().map(|s| s.id).collect::<Vec<_>>(), [first.id]);
 
-    let second = f.manager.create(CreateSession { workspace: Workspace::NewWorktree, tags: Vec::new(), ..request }).unwrap();
+    let second = f.manager.create(CreateSession { workspace: Workspace::NewWorktree, tags: Vec::new(), ..request.clone() }).unwrap();
     let wt = second.worktree.clone().unwrap();
     assert!(wt.branch.starts_with("chorus2/ledger/") && wt.base_branch.as_deref() == Some("main"), "{wt:?}");
     let beside = f.dir.join(".chorus2").join("ledger").display().to_string();
@@ -377,5 +377,17 @@ fn a_session_can_work_in_a_worktree_of_its_own() {
     assert!(!Path::new(&wt.path).exists());
     assert!(f.manager.summary(second.id).unwrap().worktree.unwrap().removed);
     assert!(git_in(&repo, &["branch", "--list", &wt.branch]).contains(&wt.branch), "the branch is kept");
-    assert_eq!(f.manager.recent_folders(), [folder]);
+    assert_eq!(f.manager.recent_folders(), std::slice::from_ref(&folder));
+
+    // A worktree folder deleted outside Chorus: Close clears git's record of it.
+    let third = f.manager.create(CreateSession { workspace: Workspace::NewWorktree, ..request }).unwrap();
+    let gone = third.worktree.clone().unwrap();
+    let live = f.manager.live.lock().unwrap().get(&third.id).cloned().unwrap();
+    f.manager.end_run_for(&live, ExitCause::UserClose);
+    std::fs::remove_dir_all(&gone.path).unwrap();
+    let check = f.manager.close_check(third.id).unwrap().worktree.unwrap();
+    assert!(check.gone && check.clean.is_none());
+    let note = f.manager.close(third.id, true).unwrap().worktree_note.unwrap();
+    assert!(note.contains("already gone"), "{note}");
+    assert!(!git_in(&repo, &["worktree", "list"]).contains(&gone.branch));
 }
