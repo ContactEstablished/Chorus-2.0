@@ -13,6 +13,7 @@ and written up in `S<n>.md`; raw evidence stays in `_verify/`, which is never co
 | S6 | ~~Local transcription~~ | Removed (D22) |
 | S7 | 3D splash | [Pass, look approved](S7.md): first frame 155–161 ms, done 2.86 s, skippable, reduced-motion version, main window unaffected |
 | S8 | Per-user installer beside Chorus 1 | [Pass, one collision](S8.md): no admin, Chorus 1 untouched, data kept on uninstall; but shortcut names collide with Chorus 1's (Q20, answered by D51) |
+| S9 | DeepSeek Harness (`dsh`) on Windows: interfaces, events, key, sessions, cost (D59, Q21) | Planned for P14 |
 
 ## Toolchain (verified 2026-10-18)
 

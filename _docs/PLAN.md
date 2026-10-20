@@ -212,8 +212,11 @@ action pipeline as Friendly. The only remote access in 2.0 (Remote hosts was dis
 whether Claude Code's and Codex's built-in remote control modes complement it (D35).
 
 ### P14 — More agents and ship
-Gemini CLI, Aider, and Ollama (via opencode) adapters; installer polish, code signing decision, update
-channel; secret scanning in CI. Once Chorus 1 is retired, the installed name drops its "2" (D51), with a
+Gemini CLI, Aider, and Ollama (via opencode) adapters. **DeepSeek Harness** (`dsh`) on DeepSeek's own
+API (D59), after spike S9 settles how Chorus runs it (Q21): on Windows, which of its interfaces gives a
+real terminal or a structured event stream, how its key and model are set from 2.0's vault and launch
+form, where its sessions live and how they resume, and how it reports cost. Installer polish, code
+signing decision, update channel; secret scanning in CI. Once Chorus 1 is retired, the installed name drops its "2" (D51), with a
 step that moves an existing "Chorus 2" install.
 
 ## 5. Ways of working

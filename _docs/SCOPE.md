@@ -83,6 +83,7 @@ From the Harness mockups, confirmed as the UI direction (D9), plus one setup aid
 | Launch presets | Solo, Pair, Workbench, Swarm | P2 |
 | Saved launch profiles | Become **Bots** | P2 → P8 |
 | More agents (Gemini, Aider, Ollama) | Adapters | P14 |
+| DeepSeek Harness (`dsh`) | DeepSeek's own agent on the DeepSeek API directly, its key from the vault as an environment variable; spike S9 first (D59, Q21) | P14 |
 
 ### Git
 | Feature | 2.0 home | Phase |

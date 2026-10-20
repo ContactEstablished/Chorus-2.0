@@ -20,6 +20,15 @@ and its TUI can attach with `--remote`, the same shape as opencode's serve + att
 app-server + `--remote` behind a capability flag; until then Friendly says "plan not available for
 Codex".* Blocks: P6.
 
+**Q21 — How should Chorus run DeepSeek Harness?** (D59.) `dsh` offers a local web UI and the server
+behind it (`dsh web`, port 3080), a one-shot headless run (`dsh --profile headless "<task>"`), a Python
+SDK, and a terminal UI only through a community plugin profile (`dsh --profile tui`). Options: (a) its
+terminal UI in the session's PTY, like every other agent, if the plugin works on Windows; (b) its own
+server, driven by Chorus the way opencode is, with Chorus's Friendly view (P6) as the interface; (c)
+headless runs only, for Automations and Bots (P8); (d) its web UI in a Chorus window. *Default: decide
+after spike S9; likely (b) for supervised sessions plus (c) for Automations, since Chorus reads agent
+state only from structured channels.* Blocks: the P14 `dsh` adapter.
+
 ## Resolved 2026-10-18
 
 Matthew kept the name Chorus, accepted every recommended default, and moved voice to a separate
