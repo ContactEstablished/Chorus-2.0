@@ -7,7 +7,10 @@ did, and what to do next.
 Chorus 2.0 is a ground-up rebuild of Chorus on **Tauri 2 (Rust)** with a **Vue 3** web UI. Windows only
 for now. Bring your own keys: Chorus itself only talks to the providers you configure.
 
-**Status:** Phase 4 (app shell and Overview) is under way. Phase 3 (agent events and durable history)
+**Status:** Phase 4 (app shell and Overview) is built and in its exit check, a day of real work in 2.0:
+the Chorus shell with Glacier and Dusk, projects (with a one-time import from Chorus 1), the Overview,
+Sessions and the Wall of live terminals, the session view, the command palette, and the 3D splash at
+start. Phase 3 (agent events and durable history)
 closed on 2026-10-19: hooks and server events turned into live session states, and every prompt, turn,
 final message, tool call and approval kept in SQLite, scrubbed. Phase 2 (agents and providers) closed on
 2026-10-19: Claude Code, Codex, opencode, Grok and shells with one effort scale, permission

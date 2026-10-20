@@ -13,7 +13,8 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js'
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
 
-// three.js is untyped here (see three.d.ts), so its objects are `any` until P4 adds @types/three.
+// three.js is untyped here (see three.d.ts): @types/three isn't on the approved list, so its objects
+// are `any`.
 type Three = any
 
 export interface SplashOptions {

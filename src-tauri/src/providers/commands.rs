@@ -1,5 +1,5 @@
-//! Providers for the bare Raw view (Settings → Providers arrives with P4's shell): add one with
-//! keys from the vault, test it, refresh its models and pick a shortlist. Inputs are checked here.
+//! Providers (Settings → Providers): add one with keys from the vault, test it, refresh its models
+//! and pick a shortlist. Inputs are checked here.
 
 use std::sync::Arc;
 

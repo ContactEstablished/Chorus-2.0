@@ -1,6 +1,7 @@
 <script setup lang="ts">
 /**
- * One xterm.js terminal bound to a PTY stream (spike S1; the Raw view builds on it in P1/P4).
+ * One xterm.js terminal bound to a PTY stream (spike S1): the session view's Raw terminal and each
+ * tile on the Wall.
  * Output arrives as raw bytes and is handed to xterm unchanged, so its UTF-8 decoder keeps state
  * across chunks. Input goes back as typed text; resizes follow the element's size.
  */

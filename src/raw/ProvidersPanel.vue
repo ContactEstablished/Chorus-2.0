@@ -1,8 +1,8 @@
 <script setup lang="ts">
 /**
  * Providers: OpenRouter, OpenAI-compatible gateways and Jev. Each points at keys from the vault,
- * can be tested, and (except Jev) has a model catalog with a shortlist to launch from. Settings →
- * Providers replaces this with P4's shell.
+ * can be tested, and (except Jev) has a model catalog with a shortlist to launch from. Shown in
+ * Settings → Providers.
  */
 import { computed, onMounted, reactive, ref } from 'vue'
 import type { CatalogEntry, ProviderKind, ProviderSummary } from '../ipc'

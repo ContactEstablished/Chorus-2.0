@@ -4,7 +4,7 @@
  * provider and model, and optionally a stored key as a variable; a preset for how many sessions to
  * start; a name and a note. Options an agent lacks are left out with the reason, and each choice
  * shows the exact arguments it adds (for opencode, the server configuration). A saved profile
- * fills the settings in one click. P4 restyles it into the app shell.
+ * fills the settings in one click. Shown in the New session dialog.
  */
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import {

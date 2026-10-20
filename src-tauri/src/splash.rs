@@ -1,4 +1,4 @@
-//! The startup splash window (spike S7; shown at launch in P4).
+//! The startup splash window (spike S7, P4).
 //!
 //! A separate, short-lived window, so it can never hold up the main window or session restore: the
 //! back end restores sessions on its own and the splash only reflects progress (`restore_progress`).
