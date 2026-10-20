@@ -6,7 +6,7 @@
  * project and tags (D52), a note, effort and permissions as button groups, and, folded away, what
  * it runs on: its own sign-in by default, or a provider, a model and a key.
  */
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import {
   commands,
   type AgentKind,
@@ -318,17 +318,19 @@ function submit(): void {
   emit('launch', { preset: preset.value, session, count: preset.value === 'swarm' ? swarmCount.value : null })
 }
 
-// Ctrl+Enter starts from anywhere in the form.
+// Ctrl+Enter starts from anywhere while the dialog is open, focus or not.
 function onKey(e: KeyboardEvent): void {
   if (e.key === 'Enter' && e.ctrlKey) {
     e.preventDefault()
     submit()
   }
 }
+onMounted(() => window.addEventListener('keydown', onKey))
+onUnmounted(() => window.removeEventListener('keydown', onKey))
 </script>
 
 <template>
-  <form class="form" @submit.prevent="submit" @keydown="onKey">
+  <form class="form" @submit.prevent="submit">
     <h2>New session</h2>
 
     <div v-if="profiles.list.length" class="chips">

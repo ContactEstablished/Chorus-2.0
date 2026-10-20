@@ -77,7 +77,7 @@ function onKey(e: KeyboardEvent): void {
       role="combobox"
       :aria-expanded="open && offers.length > 0"
       :aria-controls="listId"
-      :disabled="busy"
+      :readonly="busy"
       autocomplete="off"
       spellcheck="false"
       maxlength="60"
