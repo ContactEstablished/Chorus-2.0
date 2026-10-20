@@ -241,6 +241,25 @@ worktree whose folder was deleted by hand it just clears git's record of that on
 `prune`, which would clear every stale one). A new worktree is a folder Claude Code hasn't been told
 to trust, so its trust prompt appeared every time until D55.
 
+**L40 — OpenRouter routing, measured again in 2.0 (2026-10-20, `deepseek/deepseek-v4.1-flash`).**
+- The account preflight's 404 now names two more funnel steps, `Filter by Regional Surcharge` and
+  `Filter by Tier Endpoint Rows`, beside `Filter by Fallback`; neither is the account's. Chorus 1's
+  parser required every clause to name a known step, so both checks read as unknown until 2.0 added
+  them. This account's guardrail and data policy removed nothing for this model.
+- The cache test probed 11 endpoints for $0.0145 (estimate $0.028). Baidu again never cached; most
+  others did. With cache credit, `coreweave/fp8` led every tier at $0.0176/M blended, as in Chorus 1.
+- A first Refresh's five probes were all inconclusive and cost $0.0025, and its notes weren't shown
+  then, so the cause wasn't seen; the next Refresh's probes all concluded. Refresh now shows its notes.
+
+**L41 — opencode 2.1.1 broke the serve-and-attach launch (D42), found 2026-10-20.** It installs as the
+npm package `@opencode/cli` (`node_modules\@opencode\cli\bin\opencode.exe`), no longer `opencode-ai`.
+`serve` ("the v2 API and web server") still starts and still prints `listening on http://127.0.0.1:<port>`,
+but the API moved under `/api/` and wraps answers in `{"data": …}`: `POST /api/session` creates one,
+while `POST /session` is now the web app's route and answers 405, so every opencode launch failed with
+"opencode answered 405 when asked to start a session". `attach` is gone: the terminal UI connects with
+`opencode --server <url> --session <id>`, and by default opencode uses a shared background service
+(`--standalone` gives a private one). `/api/provider` and the event stream's shapes are not yet checked.
+
 ## Money and models
 
 **L16 — Read-then-revoke under-reports OpenRouter spend.** Reading a capped key's usage right after the

@@ -107,8 +107,8 @@ From the Harness mockups, confirmed as the UI direction (D9), plus one setup aid
 ### Routing
 | Feature | 2.0 home | Phase |
 |---|---|---|
-| Routing tiers | opencode on OpenRouter | P12 |
-| Endpoint observation | Background sampler | P12 |
+| Routing tiers | opencode on OpenRouter, in New session (D57) | P4 |
+| Endpoint observation | Background sampler, with the provider the user ticks (D57) | P4 |
 | Routing inspector | Settings → Routing | P12 |
 
 ### Council

@@ -143,7 +143,8 @@ counts. **Sessions:** searchable list, and the Wall layout of live Raw terminals
 header, status, Raw mode, the session facts panel, and the session strip (filmstrip) for fast switching.
 Projects: add, reorder, colours, hide, archive and delete (no import from Chorus 1: D50). Command
 palette (Ctrl+K), project switcher (Ctrl+G), prompt history panel with copy. **New session** in Chorus
-1's shape (D54), with session tags (D52) and worktrees made at launch (D53, brought forward from P5). **3D startup splash.** Dictation compatibility (D23): the composer and the Raw terminal accept
+1's shape (D54) and Matthew's two-pane design (D56), with session tags (D52), worktrees made at launch
+(D53, brought forward from P5), and routing tiers for opencode on OpenRouter (D57, from P12). **3D startup splash.** Dictation compatibility (D23): the composer and the Raw terminal accept
 text inserted or pasted by another app, and never submit it on their own.
 
 **Exit:** a day of real work in 2.0 without opening Chorus 1.
@@ -201,7 +202,9 @@ UI this time (session facts, Overview headline, a Usage screen). Mission Control
 P3's turn data meets its completeness bar.
 
 ### P12 — Routing tiers
-Budget / Balanced / Fast / Nitro for opencode on OpenRouter; endpoint observation; routing inspector.
+The tiers, Refresh, the account checks, the cache test and endpoint observation came to New session in
+P4 (D57). Still to come: the routing inspector (Settings → Routing: its settings, observer status and
+history).
 
 ### P13 — Phone relay (Telegram)
 Prompt sessions, answer questions and approvals, and get digests from your phone, through the same
