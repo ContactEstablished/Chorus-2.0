@@ -22,6 +22,7 @@ pub fn builder() -> Builder<tauri::Wry> {
             prefs::prefs_get,
             prefs::prefs_set,
             projects::projects_list,
+            projects::project_palette,
             projects::project_save,
             projects::project_set_state,
             projects::projects_reorder,

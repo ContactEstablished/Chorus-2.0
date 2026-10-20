@@ -66,6 +66,7 @@ function session(id: number, over: Partial<SessionSummary> = {}): SessionSummary
     description: null,
     activity: 'unknown',
     noSignal: false,
+    attention: 'running',
     projectId: null,
     latest: null,
     latestAtSecs: 0,

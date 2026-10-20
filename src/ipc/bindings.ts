@@ -12,6 +12,8 @@ export const commands = {
 	/**  Stores the preferences, with anything out of range brought back in, and applies the zoom. */
 	prefsSet: (prefs: Prefs) => typedError<Prefs, string>(__TAURI_INVOKE("prefs_set", { prefs })),
 	projectsList: () => typedError<Project[], string>(__TAURI_INVOKE("projects_list")),
+	/**  The colours offered for projects, in the order new projects get them. */
+	projectPalette: () => __TAURI_INVOKE<string[]>("project_palette"),
 	/**  Adds a project, or with `id` edits one. Returns every project. */
 	projectSave: (id: number | null, project: ProjectInput) => typedError<Project[], string>(__TAURI_INVOKE("project_save", { id, project })),
 	projectSetState: (id: number, projectState: ProjectState) => typedError<Project[], string>(__TAURI_INVOKE("project_set_state", { id, projectState })),
@@ -153,6 +155,8 @@ export type AppInfo = {
 	flavor: Flavor,
 	/**  The live data directory. Shown in the window so it's always clear which data is in use. */
 	dataDir: string,
+	/**  The user's home folder, so paths can be shown as ~/... */
+	homeDir: string | null,
 	tauriVersion: string,
 };
 
@@ -161,6 +165,24 @@ export type AskEntry = {
 	subject: string,
 	answer: string | null,
 };
+
+/**  In urgency order, most urgent first. */
+export type Attention = 
+/**  The agent waits for permission to act. */
+"approval" | 
+/**  The agent asked a question. */
+"input" | 
+/**  The last turn failed, the process exited with an error, or it couldn't start. */
+"failed" | "working" | 
+/**  The turn ended; the agent waits for the next prompt. */
+"ready" | 
+/**
+ *  Running, with no event channel to say more (a shell, Grok, or an agent before its first
+ *  event). Never shown as working (ARCHITECTURE §6).
+ */
+"running" | 
+/**  Exited cleanly, or closed. */
+"done";
 
 /**
  *  Emitted once a second so the window can show the back end is alive. It also proves the typed
@@ -368,12 +390,12 @@ export type PermissionChoice = {
 };
 
 export type Prefs = {
-	theme?: Theme,
+	theme: Theme,
 	/**  The whole window's zoom, 0.8 to 1.6. */
-	zoom?: number | null,
-	groupBy?: GroupBy,
+	zoom: number | null,
+	groupBy: GroupBy,
 	/**  Whether the session view shows the strip of other sessions. */
-	sessionStrip?: boolean,
+	sessionStrip: boolean,
 };
 
 export type Preset = 
@@ -559,6 +581,8 @@ export type SessionSummary = {
 	activity: Activity,
 	/**  Working, but neither an event nor output for a while: shown, never assumed (§6). */
 	noSignal: boolean,
+	/**  Whether it needs you, is busy or is finished, in the design's words (`chorus_core::attention`). */
+	attention: Attention,
 	/**  What the running agent's newest turn really used, read back from the agent (opencode). */
 	observed: Observed | null,
 	/**  How that turn differs from `options`, one phrase each; empty when it matches. */

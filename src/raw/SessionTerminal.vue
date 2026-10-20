@@ -7,6 +7,7 @@
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { Channel } from '@tauri-apps/api/core'
 import TerminalView from '../components/TerminalView.vue'
+import { registerTerminal } from '../components/terminals'
 import { commands } from '../ipc'
 
 const props = defineProps<{ sessionId: number; live: boolean }>()
@@ -15,6 +16,11 @@ const emit = defineEmits<{ error: [message: string] }>()
 const term = ref<InstanceType<typeof TerminalView> | null>(null)
 let viewId: number | null = null
 let disposed = false
+const unregister = registerTerminal(props.sessionId, {
+  screenText: () => term.value?.screenText() ?? '',
+  bufferText: () => term.value?.bufferText() ?? '',
+  focus: () => term.value?.focus(),
+})
 
 onMounted(async () => {
   const output = new Channel<ArrayBuffer>()
@@ -37,6 +43,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   disposed = true
+  unregister()
   if (viewId !== null) void commands.sessionDetach(props.sessionId, viewId)
 })
 

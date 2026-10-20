@@ -86,6 +86,13 @@ pub fn projects_list(state: Manager<'_>) -> Result<Vec<Project>, String> {
     all(state.store())
 }
 
+/// The colours offered for projects, in the order new projects get them.
+#[tauri::command]
+#[specta::specta]
+pub fn project_palette() -> Vec<String> {
+    pj::PALETTE.iter().map(|c| (*c).to_owned()).collect()
+}
+
 /// Adds a project, or with `id` edits one. Returns every project.
 #[tauri::command]
 #[specta::specta]

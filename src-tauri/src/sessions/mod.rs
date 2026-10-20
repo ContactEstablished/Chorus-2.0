@@ -27,6 +27,7 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 use chorus_core::activity::Activity;
+use chorus_core::attention::{Attention, attention};
 use chorus_core::agent::{LaunchOptions, ResumeKind, uuid_v4};
 use chorus_core::hooks as hk;
 use chorus_core::batch::{PTY_BATCH, SCRUB_CARRY_RELEASE_MS};
@@ -134,6 +135,8 @@ pub struct SessionSummary {
     pub activity: Activity,
     /// Working, but neither an event nor output for a while: shown, never assumed (§6).
     pub no_signal: bool,
+    /// Whether it needs you, is busy or is finished, in the design's words (`chorus_core::attention`).
+    pub attention: Attention,
     /// What the running agent's newest turn really used, read back from the agent (opencode).
     pub observed: Option<Observed>,
     /// How that turn differs from `options`, one phrase each; empty when it matches.
@@ -648,6 +651,13 @@ impl SessionManager {
             resumed: last.as_ref().is_some_and(|r| r.resumed),
             activity: run.as_ref().map_or(Activity::Unknown, |r| r.recorder.lock().expect("recorder lock").activity()),
             no_signal: run.as_ref().is_some_and(|r| r.no_signal_shown.load(Ordering::SeqCst)),
+            attention: attention(
+                row.state,
+                run.is_some(),
+                run.as_ref().map_or(Activity::Unknown, |r| r.recorder.lock().expect("recorder lock").activity()),
+                last.as_ref().and_then(|r| r.end_reason),
+                last.as_ref().and_then(|r| r.exit_code),
+            ),
             observed_differs: match (&observed, &run) {
                 (Some(o), Some(r)) => oc::differences(row.agent.spec(), &r.asked, o),
                 _ => Vec::new(),

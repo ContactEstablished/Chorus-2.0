@@ -7,6 +7,7 @@
 
 pub mod activity;
 pub mod agent;
+pub mod attention;
 pub mod batch;
 pub mod build;
 pub mod claude;

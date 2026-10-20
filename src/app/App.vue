@@ -1,111 +1,124 @@
 <script setup lang="ts">
-// P1 window: a slim bar saying which build and data are live (LESSONS L15) and the bare Raw view.
-// The real shell (rail, title bar, Overview) is P4.
-import { onMounted, onUnmounted, ref } from 'vue'
-import ChorusMark from '../components/ChorusMark.vue'
-import RawView from '../raw/RawView.vue'
-import { commands } from '../ipc'
+/**
+ * The main window's frame (PLAN P4): the rail, the title bar, the view the rail picked, the status
+ * bar and the notices. Global keys: zoom with Ctrl +/-/0.
+ */
+import { defineAsyncComponent, onMounted, onUnmounted, watch } from 'vue'
+import Rail from '../shell/Rail.vue'
+import TitleBar from '../shell/TitleBar.vue'
+import StatusBar from '../shell/StatusBar.vue'
+import Notices from '../shell/Notices.vue'
+import PhasePlaceholder from '../shell/PhasePlaceholder.vue'
 import { useAppStore } from '../stores/app'
+import { useSessionsStore } from '../stores/sessions'
+import { useProjectsStore } from '../stores/projects'
+import { usePrefsStore } from '../stores/prefs'
+import { useViewStore } from '../stores/view'
+import { useNoticesStore } from '../stores/notices'
+import { installDevApi } from './devApi'
+
+const SettingsView = defineAsyncComponent(() => import('../views/SettingsView.vue'))
+const RawView = defineAsyncComponent(() => import('../raw/RawView.vue'))
 
 const app = useAppStore()
-const devMessage = ref<string | null>(null)
-onMounted(() => void app.init())
-onUnmounted(() => app.dispose())
+const sessions = useSessionsStore()
+const projects = useProjectsStore()
+const prefs = usePrefsStore()
+const view = useViewStore()
+const notices = useNoticesStore()
 
-async function splash(reduceMotion: boolean): Promise<void> {
-  const res = await commands.spikeSplashOpen(3, reduceMotion)
-  devMessage.value = res.status === 'error' ? res.error : null
+function onKey(e: KeyboardEvent): void {
+  if (!e.ctrlKey || e.altKey || e.metaKey) return
+  // Captured before the terminal sees it: these never reach an agent.
+  const zoom = e.key === '=' || e.key === '+' ? 1 : e.key === '-' ? -1 : e.key === '0' ? 0 : null
+  if (zoom !== null) {
+    e.preventDefault()
+    e.stopPropagation()
+    void prefs.zoomBy(zoom)
+  }
 }
 
-async function fleet(): Promise<void> {
-  const res = await commands.spikeFleetOpen()
-  devMessage.value = res.status === 'error' ? res.error : null
-}
+onMounted(async () => {
+  window.addEventListener('keydown', onKey, { capture: true })
+  await app.init()
+  await Promise.all([prefs.load(), sessions.init(), projects.load()])
+  if (app.info?.flavor === 'dev') installDevApi()
+})
+onUnmounted(() => {
+  window.removeEventListener('keydown', onKey, { capture: true })
+  sessions.dispose()
+  app.dispose()
+})
+
+// The sessions store shows request failures; surface them as notices.
+watch(
+  () => sessions.error,
+  (e) => {
+    if (e) notices.error(e)
+  },
+)
 </script>
 
 <template>
-  <div class="shell">
-    <header class="bar">
-      <ChorusMark :height="22" />
-      <strong>Chorus 2.0</strong>
-      <template v-if="app.info">
-        <span class="muted">{{ app.info.version }}</span>
-        <span class="flavor" :class="app.info.flavor">{{ app.info.flavor }}</span>
-        <code class="path" :title="app.info.identifier">{{ app.info.dataDir }}</code>
-      </template>
-      <span v-else-if="app.error" class="error">Back end unavailable: {{ app.error }}</span>
-      <span class="spacer" />
-      <template v-if="app.info?.flavor === 'dev'">
-        <span v-if="devMessage" class="error">{{ devMessage }}</span>
-        <button class="quiet" @click="splash(false)">Splash</button>
-        <button class="quiet" @click="splash(true)">Splash (reduced motion)</button>
-        <button class="quiet" @click="fleet()">Fleet strip</button>
-      </template>
-    </header>
-    <RawView v-if="app.info" :dev="app.info.flavor === 'dev'" class="body" />
+  <div class="frame">
+    <Rail @new-project="view.openSettings('projects')" @edit-project="view.openSettings('projects')" />
+    <div class="main">
+      <TitleBar @palette="notices.info('The command palette arrives later in P4.')" />
+      <main class="view">
+        <SettingsView v-if="view.name === 'settings'" />
+        <RawView v-else-if="view.name === 'sessions' || view.name === 'session'" />
+        <PhasePlaceholder
+          v-else-if="view.name === 'bots'"
+          title="Bots"
+          icon="bots"
+          phase="Phase 8"
+          what="Reusable agents: agent, model, effort, permissions and instructions, started as a session in one click. They grow out of launch profiles."
+        />
+        <PhasePlaceholder
+          v-else-if="view.name === 'automations'"
+          title="Automations"
+          icon="automations"
+          phase="Phase 8"
+          what="Run a Bot on a schedule, or later on a GitHub trigger. Each run is an ordinary session you can open."
+        />
+        <PhasePlaceholder
+          v-else-if="view.name === 'documents'"
+          title="Documents"
+          icon="documents"
+          phase="Phase 8"
+          what="Documents your sessions produce, tagged by project and linked to the session that wrote each one."
+        />
+        <PhasePlaceholder
+          v-else-if="view.name === 'notes'"
+          title="Notes"
+          icon="notes"
+          phase="Phase 8"
+          what="Project or global notes that are added to agents' instructions, with pinned notes first."
+        />
+        <PhasePlaceholder v-else title="Overview" icon="overview" phase="the next P4 step" what="Session cards grouped by status, with filters and project tags." />
+      </main>
+      <StatusBar />
+    </div>
+    <Notices />
   </div>
 </template>
 
 <style scoped>
-.shell {
+.frame {
   height: 100%;
   display: flex;
-  flex-direction: column;
-}
-.bar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 14px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-sidebar);
-  min-width: 0;
-}
-.bar strong {
-  font-family: var(--font-heading);
-  font-weight: 650;
-}
-.muted {
-  color: var(--text-muted);
-}
-.spacer {
-  flex: 1;
-}
-.path {
-  font-family: var(--font-mono);
-  font-size: 12px;
-  color: var(--text-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  user-select: all;
-  min-width: 0;
-}
-.flavor {
-  padding: 1px 8px;
-  border-radius: var(--radius-pill);
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-.flavor.dev {
-  background: rgb(255 196 0 / 0.12);
-  color: var(--status-needs);
-}
-.flavor.release {
-  background: var(--accent-soft);
-  color: var(--accent);
-}
-.error {
-  color: var(--status-failed);
-}
-.body {
-  flex: 1;
   min-height: 0;
 }
-.bar button {
-  padding: 4px 10px;
-  font-size: 12.5px;
+.main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.view {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
 }
 </style>

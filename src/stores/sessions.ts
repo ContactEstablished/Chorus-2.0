@@ -95,6 +95,12 @@ export const useSessionsStore = defineStore('sessions', () => {
     return s !== null
   }
 
+  async function setProject(id: number, projectId: number | null): Promise<SessionSummary | null> {
+    const s = await attempt(() => unwrap(commands.sessionSetProject(id, projectId)))
+    if (s) apply(s)
+    return s
+  }
+
   async function restart(id: number): Promise<void> {
     const s = await attempt(() => unwrap(commands.sessionRestart(id)))
     if (s) apply(s)
@@ -128,6 +134,7 @@ export const useSessionsStore = defineStore('sessions', () => {
     launch,
     rename,
     setDescription,
+    setProject,
     restart,
     close,
     setLocked,

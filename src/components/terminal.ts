@@ -7,7 +7,7 @@
  * would erase them instead. With it, xterm.js moves the rows up to the last one with text into
  * scrollback, so the old screen's trailing blank rows aren't kept.
  */
-import type { ITerminalOptions } from '@xterm/xterm'
+import type { ITerminalOptions, ITheme } from '@xterm/xterm'
 
 export const TERMINAL_OPTIONS = {
   fontFamily: "'JetBrains Mono', 'Cascadia Mono', Consolas, monospace",
@@ -17,3 +17,15 @@ export const TERMINAL_OPTIONS = {
   scrollOnEraseInDisplay: true,
   theme: { background: '#0a0f16', foreground: '#edf2f8', cursor: '#1ec8f0', selectionBackground: '#1ec8f055' },
 } as const satisfies ITerminalOptions
+
+/** The terminal colours of the theme on screen, from its tokens (the defaults if a token is missing). */
+export function themeFromTokens(style: Pick<CSSStyleDeclaration, 'getPropertyValue'> = getComputedStyle(document.documentElement)): ITheme {
+  const token = (name: string, fallback: string) => style.getPropertyValue(name).trim() || fallback
+  const accent = token('--accent', TERMINAL_OPTIONS.theme.cursor)
+  return {
+    background: token('--bg', TERMINAL_OPTIONS.theme.background),
+    foreground: token('--text', TERMINAL_OPTIONS.theme.foreground),
+    cursor: accent,
+    selectionBackground: `${accent}55`,
+  }
+}

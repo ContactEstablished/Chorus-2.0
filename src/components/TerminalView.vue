@@ -9,7 +9,7 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebglAddon } from '@xterm/addon-webgl'
 import '@xterm/xterm/css/xterm.css'
-import { TERMINAL_OPTIONS } from './terminal'
+import { TERMINAL_OPTIONS, themeFromTokens } from './terminal'
 
 const emit = defineEmits<{
   input: [data: string]
@@ -21,9 +21,14 @@ const renderer = ref<'webgl' | 'dom'>('dom')
 let term: Terminal | null = null
 let fit: FitAddon | null = null
 let observer: ResizeObserver | null = null
+// Follows the theme: Settings switches it by changing `data-theme` on the root element.
+const themeWatch = new MutationObserver(() => {
+  if (term) term.options.theme = themeFromTokens()
+})
 
 onMounted(() => {
-  term = new Terminal({ ...TERMINAL_OPTIONS, theme: { ...TERMINAL_OPTIONS.theme } })
+  term = new Terminal({ ...TERMINAL_OPTIONS, theme: themeFromTokens() })
+  themeWatch.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
   fit = new FitAddon()
   term.loadAddon(fit)
   term.open(host.value!)
@@ -48,6 +53,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   observer?.disconnect()
+  themeWatch.disconnect()
   term?.dispose()
 })
 

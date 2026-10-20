@@ -28,6 +28,7 @@ const INFO: AppInfo = {
   identifier: 'com.contactestablished.chorus2.dev',
   flavor: 'dev',
   dataDir: 'D:\\data\\com.contactestablished.chorus2.dev',
+  homeDir: null,
   tauriVersion: '2.12.4',
 }
 

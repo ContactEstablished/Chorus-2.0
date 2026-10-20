@@ -34,6 +34,8 @@ pub struct AppInfo {
     pub flavor: Flavor,
     /// The live data directory. Shown in the window so it's always clear which data is in use.
     pub data_dir: String,
+    /// The user's home folder, so paths can be shown as ~/...
+    pub home_dir: Option<String>,
     pub tauri_version: String,
 }
 

@@ -4,7 +4,7 @@
  * terminal, and its only controls, Restart and Close, plus the agent lock. P4 replaces the
  * surroundings with the real app shell; the terminal stays.
  */
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import SessionTerminal from './SessionTerminal.vue'
 import NewSessionForm from './NewSessionForm.vue'
 import KeysPanel from './KeysPanel.vue'
@@ -13,43 +13,50 @@ import HistoryPanel from './HistoryPanel.vue'
 import { useSessionsStore } from '../stores/sessions'
 import { useKeysStore } from '../stores/keys'
 import { useProvidersStore } from '../stores/providers'
-import {
-  commands,
-  unwrap,
-  type AgentKind,
-  type CreateSession,
-  type LaunchRequest,
-  type ProfileSave,
-  type ProviderSave,
-  type SessionSummary,
-} from '../ipc'
-import { useProfilesStore } from '../stores/profiles'
+import type { LaunchRequest, SessionSummary } from '../ipc'
 import { ACTIVITY_LABELS, AGENT_LABELS, money, observedText, optionsText, versionText } from './labels'
 import { useAgentsStore } from '../stores/agents'
+import { useViewStore } from '../stores/view'
 
-const props = defineProps<{ dev: boolean }>()
 
 const sessions = useSessionsStore()
 const keys = useKeysStore()
 const agents = useAgentsStore()
 const providers = useProvidersStore()
+const view = useViewStore()
 const mode = ref<'session' | 'new' | 'keys' | 'providers'>('session')
 const busy = ref(false)
 const pin = ref('')
 const askingPin = ref(false)
 const notice = ref<string | null>(null)
-const profiles = useProfilesStore()
 // Renaming and the note, edited in the header.
 const showHistory = ref(false)
 const nameDraft = ref<string | null>(null)
 const noteDraft = ref<string | null>(null)
-const terminal = ref<InstanceType<typeof SessionTerminal> | null>(null)
 
+// The shell owns the sessions store (App.vue); this view follows the view store's session and
+// the rail's New session button.
 onMounted(async () => {
-  await Promise.all([sessions.init(), keys.load(), agents.load(false), providers.load()])
+  await Promise.all([keys.load(), agents.load(false), providers.load()])
   if (sessions.list.length === 0) mode.value = 'new'
 })
-onUnmounted(() => sessions.dispose())
+watch(
+  () => view.sessionId,
+  (id) => {
+    if (id !== null && sessions.byId[id]) select(id)
+  },
+  { immediate: true },
+)
+watch(
+  () => view.newSessionOpen,
+  (open) => {
+    if (open) {
+      mode.value = 'new'
+      view.newSessionOpen = false
+    }
+  },
+  { immediate: true },
+)
 
 const current = computed(() => (mode.value === 'session' ? sessions.selected : null))
 
@@ -119,47 +126,6 @@ async function toggleLock(s: SessionSummary): Promise<void> {
   const ok = await sessions.setLocked(s.id, !s.locked, s.locked ? pin.value || null : null)
   pin.value = ''
   if (ok) askingPin.value = false
-}
-
-// Dev builds: a small API for driving the real app from a DevTools Protocol script (as in P0).
-if (props.dev) {
-  const plain = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T
-  const api = {
-    list: () => plain(sessions.list),
-    create: async (request: Omit<CreateSession, 'options'> & { options?: CreateSession['options'] }) => {
-      const s = await sessions.create({ ...request, options: request.options ?? { effort: null, permission: null, model: null } })
-      if (s) select(s.id)
-      return plain(sessions.selected)
-    },
-    agents: async (refresh = false) => {
-      await agents.load(refresh)
-      return plain(agents.list)
-    },
-    select,
-    write: (id: number, data: string) => unwrap(commands.sessionWrite(id, data)),
-    screen: () => terminal.value?.screenText() ?? '',
-    buffer: () => terminal.value?.bufferText() ?? '',
-    restart: (id: number) => sessions.restart(id),
-    close: (id: number) => sessions.close(id),
-    lock: (id: number, locked: boolean, pinValue: string | null = null) => sessions.setLocked(id, locked, pinValue),
-    launch: (request: LaunchRequest) => sessions.launch(request).then(plain),
-    presets: (agent: AgentKind) => commands.launchPresets(agent).then(plain),
-    profiles: async () => (await profiles.load(), plain(profiles.list)),
-    profileSave: (input: ProfileSave) => profiles.save(input).then((p) => plain(p ?? profiles.error)),
-    rename: (id: number, name: string) => sessions.rename(id, name),
-    describe: (id: number, text: string | null) => sessions.setDescription(id, text),
-    history: (id: number, limit = 30) => unwrap(commands.sessionHistory(id, limit)).then(plain),
-    providers: async () => (await providers.load(), plain(providers.list)),
-    providerSave: (input: ProviderSave) => providers.save(input).then((p) => plain(p ?? providers.error)),
-    providerTest: (id: number) => providers.test(id).then(() => plain(providers.byId.get(id) ?? providers.error)),
-    providerRefresh: (id: number) => providers.refresh(id).then(() => plain(providers.byId.get(id) ?? providers.error)),
-    providerCatalog: (id: number) => providers.catalog(id).then(plain),
-    providerShortlist: (id: number, models: string[]) => providers.setShortlist(id, models).then(() => plain(providers.byId.get(id))),
-    addTestKey: (label: string) => unwrap(commands.devVaultAddTestKey(label)).then(async (k) => (await keys.load(), k)),
-    leakCheck: (credentialId: number) => unwrap(commands.devLeakCheck(credentialId, terminal.value?.screenText() ?? '')),
-    error: () => sessions.error,
-  }
-  ;(window as unknown as { __chorus: typeof api }).__chorus = api
 }
 </script>
 
@@ -256,7 +222,6 @@ if (props.dev) {
         <div class="term">
           <SessionTerminal
             :key="current.id"
-            ref="terminal"
             :session-id="current.id"
             :live="current.live"
             @error="(m) => (sessions.error = m)"

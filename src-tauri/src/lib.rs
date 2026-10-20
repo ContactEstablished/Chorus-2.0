@@ -56,6 +56,7 @@ pub fn run() {
                     identifier,
                     flavor: flavor.into(),
                     data_dir: data_dir.display().to_string(),
+                    home_dir: app.path().home_dir().ok().map(|h| h.display().to_string()),
                     tauri_version: tauri::VERSION.to_string(),
                 },
             });

@@ -1,4 +1,6 @@
-/* Design tokens (design/DESIGN.md). Glacier is the default theme (D25); Dusk lands in P4. */
+/* Design tokens (design/DESIGN.md). Glacier is the default theme; Dusk is `data-theme="dusk"` on
+   the root element (D25). */
+@import '../assets/fonts/fonts.css';
 
 :root {
   --bg: #0a0f16;
@@ -26,6 +28,20 @@
   --status-ready: #00e676;
   --status-failed: #ff3d5a;
   --status-done: #3a4a60;
+  /* Running with no event channel: neutral, never "working" (ARCHITECTURE §6). */
+  --status-running: #7d8ba0;
+
+  --tag-pink: #f472b6;
+  --tag-tan: #e0a96d;
+  --tag-lavender: #a5b4fc;
+  --tag-lime: #c4e05a;
+
+  /* Agent chips (both themes): each label on its colour at 14%. */
+  --agent-claude: #e7c3a4;
+  --agent-codex: #a9c4ee;
+  --agent-opencode: #c9b6f2;
+  --agent-grok: #b7d9c3;
+  --agent-shell: #c3cad6;
 
   /* The seven-bar mark's three neutral steps, darkest at the outside (DESIGN.md "Logo"). */
   --logo-bar-low: #3e4650;
@@ -36,12 +52,53 @@
   --radius-control: 9px;
   --radius-pill: 999px;
 
-  /* Fonts are bundled in P4; until then the system fallbacks apply. */
   --font-heading: 'Bricolage Grotesque', 'Segoe UI', system-ui, sans-serif;
   --font-ui: 'Instrument Sans', 'Segoe UI', system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', 'Cascadia Mono', Consolas, monospace;
 
+  --titlebar-h: 36px;
+  --statusbar-h: 26px;
+  --rail-w: 212px;
+
   color-scheme: dark;
+}
+
+:root[data-theme='dusk'] {
+  --bg: #1b1e25;
+  --bg-sidebar: #171a20;
+  --surface: #22262e;
+  --surface-raised: #262b34;
+  --surface-chip: #2a2f39;
+  --border: rgb(255 255 255 / 0.06);
+  --border-strong: rgb(255 255 255 / 0.12);
+
+  --text: #e9ebf1;
+  --text-2: #a3aabb;
+  --text-muted: #6f7789;
+
+  --accent: #4f8cff;
+  --accent-hover: #8db5ff;
+  --on-accent: #0b1630;
+  --accent-soft: rgb(79 140 255 / 0.12);
+  --accent-line: rgb(79 140 255 / 0.35);
+
+  --status-needs: #e9b85b;
+  --status-approval: #f09a86;
+  --status-input: #e9b85b;
+  --status-working: #5ccfdc;
+  --status-ready: #86d4a4;
+  --status-failed: #ef7a7a;
+  --status-done: #a3aabb;
+  --status-running: #6f7789;
+
+  --tag-pink: #e39ac0;
+  --tag-tan: #c9a77a;
+  --tag-lavender: #9ea4f5;
+  --tag-lime: #b9c46e;
+
+  --logo-bar-low: #444b57;
+  --logo-bar-mid: #535b68;
+  --logo-bar-high: #646d7b;
 }
 
 *,
@@ -65,6 +122,20 @@ body {
   height: 100%;
 }
 
+h1,
+h2,
+h3 {
+  font-family: var(--font-heading);
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+code,
+kbd,
+pre {
+  font-family: var(--font-mono);
+}
+
 /* The fleet strip window draws its own rounded pill on a transparent-looking background. */
 html.fleet,
 html.fleet body {
@@ -72,7 +143,6 @@ html.fleet body {
   overflow: hidden;
 }
 
-/* Base controls for the bare P1 screens. P4's components replace them with the mockup's. */
 button,
 input,
 select,
@@ -111,6 +181,11 @@ button.quiet {
   border-color: transparent;
   color: var(--text-2);
 }
+button.quiet:hover:not(:disabled) {
+  color: var(--text);
+  border-color: transparent;
+  background: var(--surface-chip);
+}
 input,
 select,
 textarea {
@@ -126,4 +201,117 @@ textarea:focus,
 button:focus-visible {
   outline: 2px solid var(--accent-line);
   outline-offset: 1px;
+}
+
+/* Status colours by attention word (chorus_core::attention). */
+.st-approval {
+  --st: var(--status-approval);
+}
+.st-input {
+  --st: var(--status-input);
+}
+.st-failed {
+  --st: var(--status-failed);
+}
+.st-working {
+  --st: var(--status-working);
+}
+.st-ready {
+  --st: var(--status-ready);
+}
+.st-running {
+  --st: var(--status-running);
+}
+.st-done {
+  --st: var(--status-done);
+}
+
+/* A small status dot; `.pulse` for working (DESIGN.md "Motion"). */
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--st, var(--status-running));
+  flex: none;
+}
+.dot.pulse {
+  animation: dot-pulse 1.6s ease-in-out infinite;
+}
+@keyframes dot-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--st) 55%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 5px color-mix(in srgb, var(--st) 0%, transparent);
+  }
+}
+
+/* Agent chips: CC, CX, OR... on the agent's colour at 14%. */
+.agent-chip {
+  display: inline-grid;
+  place-items: center;
+  min-width: 26px;
+  height: 20px;
+  padding: 0 5px;
+  border-radius: 6px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--agent);
+  background: color-mix(in srgb, var(--agent) 14%, transparent);
+  flex: none;
+}
+.agent-claude {
+  --agent: var(--agent-claude);
+}
+.agent-codex {
+  --agent: var(--agent-codex);
+}
+.agent-opencode {
+  --agent: var(--agent-opencode);
+}
+.agent-grok {
+  --agent: var(--agent-grok);
+}
+.agent-shell {
+  --agent: var(--agent-shell);
+}
+
+/* A project tag: its colour as a small square, then its name. */
+.project-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: var(--surface-chip);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+}
+.project-tag::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 2px;
+  background: var(--tag, var(--text-muted));
+}
+
+.scroll {
+  overflow: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
