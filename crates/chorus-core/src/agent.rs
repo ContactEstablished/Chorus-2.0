@@ -17,10 +17,11 @@ pub enum AgentKind {
     Codex,
     Opencode,
     Grok,
+    Gemini,
 }
 
 impl AgentKind {
-    pub const ALL: [AgentKind; 5] = [Self::Shell, Self::Claude, Self::Codex, Self::Opencode, Self::Grok];
+    pub const ALL: [AgentKind; 6] = [Self::Shell, Self::Claude, Self::Codex, Self::Opencode, Self::Grok, Self::Gemini];
 
     /// The stored and serialised name.
     pub fn as_str(self) -> &'static str {
@@ -30,6 +31,7 @@ impl AgentKind {
             Self::Codex => "codex",
             Self::Opencode => "opencode",
             Self::Grok => "grok",
+            Self::Gemini => "gemini",
         }
     }
 
@@ -45,6 +47,7 @@ impl AgentKind {
             Self::Codex => "Codex",
             Self::Opencode => "opencode",
             Self::Grok => "Grok",
+            Self::Gemini => "Gemini CLI",
         }
     }
 
@@ -55,6 +58,7 @@ impl AgentKind {
             Self::Codex => &CODEX,
             Self::Opencode => &OPENCODE,
             Self::Grok => &GROK,
+            Self::Gemini => &GEMINI,
         }
     }
 }
@@ -313,6 +317,32 @@ const GROK: Spec = Spec {
     partner_rank: Some(6),
 };
 
+/// Gemini CLI 0.64.0: `--approval-mode` (default, auto_edit, yolo, plan), `-m` and
+/// `--session-id`/`--resume <uuid>`. It has no effort setting, so none is declared. A permission
+/// mode is always passed, because a user's `general.defaultApprovalMode` setting can be auto_edit or
+/// plan. Its approval modes map one level short of Claude's: there is nothing like Auto, so that
+/// level isn't offered. No hooks, server or transcript channel is built, so a session is "Running".
+/// Its auto-update switch is a setting in the user's own `settings.json` (0.64.0 has no flag or
+/// environment variable for it), which Chorus doesn't write.
+const GEMINI: Spec = Spec {
+    kind: AgentKind::Gemini,
+    verified: Some("0.64.0"),
+    carrier: Carrier::Argv,
+    has_event_channel: false,
+    efforts: &[],
+    default_effort: None,
+    permissions: &[
+        (Permission::Manual, &["--approval-mode", "default"]),
+        (Permission::AcceptEdits, &["--approval-mode", "auto_edit"]),
+        (Permission::Plan, &["--approval-mode", "plan"]),
+        (Permission::FullAccess, &["--approval-mode", "yolo"]),
+    ],
+    default_permission: Some(Permission::Manual),
+    model: Some(ModelArg::Flag("--model")),
+    resume: Resume::Assigned { create: "--session-id", resume: "--resume" },
+    partner_rank: Some(4),
+};
+
 pub const MAX_MODEL_CHARS: usize = 200;
 
 /// A model name safe to pass as an argument and inside a TOML string: letters, digits and
@@ -540,6 +570,13 @@ mod tests {
         assert!(opencode.option_args(&resolved).is_empty());
         let asked = LaunchOptions { permission: Some(Permission::Auto), ..Default::default() };
         assert!(opencode.resolve(&asked).unwrap_err().contains("Auto"));
+        // Gemini CLI has no effort setting and nothing like Auto.
+        let gemini = AgentKind::Gemini.spec();
+        let asked = LaunchOptions { effort: Some(Effort::Fast), ..Default::default() };
+        assert_eq!(gemini.resolve(&asked).unwrap_err(), "Gemini CLI has no Fast effort setting");
+        // A session asks for no effort at launch, so the CLI's default stands.
+        let asked = LaunchOptions { permission: Some(Permission::Auto), ..Default::default() };
+        assert!(gemini.resolve(&asked).unwrap_err().contains("Auto"));
     }
 
     #[test]
@@ -571,6 +608,11 @@ mod tests {
         );
         // Grok always gets a permission mode, even when none is chosen.
         assert!(grok.option_args(&grok.resolve(&LaunchOptions::default()).unwrap()).contains(&"--permission-mode".to_owned()));
+        let gemini = AgentKind::Gemini.spec();
+        let opts = LaunchOptions { permission: Some(Permission::Plan), model: Some("gemini-3-pro-preview".into()), ..Default::default() };
+        assert_eq!(gemini.option_args(&gemini.resolve(&opts).unwrap()), ["--approval-mode", "plan", "--model", "gemini-3-pro-preview"]);
+        // A user's settings can default Gemini to auto_edit or plan, so a mode is always passed.
+        assert_eq!(gemini.option_args(&gemini.resolve(&LaunchOptions::default()).unwrap()), ["--approval-mode", "default"]);
     }
 
     #[test]
@@ -579,6 +621,10 @@ mod tests {
         let claude = AgentKind::Claude.spec();
         assert_eq!(claude.conversation_args(Some(id), false), ["--session-id", id]);
         assert_eq!(claude.conversation_args(Some(id), true), ["--resume", id]);
+        // Gemini CLI takes an id to create and the same one to resume; it refuses an id that exists.
+        let gemini = AgentKind::Gemini.spec();
+        assert_eq!(gemini.conversation_args(Some(id), false), ["--session-id", id]);
+        assert_eq!(gemini.conversation_args(Some(id), true), ["--resume", id]);
         let codex = AgentKind::Codex.spec();
         assert!(codex.conversation_args(None, false).is_empty());
         assert!(codex.conversation_args(Some(id), false).is_empty());

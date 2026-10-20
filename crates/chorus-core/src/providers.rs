@@ -95,6 +95,10 @@ pub fn route_support(agent: AgentKind, kind: ProviderKind) -> Result<(), String>
                 .into(),
         ),
         (AgentKind::Grok, _) => Err("Grok has no setting for another provider's address, so it runs on xAI only.".into()),
+        (AgentKind::Gemini, _) => Err(
+            "Gemini CLI runs on your Google login or a Gemini key (Key below); Chorus doesn't route it through other providers."
+                .into(),
+        ),
         (AgentKind::Shell, _) => Err("A shell runs no model. To give it a key, use Key below.".into()),
     }
 }
@@ -480,6 +484,7 @@ mod tests {
             (AgentKind::Opencode, Gateway),
             (AgentKind::Claude, Openrouter),
             (AgentKind::Grok, Openrouter),
+            (AgentKind::Gemini, Openrouter),
             (AgentKind::Shell, Gateway),
             (AgentKind::Codex, Jev),
         ] {

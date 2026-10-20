@@ -57,6 +57,15 @@ pub fn resolve(kind: AgentKind, parent_env: &[(String, String)], scratch: &Path)
             args.extend(["-c".into(), "check_for_update_on_startup=false".into()]);
             Ok(Launch { program, args, additions: vec![] })
         }
+        AgentKind::Gemini => {
+            let (program, mut args) = through_shim(&path, "gemini.cmd")?;
+            // The folder is trusted for this session only, so the first run in a project never
+            // stops at "Do you trust this folder?". Nothing is written to the user's settings.
+            // 0.64.0 has no auto-update switch on the command line or in the environment; its
+            // `general.enableAutoUpdate` is a setting in the user's own settings file.
+            args.push("--skip-trust".into());
+            Ok(Launch { program, args, additions: vec![] })
+        }
         AgentKind::Opencode => {
             // The session runs `serve` and `attach` with these (ARCHITECTURE §5, `opencode`). Its
             // conversations live in the session's own data folder, which is how they resume.
@@ -193,6 +202,21 @@ pub fn claude_trust_folder(parent_env: &[(String, String)], folder: &str) -> Res
 /// searched rather than re-deriving its name. Codex's ids are only known once it has written them.
 pub fn conversation_exists(kind: AgentKind, id: &str, parent_env: &[(String, String)]) -> bool {
     let home = || env_value(parent_env, "USERPROFILE").map(PathBuf::from);
+    if kind == AgentKind::Gemini {
+        // Gemini CLI 0.64.0 writes `<home>\.gemini\tmp\<project>\chats\session-<ms>-<id's first
+        // 8>.jsonl`. The project folder is derived from the working directory, so every one is
+        // searched. `--session-id` refuses an id that already exists, which is why this matters.
+        let Some(short) = id.get(..8) else { return false };
+        let Some(tmp) = home().map(|h| h.join(".gemini").join("tmp")) else { return false };
+        let suffix = format!("-{short}.jsonl");
+        return std::fs::read_dir(tmp).into_iter().flatten().flatten().any(|project| {
+            std::fs::read_dir(project.path().join("chats"))
+                .into_iter()
+                .flatten()
+                .flatten()
+                .any(|f| f.file_name().to_string_lossy().ends_with(&suffix))
+        });
+    }
     let (root, file) = match kind {
         AgentKind::Claude => {
             let config = env_value(parent_env, "CLAUDE_CONFIG_DIR").map(PathBuf::from).or_else(|| home().map(|h| h.join(".claude")));
@@ -200,7 +224,8 @@ pub fn conversation_exists(kind: AgentKind, id: &str, parent_env: &[(String, Str
         }
         AgentKind::Grok => (home().map(|h| h.join(".grok").join("sessions")), id.to_owned()),
         AgentKind::Codex => return true,
-        AgentKind::Shell | AgentKind::Opencode => return false,
+        // Gemini is handled above.
+        AgentKind::Gemini | AgentKind::Shell | AgentKind::Opencode => return false,
     };
     let Some(Ok(folders)) = root.map(std::fs::read_dir) else {
         return false;

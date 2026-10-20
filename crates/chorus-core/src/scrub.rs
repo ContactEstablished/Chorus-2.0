@@ -377,7 +377,22 @@ mod tests {
     #[test]
     fn builtin_patterns_compile_in_order() {
         let names: Vec<_> = builtin_patterns().into_iter().map(|p| p.name).collect();
-        assert_eq!(names, ["anthropic", "openrouter", "openai-project", "openai-classic", "github", "aws-access-key-id"]);
+        assert_eq!(
+            names,
+            ["anthropic", "openrouter", "openai-project", "openai-classic", "github", "aws-access-key-id", "google-api-key"]
+        );
+    }
+
+    #[test]
+    fn a_google_api_key_is_redacted_and_a_lookalike_is_not() {
+        let p = builtin_patterns();
+        // Gemini's GEMINI_API_KEY: AIza and 35 more characters.
+        let key = fake("AIza", 35);
+        let out = String::from_utf8(scrub_all(format!("GEMINI_API_KEY={key} done").as_bytes(), &[], &p)).unwrap();
+        assert_eq!(out, "GEMINI_API_KEY=[REDACTED-CREDENTIAL] done");
+        // The same letters without the prefix, and a short one, are ordinary text.
+        let plain = format!("AIzb{} and AIza short", "B".repeat(35));
+        assert_eq!(String::from_utf8(scrub_all(plain.as_bytes(), &[], &p)).unwrap(), plain);
     }
 
     #[test]

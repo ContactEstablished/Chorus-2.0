@@ -96,6 +96,8 @@ mod tests {
         assert_eq!(parse_version("codex-cli 0.162.1"), Some(v(0, 162, 1)));
         assert_eq!(parse_version("\n1.19.3\r\n"), Some(v(1, 19, 3)));
         assert_eq!(parse_version("grok 1.0.62 (1474f9cbdd91) [stable]"), Some(v(1, 0, 62)));
+        // Gemini CLI 0.64.0 prints its version alone.
+        assert_eq!(parse_version("0.64.0\n"), Some(v(0, 64, 0)));
         assert_eq!(parse_version("v0.9.2-beta.1"), Some(v(0, 9, 2)));
         assert_eq!(parse_version("unknown option --version"), None);
         assert_eq!(parse_version(""), None);

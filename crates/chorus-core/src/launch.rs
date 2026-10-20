@@ -155,6 +155,11 @@ mod tests {
         assert!(!partner_order().contains(&Shell), "the shell is never a reviewer");
         assert_eq!(partner_for(Claude, &[Shell, Claude]), None);
         assert_eq!(partner_for(Codex, &[Codex, Shell]), None);
+        // An agent without a channel comes before Grok, which has none either.
+        let order = partner_order();
+        let at = |k| order.iter().position(|x| *x == k).unwrap();
+        assert!(at(Gemini) < at(Grok));
+        assert_eq!(partner_for(Claude, &[Shell, Claude, Gemini]), Some(Gemini));
     }
 
     #[test]
