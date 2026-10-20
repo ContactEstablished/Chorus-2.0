@@ -209,6 +209,14 @@ const recentChips = computed(() => recent.value.filter((f) => f.toLowerCase() !=
 function leaf(path: string): string {
   return path.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || path
 }
+// A long path shows its end (the folder's own name) unless it's being edited.
+const folderEl = ref<HTMLInputElement | null>(null)
+function showFolderEnd(): void {
+  const el = folderEl.value
+  if (el && document.activeElement !== el) el.scrollLeft = el.scrollWidth
+}
+watch(cwd, () => void nextTick(showFolderEnd))
+
 async function browse(): Promise<void> {
   const picked = await commands.folderPick(cwd.value.trim() || null).catch(() => null)
   if (picked) cwd.value = picked
@@ -397,7 +405,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
       <section class="field">
         <span class="label">Folder</span>
         <div class="boxed folder">
-          <input v-model="cwd" class="mono" placeholder="C:\Projects\app" spellcheck="false" autocomplete="off" aria-label="Folder" />
+          <input ref="folderEl" v-model="cwd" class="mono" placeholder="C:\Projects\app" spellcheck="false" autocomplete="off" aria-label="Folder" @blur="showFolderEnd" />
           <button type="button" class="inner" @click="browse"><Icon name="folder" :size="14" /> Browse…</button>
         </div>
         <div v-if="recentChips.length" class="chips">
@@ -557,9 +565,8 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
       <div v-if="agent !== 'shell'" class="field">
         <span class="small">{{ modelUpFront ? 'Server config' : 'Command' }}</span>
         <div class="command mono">
-          <span class="program">{{ PROGRAMS[agent] }}</span>
-          <template v-for="(a, i) in args" :key="i"> {{ a }}</template>
-          <span v-if="provider" class="muted"> + {{ provider.name }}'s settings</span>
+          <span class="program">{{ PROGRAMS[agent] }}</span>{{ args.length ? ` ${args.join(' ')}` : '' }}
+          <span v-if="provider" class="muted">{{ ` + ${provider.name}'s settings` }}</span>
         </div>
       </div>
 
@@ -580,11 +587,12 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
 </template>
 
 <style scoped>
+/* A fixed height, so each pane scrolls on its own and Start stays in view. */
 .box {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 280px;
-  max-height: calc(100vh - 48px);
-  min-height: 0;
+  grid-template-rows: 100%;
+  height: min(800px, calc(100vh - 48px));
 }
 .form {
   display: flex;
@@ -907,6 +915,9 @@ em {
 @media (max-width: 760px) {
   .box {
     grid-template-columns: 1fr;
+    grid-template-rows: auto;
+    height: auto;
+    max-height: calc(100vh - 48px);
     overflow: auto;
   }
   .form {
