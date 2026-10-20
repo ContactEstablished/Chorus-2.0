@@ -264,6 +264,7 @@ mod tests {
                 description: None,
                 project_id: None,
                 worktree_id: None,
+                routing: None,
             },
         )
         .unwrap()

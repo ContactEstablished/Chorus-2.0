@@ -70,6 +70,7 @@ function session(id: number, over: Partial<SessionSummary> = {}): SessionSummary
     projectId: null,
     tags: [],
     worktree: null,
+    routing: null,
     latest: null,
     latestAtSecs: 0,
     ...over,

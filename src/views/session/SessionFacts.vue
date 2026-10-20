@@ -71,6 +71,10 @@ async function retag(tags: string[]): Promise<void> {
         </template>
         <dt>Runs on</dt>
         <dd>{{ s.providerName ?? 'its own sign-in' }}</dd>
+        <template v-if="s.routing">
+          <dt>Routing</dt>
+          <dd>{{ s.routing }}</dd>
+        </template>
         <template v-if="capped">
           <dt>Run key</dt>
           <dd>{{ capped }}</dd>

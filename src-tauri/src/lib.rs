@@ -10,6 +10,7 @@ mod lock;
 mod prefs;
 mod projects;
 mod providers;
+mod routing;
 mod sessions;
 mod splash;
 mod store;
@@ -107,6 +108,11 @@ pub fn run() {
             {
                 eprintln!("splash: {e}");
             }
+            // Routing tiers (D57): the observer refetches refreshed models' endpoints, when the user chose
+            // a provider for it.
+            let routing = std::sync::Arc::new(routing::Routing::default());
+            routing::start_observer(manager.clone(), routing.clone());
+            app.manage(routing);
             app.manage(manager);
             app::start_pulse(app.handle().clone());
             Ok(())

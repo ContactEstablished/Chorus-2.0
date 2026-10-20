@@ -59,7 +59,9 @@ use crate::store::providers as provider_rows;
 use crate::store::tags as tag_rows;
 use crate::store::sessions::{self as rows, NewRun, NewSession, SessionRow};
 use crate::store::{Store, credentials};
+use crate::routing;
 use crate::vault;
+use chorus_core::routing::launch::{REFUSE_STORED_INVALID, RoutingLaunchChoice, StoredSelection, parse_stored_selection};
 use job::Job;
 use mirror::Mirror;
 use workspace::Workspace;
@@ -154,6 +156,8 @@ pub struct SessionSummary {
     pub tags: Vec<String>,
     /// The worktree New session made for it (D53), if any.
     pub worktree: Option<workspace::WorktreeInfo>,
+    /// The routing tier it runs with on OpenRouter, in words (D57).
+    pub routing: Option<String>,
     /// The newest turn's final message, else its prompt, already scrubbed; shown on cards.
     pub latest: Option<String>,
     /// When that turn started, or 0.
@@ -205,6 +209,9 @@ pub struct CreateSession {
     /// In `cwd`, or in a new worktree of its repository.
     #[serde(default)]
     pub workspace: workspace::Workspace,
+    /// opencode on OpenRouter: a routing tier, or `default` for none (D57). Absent elsewhere.
+    #[serde(default)]
+    pub routing: Option<RoutingLaunchChoice>,
 }
 
 /// Starts the sessions a preset makes. `session` is the first; the others are derived from it.
@@ -710,6 +717,7 @@ impl SessionManager {
             project_id: row.project_id,
             tags: tag_rows::get(&self.store, row.id).unwrap_or_default(),
             worktree: row.worktree_id.and_then(|w| self.worktree_info(w)),
+            routing: routing::describe(row.routing.as_deref()),
             latest_at_secs: latest.as_ref().map_or(0, |(_, at)| vault::commands::secs(*at)),
             latest: latest.map(|(text, _)| text),
         }
@@ -821,6 +829,7 @@ impl SessionManager {
         let options = self.check_settings(req.agent, &req.options, req.provider_id, req.credential.as_ref())?;
         let description = launch_rules::clean_description(req.description.as_deref())?;
         let tags = chorus_core::tags::clean_tags(&req.tags)?;
+        let routing = routing::for_launch(&self.store, req.agent, req.provider_id, req.routing, &options)?;
         let spec = req.agent.spec();
         // Chorus names the conversation up front where the agent lets it, so every later run can
         // resume it.
@@ -850,6 +859,7 @@ impl SessionManager {
                 description: description.as_deref(),
                 project_id,
                 worktree_id: join.or(made.as_ref().map(|m| m.id)),
+                routing: routing.as_deref(),
             },
         );
         let id = match inserted {
@@ -869,6 +879,12 @@ impl SessionManager {
             && let Some(w) = join.or(made.as_ref().map(|m| m.id))
         {
             self.trust_worktree_for_claude(w, &asked);
+        }
+        if let (Some(choice), Some(model)) = (req.routing, options.model.as_deref())
+            && req.agent == AgentKind::Opencode
+            && req.provider_id.is_some()
+        {
+            routing::remember(&self.store, model, choice);
         }
         let live = self.live_for(id);
         if let Err(e) = self.start_run(&live) {
@@ -923,7 +939,16 @@ impl SessionManager {
             let provider = provider_rows::get(&self.store, provider_id)?.ok_or("the provider this session runs on was deleted")?;
             let model = row.options.model.clone().ok_or("this session has a provider but no model")?;
             let catalog = provider_rows::catalog_model(&self.store, provider_id, &model).ok().flatten();
-            let route = prov::route(row.agent, provider.kind, &provider.name, provider.base_url.as_deref().unwrap_or(""), &model, catalog.as_ref())?;
+            let mut route = prov::route(row.agent, provider.kind, &provider.name, provider.base_url.as_deref().unwrap_or(""), &model, catalog.as_ref())?;
+            // A routing tier (D57): the selection stored at launch, never ranked again.
+            match parse_stored_selection(row.routing.as_deref()) {
+                StoredSelection::None => {}
+                StoredSelection::Invalid => return Err(REFUSE_STORED_INVALID.into()),
+                StoredSelection::Selection(s) => {
+                    let effort = oc::wanted_variant(spec, &row.options);
+                    prov::apply_routing(&mut route, &model, &s, catalog.as_ref().map(|c| c.efforts.as_slice()), effort.as_deref());
+                }
+            }
             let own_key = || -> Result<String, String> {
                 let cid = provider.credential_id.ok_or_else(|| format!("{} has no key", provider.name))?;
                 vault::decrypt(&self.store, cid)
@@ -1518,6 +1543,7 @@ impl SessionManager {
                 project_id: first.project_id,
                 tags: first.tags.clone(),
                 workspace: Workspace::Here,
+                routing: None,
             };
             let (session, error) = match self.create_in(derived, worktree) {
                 Ok(s) => (Some(s), None),

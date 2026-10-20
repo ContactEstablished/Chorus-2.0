@@ -38,6 +38,7 @@ impl Fixture {
             project_id: None,
             tags: Vec::new(),
             workspace: Default::default(),
+            routing: None,
         };
         let s = self.manager.create(req).unwrap();
         assert!(s.live, "shell should be running: {:?}", s.note);
@@ -256,6 +257,7 @@ fn bad_input_is_refused_at_the_boundary() {
         project_id: None,
         tags: Vec::new(),
         workspace: Default::default(),
+        routing: None,
     };
     assert!(f.manager.create(req.clone()).unwrap_err().contains("full path"));
     req.cwd = f.dir.join("missing").display().to_string();
@@ -287,6 +289,7 @@ fn a_preset_launch_names_and_notes_its_sessions() {
         project_id: None,
         tags: Vec::new(),
         workspace: Default::default(),
+        routing: None,
     };
     // A shell can't build: Workbench and Pair say so, and nothing starts.
     let refused = f.manager.launch(LaunchRequest { preset: Preset::Workbench, session: session.clone(), count: None }).unwrap_err();
@@ -343,6 +346,7 @@ fn a_session_can_work_in_a_worktree_of_its_own() {
         project_id: None,
         tags: vec!["Spike".into(), "spike".into(), "review".into()],
         workspace: Workspace::Here,
+        routing: None,
     };
     let first = f.manager.create(request.clone()).unwrap();
     assert_eq!(first.tags, ["spike", "review"]);

@@ -43,6 +43,12 @@ export const commands = {
 	providerRefreshCatalog: (id: number) => typedError<ProviderSummary, string>(__TAURI_INVOKE("provider_refresh_catalog", { id })),
 	providerCatalog: (id: number) => typedError<CatalogEntry[], string>(__TAURI_INVOKE("provider_catalog", { id })),
 	providerSetShortlist: (id: number, models: string[]) => typedError<ProviderSummary, string>(__TAURI_INVOKE("provider_set_shortlist", { id, models })),
+	/**  The tiers as stored for `model` with `provider_id`'s account checks: free, no request sent. */
+	routingTiers: (providerId: number, model: string, effort: "fast" | "balanced" | "deep" | "max" | null) => typedError<TiersView_Serialize, string>(__TAURI_INVOKE("routing_tiers", { providerId, model, effort })),
+	/**  Refresh: fetch, check the account, rank, and test prompt caching within $0.05. */
+	routingRefresh: (providerId: number, model: string, effort: "fast" | "balanced" | "deep" | "max" | null) => typedError<RefreshOutcome_Serialize, string>(__TAURI_INVOKE("routing_refresh", { providerId, model, effort })),
+	/**  Which provider's key keeps refreshed models' speeds fresh every 30 minutes; `None` stops it. */
+	routingWatch: (providerId: number | null) => typedError<null, string>(__TAURI_INVOKE("routing_watch", { providerId })),
 	sessionsList: () => typedError<SessionSummary[], string>(__TAURI_INVOKE("sessions_list")),
 	sessionCreate: (request: CreateSession) => typedError<SessionSummary, string>(__TAURI_INVOKE("session_create", { request })),
 	/**  Starts the sessions a preset makes (one for Solo, two for Pair and Workbench). */
@@ -124,6 +130,9 @@ export const events = {
 };
 
 /* Types */
+/**  Whether the account guardrail preflight was read (K3). */
+export type AccountCheck = "checked" | "unknown";
+
 export type Activity = 
 /**  No event yet, or the agent has no event channel (Grok, a shell). */
 "unknown" | 
@@ -214,6 +223,53 @@ export type BackendPulse = {
 	uptimeSecs: number,
 };
 
+/**  A candidate's blended price at the profile's token mix, in USD per million tokens. */
+export type CandidateCost = {
+	blended: number | null,
+	/**  Fresh share × prompt price. */
+	fresh: number | null,
+	/**  Cached share × (cache price when credited, else prompt price). */
+	cached: number | null,
+	/**  Output share × completion price. */
+	output: number | null,
+	cacheCredit: boolean,
+	overrideApplied: boolean,
+	promptPerM: number | null,
+	completionPerM: number | null,
+	/**  The cache price used when credited (the prompt price when a row lists none). */
+	cacheReadPerM: number | null,
+};
+
+/**  Everything the ranker knows about one routable tag, eligible or not. */
+export type CandidateExplanation = {
+	tag: string,
+	providerName: string,
+	rows: number,
+	/**  Declared; `Unknown` when the rows disagree. */
+	quantization: Quantization,
+	/**  The distinct declared row values, in `QUANTIZATIONS` order. */
+	rowQuantizations: Quantization[],
+	/**  Native precision for an admitted undeclared candidate. */
+	effectiveQuantization: Quantization,
+	uptime1d: number | null,
+	uptime5m: number | null,
+	status: number | null,
+	/**  Speed observations used for smoothing. */
+	observations: number,
+	limitedHistory: boolean,
+	tpsP50: number | null,
+	latencyP50S: number | null,
+	tpsP90: number | null,
+	latencyP90S: number | null,
+	effectiveTps: number | null,
+	/**  `None`: no usable price. */
+	cost: CandidateCost | null,
+	/**  Every failing rule, in canonical order. Empty means eligible. */
+	excludedBy: string[],
+	budgetFloorExcluded: boolean,
+	scores: TierScores,
+};
+
 /**  A key minted for one run (`providers::keys`). The key itself is never shown or kept. */
 export type CappedKeyInfo = {
 	limitUsd: number | null,
@@ -282,6 +338,8 @@ export type CreateSession = {
 	tags?: string[],
 	/**  In `cwd`, or in a new worktree of its repository. */
 	workspace?: Workspace,
+	/**  opencode on OpenRouter: a routing tier, or `default` for none (D57). Absent elsewhere. */
+	routing?: RoutingLaunchChoice | null,
 };
 
 export type CredentialSummary = {
@@ -417,12 +475,80 @@ export type LeakReport = {
 	filesScanned: number,
 };
 
+/**  The endpoint Nitro would most likely use: a labelled preview, not a choice. */
+export type NitroLikely = {
+	tag: string,
+	providerName: string,
+	tpsP50: number | null,
+};
+
+/**  Nitro: the `:nitro` model id, and OpenRouter picks the fastest endpoint (MR-D4). */
+export type NitroSelection = NitroSelection_Serialize | NitroSelection_Deserialize;
+
+/**  Nitro: the `:nitro` model id, and OpenRouter picks the fastest endpoint (MR-D4). */
+export type NitroSelection_Deserialize = {
+	/**  The slug plus `:nitro`. */
+	model: string,
+	/**  `None` under `DataCollection::Allow`. */
+	provider: OpenRouterProviderPrefs_Deserialize | null,
+	likely: NitroLikely | null,
+	/**  The reliability and precision rules the likely endpoint fails. */
+	likelyFailsRules: string[],
+};
+
+/**  Nitro: the `:nitro` model id, and OpenRouter picks the fastest endpoint (MR-D4). */
+export type NitroSelection_Serialize = {
+	/**  The slug plus `:nitro`. */
+	model: string,
+	/**  `None` under `DataCollection::Allow`. */
+	provider: OpenRouterProviderPrefs_Serialize | null,
+	likely: NitroLikely | null,
+	/**  The reliability and precision rules the likely endpoint fails. */
+	likelyFailsRules: string[],
+};
+
 /**  What a turn really ran with, read back from opencode's stored message. */
 export type Observed = {
 	/**  `provider/model`. */
 	model: string,
 	variant: string | null,
 	agent: string | null,
+};
+
+/**
+ *  OpenRouter's request `provider` object, with OpenRouter's own (snake_case) keys. Absent keys
+ *  are left out, never sent as null. [`OpenRouterProviderPrefs::to_value`] is the JSON to send.
+ */
+export type OpenRouterProviderPrefs = OpenRouterProviderPrefs_Serialize | OpenRouterProviderPrefs_Deserialize;
+
+/**
+ *  OpenRouter's request `provider` object, with OpenRouter's own (snake_case) keys. Absent keys
+ *  are left out, never sent as null. [`OpenRouterProviderPrefs::to_value`] is the JSON to send.
+ */
+export type OpenRouterProviderPrefs_Deserialize = {
+	/**  Endpoint tags, never display names. */
+	order?: string[] | null,
+	/**  Only ever `false`. */
+	allow_fallbacks?: boolean | null,
+	/**  Only ever `true`. */
+	require_parameters?: boolean | null,
+	quantizations?: Quantization[] | null,
+	data_collection?: ProviderDataCollection | null,
+};
+
+/**
+ *  OpenRouter's request `provider` object, with OpenRouter's own (snake_case) keys. Absent keys
+ *  are left out, never sent as null. [`OpenRouterProviderPrefs::to_value`] is the JSON to send.
+ */
+export type OpenRouterProviderPrefs_Serialize = {
+	/**  Endpoint tags, never display names. */
+	order?: string[] | null,
+	/**  Only ever `false`. */
+	allow_fallbacks?: boolean | null,
+	/**  Only ever `true`. */
+	require_parameters?: boolean | null,
+	quantizations?: Quantization[] | null,
+	data_collection?: ProviderDataCollection | null,
 };
 
 /**  How much the agent may do without asking. */
@@ -476,6 +602,20 @@ export type PresetChoice = {
 	reason: string | null,
 };
 
+export type ProbeSkip = {
+	tag: string,
+	reason: ProbeSkipReason,
+};
+
+/**  Why an eligible, due tag was not probed. */
+export type ProbeSkipReason = 
+/**  The $ cap. */
+"cap" | 
+/**  A verification-only tag limit. */
+"limit" | 
+/**  The refresh was stopped. */
+"aborted";
+
 export type ProfileSave = {
 	/**  `None` adds one. */
 	id: number | null,
@@ -520,6 +660,9 @@ export type ProjectState = "active" |
 /**  Finished with: out of the rail and the Overview's chips. */
 "archived";
 
+/**  The `"deny"` literal OpenRouter's `provider.data_collection` takes. */
+export type ProviderDataCollection = "deny";
+
 export type ProviderKind = 
 /**  OpenRouter: one key for many models, and a management key that mints capped keys. */
 "openrouter" | 
@@ -561,6 +704,63 @@ export type ProviderSummary = {
 	agents: AgentRoute[],
 };
 
+/**
+ *  An endpoint's declared precision, in Chorus 1's `QUANTIZATIONS` order (the order every list
+ *  of them uses).
+ */
+export type Quantization = "int4" | "int8" | "fp4" | "fp6" | "fp8" | "fp16" | "bf16" | "fp32" | 
+/**  Undeclared, unrecognised, or different across the rows that share a tag. */
+"unknown";
+
+/**  The three tiers the ranker orders. Nitro is never ranked: OpenRouter chooses. */
+export type RankedTier = "budget" | "balanced" | "fast";
+
+/**  What one Refresh did. */
+export type RefreshOutcome = RefreshOutcome_Serialize | RefreshOutcome_Deserialize;
+
+/**  What one Refresh did. */
+export type RefreshOutcome_Deserialize = {
+	view: TiersView_Deserialize,
+	/**  The cache test's worst case, and what it cost by OpenRouter's own figures. */
+	estimateUsd: number | null,
+	spentUsd: number | null,
+	probed: string[],
+	notProbed: ProbeSkip[],
+	/**  Endpoint rows OpenRouter sent that Chorus couldn't use. */
+	rejectedRows: number,
+	/**  A check or test that failed, in words; the tiers still rank what was learned. */
+	notes: string[],
+};
+
+/**  What one Refresh did. */
+export type RefreshOutcome_Serialize = {
+	view: TiersView_Serialize,
+	/**  The cache test's worst case, and what it cost by OpenRouter's own figures. */
+	estimateUsd: number | null,
+	spentUsd: number | null,
+	probed: string[],
+	notProbed: ProbeSkip[],
+	/**  Endpoint rows OpenRouter sent that Chorus couldn't use. */
+	rejectedRows: number,
+	/**  A check or test that failed, in words; the tiers still rank what was learned. */
+	notes: string[],
+};
+
+/**  What routing knows about the model beyond its endpoints. */
+export type RegistryInfo = {
+	/**  Chorus's own facts, or ones derived from the endpoints (fp8 as a quality floor). */
+	source: RegistrySource,
+	nativePrecision: Quantization | null,
+	minContext: number,
+};
+
+/**  Where an entry came from. */
+export type RegistrySource = 
+/**  Listed in the bundled registry, with reviewed precision and first parties. */
+"bundled" | 
+/**  Not listed: derived from the model's endpoints by [`entry_for`]. */
+"derived";
+
 /**  The sessions Chorus relaunches at start, and how many are back (each started or failed). */
 export type RestoreProgress = {
 	total: number,
@@ -582,6 +782,22 @@ export type ResumeKind =
 
 /**  What a session in a launch is for. A label, not a limit: a reviewer can write files too. */
 export type Role = "builder" | "reviewer" | "shell";
+
+/**
+ *  What a launch can remember per model (K8): a tier, or `Default` for an eligible launch that
+ *  sent none.
+ */
+export type RoutingLaunchChoice = "budget" | "balanced" | "fast" | "nitro" | "default";
+
+/**  Which measured workload a ranking is for (MR-D6, MR-D9). */
+export type RoutingProfileId = 
+/**  A session someone is typing into. */
+"interactive" | 
+/**
+ *  Chorus 1's Team helper turns. 2.0 has no Team helpers yet; the profile is kept because its
+ *  golden results pin the ranker.
+ */
+"helper";
 
 /**  A session's recent turns and how complete its records are. */
 export type SessionHistory = {
@@ -659,6 +875,8 @@ export type SessionSummary = {
 	tags: string[],
 	/**  The worktree New session made for it (D53), if any. */
 	worktree: WorktreeInfo | null,
+	/**  The routing tier it runs with on OpenRouter, in words (D57). */
+	routing: string | null,
 	/**  The newest turn's final message, else its prompt, already scrubbed; shown on cards. */
 	latest: string | null,
 	/**  When that turn started, or 0. */
@@ -691,6 +909,146 @@ export type TagUse = {
 };
 
 export type Theme = "glacier" | "dusk";
+
+/**  The ranked tiers view: every tier, Nitro, the explanation of each candidate, and warnings. */
+export type TierResult = TierResult_Serialize | TierResult_Deserialize;
+
+/**  The ranked tiers view: every tier, Nitro, the explanation of each candidate, and warnings. */
+export type TierResult_Deserialize = {
+	model: string,
+	profile: RoutingProfileId,
+	/**  The `now_ms` it was computed at. */
+	computedAtMs: number | null,
+	snapshotFetchedAtMs: number | null,
+	snapshotAgeMinutes: number,
+	stale: boolean,
+	accountEligibility: AccountCheck,
+	medianEligibleTps: number | null,
+	budgetFloorTps: number | null,
+	tiers: TierSelections_Deserialize,
+	nitro: NitroSelection_Deserialize,
+	/**  Sorted by tag. */
+	candidates: CandidateExplanation[],
+	warnings: string[],
+};
+
+/**  The ranked tiers view: every tier, Nitro, the explanation of each candidate, and warnings. */
+export type TierResult_Serialize = {
+	model: string,
+	profile: RoutingProfileId,
+	/**  The `now_ms` it was computed at. */
+	computedAtMs: number | null,
+	snapshotFetchedAtMs: number | null,
+	snapshotAgeMinutes: number,
+	stale: boolean,
+	accountEligibility: AccountCheck,
+	medianEligibleTps: number | null,
+	budgetFloorTps: number | null,
+	tiers: TierSelections_Serialize,
+	nitro: NitroSelection_Serialize,
+	/**  Sorted by tag. */
+	candidates: CandidateExplanation[],
+	warnings: string[],
+};
+
+/**  A candidate's score per tier; `None` where it is not scored. */
+export type TierScores = {
+	budget: number | null,
+	balanced: number | null,
+	fast: number | null,
+};
+
+/**  One ranked tier: its endpoints in order and the provider object that pins them. */
+export type TierSelection = TierSelection_Serialize | TierSelection_Deserialize;
+
+/**  One ranked tier: its endpoints in order and the provider object that pins them. */
+export type TierSelection_Deserialize = {
+	tier: RankedTier,
+	/**  The slug, never suffixed. */
+	model: string,
+	provider: OpenRouterProviderPrefs_Deserialize,
+	/**  The `order` tags. */
+	endpoints: string[],
+	limitedHistory: boolean,
+	limitedFallbacks: boolean,
+	rationale: string,
+};
+
+/**  One ranked tier: its endpoints in order and the provider object that pins them. */
+export type TierSelection_Serialize = {
+	tier: RankedTier,
+	/**  The slug, never suffixed. */
+	model: string,
+	provider: OpenRouterProviderPrefs_Serialize,
+	/**  The `order` tags. */
+	endpoints: string[],
+	limitedHistory: boolean,
+	limitedFallbacks: boolean,
+	rationale: string,
+};
+
+export type TierSelections = TierSelections_Serialize | TierSelections_Deserialize;
+
+export type TierSelections_Deserialize = {
+	budget: TierSelection_Deserialize | null,
+	balanced: TierSelection_Deserialize | null,
+	fast: TierSelection_Deserialize | null,
+};
+
+export type TierSelections_Serialize = {
+	budget: TierSelection_Serialize | null,
+	balanced: TierSelection_Serialize | null,
+	fast: TierSelection_Serialize | null,
+};
+
+/**  New session's routing section for one provider and model. */
+export type TiersView = TiersView_Serialize | TiersView_Deserialize;
+
+/**  New session's routing section for one provider and model. */
+export type TiersView_Deserialize = {
+	model: string,
+	/**  `None` until the first Refresh stores this model's endpoints. */
+	result: TierResult_Deserialize | null,
+	registry: RegistryInfo | null,
+	/**  What the last launch of this model used. */
+	remembered: RoutingLaunchChoice | null,
+	/**
+	 *  What New session chooses: the remembered choice if it can launch, else Balanced, else
+	 *  OpenRouter default (Chorus 1's `defaultLaunchChoice`). Nitro only when remembered.
+	 */
+	preselect: RoutingLaunchChoice,
+	/**  Why the wanted choice isn't the preselected one ("Refresh to use Balanced."). */
+	preselectHint: string | null,
+	/**  The observer keeps this model's speeds fresh with this provider's key. */
+	watching: boolean,
+	/**  Why Refresh can't run with this provider; tiers already stored still show. */
+	problem: string | null,
+	/**  Seconds before Refresh may run again for this model. */
+	retryInSecs: number,
+};
+
+/**  New session's routing section for one provider and model. */
+export type TiersView_Serialize = {
+	model: string,
+	/**  `None` until the first Refresh stores this model's endpoints. */
+	result: TierResult_Serialize | null,
+	registry: RegistryInfo | null,
+	/**  What the last launch of this model used. */
+	remembered: RoutingLaunchChoice | null,
+	/**
+	 *  What New session chooses: the remembered choice if it can launch, else Balanced, else
+	 *  OpenRouter default (Chorus 1's `defaultLaunchChoice`). Nitro only when remembered.
+	 */
+	preselect: RoutingLaunchChoice,
+	/**  Why the wanted choice isn't the preselected one ("Refresh to use Balanced."). */
+	preselectHint: string | null,
+	/**  The observer keeps this model's speeds fresh with this provider's key. */
+	watching: boolean,
+	/**  Why Refresh can't run with this provider; tiers already stored still show. */
+	problem: string | null,
+	/**  Seconds before Refresh may run again for this model. */
+	retryInSecs: number,
+};
 
 export type ToolEntry = {
 	tool: string,

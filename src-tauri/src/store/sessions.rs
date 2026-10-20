@@ -30,6 +30,8 @@ pub struct SessionRow {
     pub project_id: Option<u32>,
     /// The worktree New session made for it (`store::worktrees`), if any.
     pub worktree_id: Option<u32>,
+    /// The routing it launched with (`chorus_core::routing::launch::RoutingLaunchSelection`, JSON).
+    pub routing: Option<String>,
 }
 
 pub struct NewSession<'a> {
@@ -46,6 +48,7 @@ pub struct NewSession<'a> {
     pub description: Option<&'a str>,
     pub project_id: Option<u32>,
     pub worktree_id: Option<u32>,
+    pub routing: Option<&'a str>,
 }
 
 pub struct NewRun<'a> {
@@ -72,7 +75,7 @@ pub struct RunRow {
 }
 
 const SESSION_COLUMNS: &str = "id, name, agent, cwd, state, credential_id, credential_env, cols, rows, locked, note, \
-                               created_at, options, agent_session_id, provider_id, description, project_id, worktree_id";
+                               created_at, options, agent_session_id, provider_id, description, project_id, worktree_id, routing";
 
 fn session_from(r: &Row<'_>) -> rusqlite::Result<SessionRow> {
     let bad = |i: usize, what: &str, v: String| {
@@ -100,6 +103,7 @@ fn session_from(r: &Row<'_>) -> rusqlite::Result<SessionRow> {
         description: r.get(15)?,
         project_id: r.get(16)?,
         worktree_id: r.get(17)?,
+        routing: r.get(18)?,
     })
 }
 
@@ -108,8 +112,8 @@ pub fn insert(store: &Store, s: &NewSession<'_>) -> Result<u32, String> {
     store.with(|c| {
         c.execute(
             "INSERT INTO sessions (name, agent, cwd, state, credential_id, credential_env, cols, rows, created_at,
-                                   options, agent_session_id, provider_id, description, project_id, worktree_id)
-             VALUES (?1, ?2, ?3, 'running', ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+                                   options, agent_session_id, provider_id, description, project_id, worktree_id, routing)
+             VALUES (?1, ?2, ?3, 'running', ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
             params![
                 s.name,
                 s.agent.as_str(),
@@ -124,7 +128,8 @@ pub fn insert(store: &Store, s: &NewSession<'_>) -> Result<u32, String> {
                 s.provider_id,
                 s.description,
                 s.project_id,
-                s.worktree_id
+                s.worktree_id,
+                s.routing
             ],
         )?;
         Ok(c.last_insert_rowid() as u32)
@@ -280,6 +285,7 @@ mod tests {
             description: None,
             project_id: None,
             worktree_id: None,
+            routing: None,
         }
     }
 

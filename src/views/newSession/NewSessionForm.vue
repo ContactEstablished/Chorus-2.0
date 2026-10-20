@@ -20,8 +20,10 @@ import {
   type Preset,
   type PresetChoice,
   type ProfileSummary,
+  type RoutingLaunchChoice,
   type Workspace,
 } from '../../ipc'
+import RoutingTiers from './RoutingTiers.vue'
 import ButtonGroup from '../../components/ButtonGroup.vue'
 import TagInput from '../../components/TagInput.vue'
 import ProjectPicker from '../../components/ProjectPicker.vue'
@@ -94,6 +96,7 @@ const model = ref('')
 const providerId = ref<number | null>(null)
 const keyId = ref<number | null>(null)
 const envVar = ref('')
+const routing = ref<RoutingLaunchChoice | null>(null)
 const runsOnOpen = ref(false)
 const runsOnEl = ref<HTMLElement | null>(null)
 const presetChoices = ref<PresetChoice[]>([])
@@ -278,8 +281,13 @@ const runsOnText = computed(() => {
   const key = keyLabel.value ? ` with the key ${keyLabel.value}` : ''
   return provider.value ? `${provider.value.name}${key}` : `${SIGN_IN[agent.value]}${key}`
 })
-// opencode names its model up front; the others only when what it runs on is opened.
+// opencode names its model and provider up front; the others only when what it runs on is opened.
 const modelUpFront = computed(() => !!info.value?.optionsInConfig)
+// Routing tiers (D57): opencode on an OpenRouter provider, with a model named.
+const routingApplies = computed(
+  () => agent.value === 'opencode' && provider.value?.kind === 'openrouter' && /^[a-z0-9][\w.@~-]*\/[\w.@~:-]+$/i.test(model.value.trim()),
+)
+const ROUTING_LABELS: Record<RoutingLaunchChoice, string> = { budget: 'Budget', balanced: 'Balanced', fast: 'Fast', nitro: 'Nitro', default: 'OpenRouter default' }
 function openRunsOn(): void {
   runsOnOpen.value = true
   void nextTick(() => runsOnEl.value?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }))
@@ -365,6 +373,7 @@ function submit(): void {
     projectId: projectId.value,
     tags: tags.value,
     workspace: preset.value === 'swarm' ? 'new-worktree' : workspace.value,
+    routing: routingApplies.value ? routing.value : null,
   }
   emit('launch', { preset: preset.value, session, count: preset.value === 'swarm' ? swarmCount.value : null })
 }
@@ -475,10 +484,32 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
           </div>
         </section>
 
-        <section v-if="modelUpFront" class="field">
-          <span class="label">Model <em>{{ provider ? `(required: a ${provider.name} model id)` : '(optional)' }}</em></span>
-          <input v-model="model" class="mono" maxlength="200" spellcheck="false" autocomplete="off" list="provider-shortlist" placeholder="provider/model, for example opencode/big-pickle" />
+        <section v-if="modelUpFront" class="pair">
+          <label class="field">
+            <span class="label">Runs on</span>
+            <select v-model="providerId">
+              <option :value="null">{{ SIGN_IN[agent] }}</option>
+              <option v-for="r in routes" :key="r.provider.id" :value="r.provider.id" :disabled="r.reason !== null">
+                {{ r.provider.name }}{{ r.reason ? ` (not for ${info.displayName}: ${r.reason})` : '' }}
+              </option>
+            </select>
+          </label>
+          <label class="field">
+            <span class="label">Model <em>{{ provider ? '(required)' : '(optional)' }}</em></span>
+            <input
+              v-model="model"
+              class="mono"
+              maxlength="200"
+              spellcheck="false"
+              autocomplete="off"
+              list="provider-shortlist"
+              :placeholder="provider ? (provider.shortlist[0] ?? 'author/model') : 'provider/model, for example opencode/big-pickle'"
+            />
+          </label>
+          <span v-if="keyNote" class="hint span">{{ keyNote }}</span>
         </section>
+
+        <RoutingTiers v-if="routingApplies && providerId !== null" v-model="routing" :provider-id="providerId" :model="model" :effort="effortShown" />
 
         <section ref="runsOnEl" class="runs-on">
           <button type="button" class="quiet disclosure" :aria-expanded="runsOnOpen" @click="runsOnOpen = !runsOnOpen">
@@ -490,7 +521,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
               <span class="label">Model <em>{{ provider ? `(required: a ${provider.name} model id)` : "(optional: the CLI's default otherwise)" }}</em></span>
               <input v-model="model" class="mono" maxlength="200" spellcheck="false" autocomplete="off" list="provider-shortlist" :placeholder="provider?.shortlist[0] ?? ''" />
             </label>
-            <label v-if="routes.length" class="field">
+            <label v-if="routes.length && !modelUpFront" class="field">
               <span class="label">Provider</span>
               <select v-model="providerId">
                 <option :value="null">None: {{ SIGN_IN[agent] }}</option>
@@ -564,6 +595,10 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
         <template v-if="tags.length">
           <dt>Tags</dt>
           <dd>{{ tags.join(', ') }}</dd>
+        </template>
+        <template v-if="routingApplies && routing">
+          <dt>Routing</dt>
+          <dd>{{ ROUTING_LABELS[routing] }}</dd>
         </template>
       </dl>
 
@@ -658,6 +693,9 @@ em {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 12px;
+}
+.pair .span {
+  grid-column: 1 / -1;
 }
 .row {
   display: flex;

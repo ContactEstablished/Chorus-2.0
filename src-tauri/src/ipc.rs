@@ -8,7 +8,7 @@ use specta_typescript::Typescript;
 use std::path::Path;
 use tauri_specta::{Builder, collect_commands, collect_events};
 
-use crate::{agents, app, fleet, lock, prefs, projects, providers, sessions, splash, vault};
+use crate::{agents, app, fleet, lock, prefs, projects, providers, routing, sessions, splash, vault};
 
 /// Where the generated bindings live, relative to this crate.
 #[cfg_attr(not(debug_assertions), allow(dead_code, reason = "debug builds and tests regenerate the bindings"))]
@@ -38,6 +38,9 @@ pub fn builder() -> Builder<tauri::Wry> {
             providers::commands::provider_refresh_catalog,
             providers::commands::provider_catalog,
             providers::commands::provider_set_shortlist,
+            routing::commands::routing_tiers,
+            routing::commands::routing_refresh,
+            routing::commands::routing_watch,
             s::sessions_list,
             s::session_create,
             s::sessions_launch,
