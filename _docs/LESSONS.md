@@ -232,6 +232,13 @@ with "resource path `binaries\<name>-<target triple>.exe` doesn't exist" until t
 `npm run build` uses; its `beforeBuildCommand` builds `chorus-hook` and copies it in, and the installer
 ships it beside `chorus.exe` as `chorus-hook.exe`. Dev builds keep building it beside the debug exe.
 
+**L39 — git on Windows, for worktrees (git 2.50.0, 2026-10-20).** `git rev-parse --show-toplevel` prints
+forward slashes (`C:/work/ledger`); `--git-common-dir` is relative unless `--path-format=absolute`
+(git 2.31+) comes first, and with it one call gives the tree, the repository's `.git` and, with
+`--abbrev-ref HEAD`, the branch (`HEAD` when detached). `git worktree remove` without `--force` refuses
+untracked files as well as changes, and works a moment after the session's process tree ends. A new
+worktree is a folder Claude Code hasn't been told to trust, so its trust prompt appears every time.
+
 ## Money and models
 
 **L16 — Read-then-revoke under-reports OpenRouter spend.** Reading a capped key's usage right after the

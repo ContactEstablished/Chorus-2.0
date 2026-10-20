@@ -32,6 +32,7 @@ From the Harness mockups, confirmed as the UI direction (D9), plus one setup aid
 | Notes | Project-tagged context for agents and future-you; untagged notes apply everywhere. Injected into agent instructions. | P8 |
 | Themes | Glacier (default) and Dusk (D25) | P4 |
 | Import projects from Chorus 1 | Dropped on 2026-10-20 (D50): Matthew brings projects over by hand | — |
+| Session tags | Free-form labels beside the project, typed with autocomplete; on cards, in the facts panel and in search (D52) | P4 |
 
 ## Kept features and where they live
 
@@ -86,7 +87,7 @@ From the Harness mockups, confirmed as the UI direction (D9), plus one setup aid
 ### Git
 | Feature | 2.0 home | Phase |
 |---|---|---|
-| Worktree per agent | Launch option | P5 |
+| Worktree per agent | Launch option: suggested when the folder's tree is in use (D53) | P4 (attach to a kept one: P5) |
 | Boot reconcile | Boot | P5 |
 | Worktree panel | Settings / project view | P5 |
 | Diff summary on panes | Session facts "Changes" + card | P5 |

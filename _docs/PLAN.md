@@ -142,16 +142,17 @@ default, and Dusk, D25), text zoom, in-app notices.
 counts. **Sessions:** searchable list, and the Wall layout of live Raw terminals (D26). **Session view:**
 header, status, Raw mode, the session facts panel, and the session strip (filmstrip) for fast switching.
 Projects: add, reorder, colours, hide, archive and delete (no import from Chorus 1: D50). Command
-palette (Ctrl+K), project switcher (Ctrl+G), New session flow, prompt history panel with
-copy. **3D startup splash.** Dictation compatibility (D23): the composer and the Raw terminal accept
+palette (Ctrl+K), project switcher (Ctrl+G), prompt history panel with copy. **New session** in Chorus
+1's shape (D54), with session tags (D52) and worktrees made at launch (D53, brought forward from P5). **3D startup splash.** Dictation compatibility (D23): the composer and the Raw terminal accept
 text inserted or pasted by another app, and never submit it on their own.
 
 **Exit:** a day of real work in 2.0 without opening Chorus 1.
 
 ### P5 — Git and worktrees
-Worktree per session (current tree, new isolated worktree, or an existing one); boot reconcile with `git
-worktree list` as the authority; worktree panel (branch, ahead/behind, clean); diff summary in the
-session facts ("11 files · +612 −48"); keep-or-remove on Close, never deleting uncommitted work.
+New session already makes worktrees, Swarm runs, and Close removes a clean worktree and keeps
+uncommitted work (D53, built in P4). Still to come: attaching a session to a worktree an earlier one
+left; boot reconcile with `git worktree list` as the authority; worktree panel (branch, ahead/behind,
+clean); diff summary in the session facts ("11 files · +612 −48").
 
 **Exit (M1):** the Swarm preset launches N agents in N worktrees, and removing a worktree behind 2.0's
 back is healed on the next boot.

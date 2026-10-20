@@ -59,8 +59,8 @@ impl Preset {
         match self {
             Self::Pair => Some("Both agents can write the same files: the reviewer is a role, not a sandbox."),
             Self::Workbench => Some("The shell is a plain terminal: Chorus never hands it a key."),
-            Self::Swarm => Some("Each agent gets its own worktree and branch, made from the folder's current branch."),
-            Self::Solo => None,
+            // New session says which branch each worktree starts from.
+            Self::Solo | Self::Swarm => None,
         }
     }
 }
