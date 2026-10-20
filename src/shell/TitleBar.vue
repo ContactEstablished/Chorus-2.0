@@ -29,7 +29,7 @@ onUnmounted(() => unlisten?.())
     <div class="left" data-tauri-drag-region>
       <span v-if="app.info?.flavor === 'dev'" class="dev" :title="`${app.info.identifier} — dev data, never the installed app's`">dev build</span>
     </div>
-    <button class="palette" title="Search sessions and projects, or run a command" @click="$emit('palette')">
+    <button class="palette" title="Search sessions and projects, or run a command (Ctrl+K when no terminal has focus)" @click="$emit('palette')">
       <Icon name="search" :size="14" />
       <span>Search or run a command…</span>
       <kbd>Ctrl K</kbd>

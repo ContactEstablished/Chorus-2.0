@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
  * The main window's frame (PLAN P4): the rail, the title bar, the view the rail picked, the status
- * bar and the notices. Global keys: zoom with Ctrl +/-/0.
+ * bar and the notices. Global keys, outside a terminal: Ctrl+K, Ctrl+G and zoom with Ctrl +/-/0.
  */
 import { defineAsyncComponent, onMounted, onUnmounted, watch } from 'vue'
 import Rail from '../shell/Rail.vue'
@@ -34,7 +34,8 @@ const notices = useNoticesStore()
 
 function onKey(e: KeyboardEvent): void {
   if (!e.ctrlKey || e.altKey || e.metaKey) return
-  // Captured before the terminal sees them: these never reach an agent.
+  // A focused terminal keeps them: there they belong to its shell or agent (D49).
+  if (e.target instanceof Element && e.target.closest('.xterm')) return
   const key = e.key.toLowerCase()
   const zoom = key === '=' || key === '+' ? 1 : key === '-' ? -1 : key === '0' ? 0 : null
   if (zoom !== null) {

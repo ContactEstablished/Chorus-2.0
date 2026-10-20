@@ -54,7 +54,7 @@ async function replay(): Promise<void> {
 
   <div class="group">
     <h2>Text size</h2>
-    <p class="hint">Zooms the whole window, terminals included. Ctrl + and Ctrl − change it anywhere; Ctrl 0 resets.</p>
+    <p class="hint">Zooms the whole window, terminals included. Ctrl + and Ctrl − change it anywhere but in a terminal; Ctrl 0 resets.</p>
     <div class="zoom">
       <button :disabled="zoom <= ZOOM_MIN" aria-label="Smaller" @click="prefs.zoomBy(-1)">−</button>
       <output>{{ Math.round(zoom * 100) }}%</output>
