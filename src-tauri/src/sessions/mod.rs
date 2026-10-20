@@ -952,27 +952,42 @@ impl SessionManager {
                     prov::apply_routing(&mut route, &model, &s, catalog.as_ref().map(|c| c.efforts.as_slice()), effort.as_deref());
                 }
             }
-            let own_key = || -> Result<String, String> {
-                let cid = provider.credential_id.ok_or_else(|| format!("{} has no key", provider.name))?;
-                vault::decrypt(&self.store, cid)
-            };
-            let key = if provider.kind == ProviderKind::Openrouter && provider.management_credential_id.is_some() {
-                match crate::providers::keys::mint_for_run(&self.store, &provider, row.id) {
-                    Ok(minted) => {
-                        capped.ledger = Some(minted.ledger_id);
-                        notes.push(format!("This run has its own OpenRouter key, capped at ${:.2}.", minted.limit_usd));
-                        minted.key
+            // A provider that takes no key (Ollama) gets none, and nothing is minted for it.
+            if let Some(key_var) = route.key_var {
+                let own_key = || -> Result<String, String> {
+                    let cid = provider.credential_id.ok_or_else(|| format!("{} has no key", provider.name))?;
+                    vault::decrypt(&self.store, cid)
+                };
+                let key = if provider.kind == ProviderKind::Openrouter && provider.management_credential_id.is_some() {
+                    match crate::providers::keys::mint_for_run(&self.store, &provider, row.id) {
+                        Ok(minted) => {
+                            capped.ledger = Some(minted.ledger_id);
+                            notes.push(format!("This run has its own OpenRouter key, capped at ${:.2}.", minted.limit_usd));
+                            minted.key
+                        }
+                        Err(e) => {
+                            let key = own_key().map_err(|k| format!("couldn't mint a capped key ({e}), and {k}"))?;
+                            notes.push(format!("Couldn't mint a capped key ({e}), so this run uses the {} key, without a cap.", provider.name));
+                            key
+                        }
                     }
-                    Err(e) => {
-                        let key = own_key().map_err(|k| format!("couldn't mint a capped key ({e}), and {k}"))?;
-                        notes.push(format!("Couldn't mint a capped key ({e}), so this run uses the {} key, without a cap.", provider.name));
-                        key
+                } else {
+                    own_key()?
+                };
+                secrets.push((key_var.to_owned(), key));
+            }
+            if provider.kind == ProviderKind::Ollama {
+                // Chorus never starts Ollama, so say when it isn't there and when the model is odd.
+                match crate::providers::ollama_base(provider.base_url.as_deref())
+                    .and_then(|base| crate::providers::ollama_tags(&base).map(|models| (base, models)))
+                {
+                    Ok((_, models)) if !models.iter().any(|m| m.id == model) => {
+                        notes.push(format!("Ollama doesn't list {model}, so this turn may fail: pull it or pick another model."));
                     }
+                    Ok(_) => {}
+                    Err(e) => notes.push(e),
                 }
-            } else {
-                own_key()?
-            };
-            secrets.push((route.key_var.to_owned(), key));
+            }
             options.model = Some(route.model);
             route_args = route.args;
             opencode_provider = route.opencode_provider;
@@ -1165,9 +1180,14 @@ impl SessionManager {
                 (id, false)
             }
         };
+        // A provider with no key (Ollama) isn't in opencode's `connected` list, which is not the
+        // same as the model not running.
+        let keyless = row.provider_id.is_some_and(|id| {
+            provider_rows::get(&self.store, id).ok().flatten().is_some_and(|p| p.kind == ProviderKind::Ollama)
+        });
         if let Some(model) = &options.model {
             let wanted = oc::wanted_variant(row.agent.spec(), options);
-            match server.api.check_model(model) {
+            match server.api.check_model(model, keyless) {
                 Ok(Some(check)) => notes.extend(oc::model_note(model, wanted.as_deref(), &check)),
                 Ok(None) => notes.push("opencode's model list isn't in the shape Chorus checked, so the model wasn't checked.".into()),
                 Err(e) => notes.push(format!("Chorus couldn't check the model with opencode: {e}")),

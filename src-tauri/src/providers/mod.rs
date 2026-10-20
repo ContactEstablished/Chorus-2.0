@@ -96,8 +96,29 @@ pub fn test(kind: ProviderKind, base_url: Option<&str>, key: Option<&str>, manag
             Some(k) => jev(k),
             None => Err("No key is set.".into()),
         }),
+        ProviderKind::Ollama => check(ollama_base(base_url).and_then(|base| {
+            ollama_tags(&base).map(|models| format!("Ollama answered at {base} and lists {} local models.", models.len()))
+        })),
     }
     (ok, notes.join(" "))
+}
+
+/// Ollama's address: the provider's own, or its default. Only `https://`, `localhost` or
+/// `127.0.0.1` pass (a local model is never reached over plain http elsewhere).
+pub fn ollama_base(base_url: Option<&str>) -> Result<String, String> {
+    match base_url.map(str::trim).filter(|u| !u.is_empty()) {
+        Some(u) => p::clean_base_url(u),
+        None => Ok(p::OLLAMA_URL.to_owned()),
+    }
+}
+
+/// Ollama's local models, or the sentence that says why there are none: Chorus never starts it.
+pub fn ollama_tags(base: &str) -> Result<Vec<CatalogModel>, String> {
+    let r = get(&format!("{base}/api/tags"), None).map_err(|_| format!("Ollama isn't running at {base}."))?;
+    if r.status != 200 {
+        return Err(format!("Ollama answered {} at {base}.", r.status));
+    }
+    p::parse_ollama_tags(&r.body).ok_or_else(|| format!("Ollama's list at {base} isn't in the shape Chorus reads."))
 }
 
 /// `GET /key` answers for the key itself; it shows the key's spend and limit.
@@ -150,11 +171,15 @@ fn jev(key: &str) -> Result<String, String> {
 
 /// The provider's model list. OpenRouter's is public; a gateway's needs its key.
 pub fn fetch_catalog(kind: ProviderKind, base_url: Option<&str>, key: Option<&str>) -> Result<Vec<CatalogModel>, String> {
+    if kind == ProviderKind::Ollama {
+        return ollama_tags(&ollama_base(base_url)?);
+    }
     let url = match (kind, base_url) {
         (ProviderKind::Openrouter, _) => format!("{}/models", p::OPENROUTER_API),
         (ProviderKind::Gateway, Some(u)) => format!("{u}/models"),
         (ProviderKind::Gateway, None) => return Err("No address is set.".into()),
-        (ProviderKind::Jev, _) => return Err("Jev has no model list to choose from.".into()),
+        // Ollama returned above.
+        (ProviderKind::Jev | ProviderKind::Ollama, _) => return Err("Jev has no model list to choose from.".into()),
     };
     let bearer = if kind == ProviderKind::Gateway { key } else { None };
     let r = get(&url, bearer)?;

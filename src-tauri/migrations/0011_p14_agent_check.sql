@@ -45,3 +45,34 @@ FROM sessions;
 
 DROP TABLE sessions;
 ALTER TABLE sessions_new RENAME TO sessions;
+
+-- The same for `providers.kind`: Ollama is a provider now (decision P14-3). `model_catalog`,
+-- `shortlist` and `capped_keys` point at `providers` with cascade or nothing, so this rebuild needs
+-- the foreign keys off as well; `sessions.provider_id` is a plain integer on purpose.
+CREATE TABLE providers_new (
+  id                       INTEGER PRIMARY KEY,
+  kind                     TEXT    NOT NULL CHECK (kind IN ('openrouter', 'gateway', 'jev', 'ollama')),
+  name                     TEXT    NOT NULL UNIQUE,
+  -- A gateway's or Ollama's address; OpenRouter and Jev use their fixed ones.
+  base_url                 TEXT,
+  credential_id            INTEGER REFERENCES credentials (id) ON DELETE SET NULL,
+  management_credential_id INTEGER REFERENCES credentials (id) ON DELETE SET NULL,
+  cap_usd                  REAL,
+  tested_at                INTEGER,
+  test_ok                  INTEGER CHECK (test_ok IN (0, 1)),
+  test_note                TEXT,
+  catalog_refreshed_at     INTEGER,
+  created_at               INTEGER NOT NULL
+) STRICT;
+
+INSERT INTO providers_new (
+  id, kind, name, base_url, credential_id, management_credential_id, cap_usd, tested_at, test_ok,
+  test_note, catalog_refreshed_at, created_at
+)
+SELECT
+  id, kind, name, base_url, credential_id, management_credential_id, cap_usd, tested_at, test_ok,
+  test_note, catalog_refreshed_at, created_at
+FROM providers;
+
+DROP TABLE providers;
+ALTER TABLE providers_new RENAME TO providers;

@@ -116,13 +116,15 @@ pub enum ModelCheck {
 }
 
 /// From `GET /api/provider` and `GET /api/model`; `None` when either isn't the shape 2.1.1 gives.
-pub fn check_model(providers_body: &str, models_body: &str, model: &str) -> Option<ModelCheck> {
+/// `keyless` is a route whose provider needs no key, such as Ollama on this machine: opencode marks
+/// that provider disabled for want of a login, which is not the same as the model not running.
+pub fn check_model(providers_body: &str, models_body: &str, model: &str, keyless: bool) -> Option<ModelCheck> {
     let (provider, id) = model.split_once('/')?;
     let providers = data(providers_body)?;
     let Some(p) = providers.as_array()?.iter().find(|p| p.get("id").and_then(Value::as_str) == Some(provider)) else {
         return Some(ModelCheck::NoSuchProvider);
     };
-    if p.get("activation").and_then(Value::as_str) == Some("disabled") {
+    if !keyless && p.get("activation").and_then(Value::as_str) == Some("disabled") {
         return Some(ModelCheck::NotConnected);
     }
     let models = data(models_body)?;
@@ -481,19 +483,27 @@ mod tests {
 
     #[test]
     fn the_model_is_checked_against_the_server() {
-        let known = check_model(PROVIDERS, MODELS, "opencode/deepseek-v4.1-flash-free").unwrap();
+        let known = check_model(PROVIDERS, MODELS, "opencode/deepseek-v4.1-flash-free", false).unwrap();
         assert_eq!(known, ModelCheck::Known { variants: vec!["low".into(), "high".into(), "max".into()] });
         assert_eq!(model_note("opencode/deepseek-v4.1-flash-free", Some("high"), &known), None);
         assert_eq!(
             model_note("opencode/deepseek-v4.1-flash-free", Some("medium"), &known).unwrap(),
             "opencode/deepseek-v4.1-flash-free has no medium effort (it has low, high, max), so opencode uses its default."
         );
-        let none = check_model(PROVIDERS, MODELS, "opencode/big-pickle").unwrap();
+        let none = check_model(PROVIDERS, MODELS, "opencode/big-pickle", false).unwrap();
         assert!(model_note("opencode/big-pickle", Some("low"), &none).unwrap().contains("no effort settings"));
-        assert_eq!(check_model(PROVIDERS, MODELS, "anthropic/claude-sonnet-4-6"), Some(ModelCheck::NotConnected));
-        assert_eq!(check_model(PROVIDERS, MODELS, "nobody/x"), Some(ModelCheck::NoSuchProvider));
-        assert_eq!(check_model(PROVIDERS, MODELS, "opencode/nope"), Some(ModelCheck::NoSuchModel));
-        assert_eq!(check_model("[]", MODELS, "opencode/x"), None);
+        assert_eq!(check_model(PROVIDERS, MODELS, "anthropic/claude-sonnet-4-6", false), Some(ModelCheck::NotConnected));
+        assert_eq!(check_model(PROVIDERS, MODELS, "nobody/x", false), Some(ModelCheck::NoSuchProvider));
+        assert_eq!(check_model(PROVIDERS, MODELS, "opencode/nope", false), Some(ModelCheck::NoSuchModel));
+        assert_eq!(check_model("[]", MODELS, "opencode/x", false), None);
+        // A keyless provider (Ollama) runs even though opencode shows it disabled for want of a
+        // login: that is what a local provider looks like.
+        const WITH_OLLAMA: &str = r#"{"location":{},"data":[{"id":"ollama","name":"Ollama (local)","activation":"disabled","package":"x"}]}"#;
+        const OLLAMA_MODELS: &str = r#"{"location":{},"data":[{"id":"llama3.2:1b","providerID":"ollama","variants":[]}]}"#;
+        assert_eq!(check_model(WITH_OLLAMA, OLLAMA_MODELS, "ollama/llama3.2:1b", false), Some(ModelCheck::NotConnected));
+        let known = check_model(WITH_OLLAMA, OLLAMA_MODELS, "ollama/llama3.2:1b", true).unwrap();
+        assert_eq!(known, ModelCheck::Known { variants: vec![] });
+        assert_eq!(model_note("ollama/llama3.2:1b", None, &known), None);
     }
 
     /// One event as the stream sends it: `{ id, type, data }`.

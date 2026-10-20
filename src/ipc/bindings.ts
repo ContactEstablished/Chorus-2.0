@@ -671,7 +671,9 @@ export type ProviderKind =
 /**  Any OpenAI-compatible endpoint (Responses API) at a base URL. */
 "gateway" | 
 /**  TypeSafe's Jev: typed decisions, not an agent model (D40). */
-"jev";
+"jev" | 
+/**  Ollama on this machine: no key, and its models are whatever it has pulled. */
+"ollama";
 
 export type ProviderSave = {
 	/**  `None` adds a provider. */

@@ -164,7 +164,8 @@ impl Api {
     }
 
     /// What the server knows of `model`; `None` when its answers aren't the shape Chorus checked.
-    pub fn check_model(&self, model: &str) -> Result<Option<ModelCheck>, String> {
+    /// `keyless` is the route's provider needing no key (Ollama), which opencode lists as disabled.
+    pub fn check_model(&self, model: &str, keyless: bool) -> Result<Option<ModelCheck>, String> {
         let deadline = std::time::Instant::now() + PROVIDERS_WAIT;
         let providers = loop {
             let (status, body) = self.get("/api/provider")?;
@@ -180,7 +181,7 @@ impl Api {
         if status != 200 {
             return Err(format!("opencode answered {status} when asked for its models"));
         }
-        Ok(opencode::check_model(&providers, &models, model))
+        Ok(opencode::check_model(&providers, &models, model, keyless))
     }
 
     /// The server's event stream (`GET /api/event`), open until the server ends.

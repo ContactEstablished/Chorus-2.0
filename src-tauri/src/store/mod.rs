@@ -215,6 +215,9 @@ mod tests {
             INSERT INTO asks (id, session_id, turn_id, kind, subject, asked_at, answer) VALUES (1, 7, 2, 'approval', 'edit', 1007, 'yes');
             INSERT INTO agent_events (id, session_id, run_id, at, source, name, body) VALUES (1, 7, 3, 1008, 'hook', 'Stop', 'done');
             INSERT INTO session_tags (session_id, tag, position) VALUES (7, 'fix', 0);
+            INSERT INTO providers (id, kind, name, created_at) VALUES (4, 'openrouter', 'OpenRouter', 1009);
+            INSERT INTO model_catalog (provider_id, model_id, data, first_seen_at) VALUES (4, 'x/y', '{}', 1010);
+            INSERT INTO shortlist (provider_id, model_id, added_at) VALUES (4, 'x/y', 1011);
             "#,
         )
         .unwrap();
@@ -223,7 +226,19 @@ mod tests {
         let (version, counts, violations): (u32, Vec<i64>, Vec<String>) = store
             .with(|c| {
                 let version = c.pragma_query_value(None, "user_version", |r| r.get(0))?;
-                let counts = ["sessions", "runs", "prompts", "turns", "tool_calls", "asks", "agent_events", "session_tags"]
+                let counts = [
+                    "sessions",
+                    "runs",
+                    "prompts",
+                    "turns",
+                    "tool_calls",
+                    "asks",
+                    "agent_events",
+                    "session_tags",
+                    "providers",
+                    "model_catalog",
+                    "shortlist",
+                ]
                     .iter()
                     .map(|t| c.query_row(&format!("SELECT count(*) FROM {t}"), [], |r| r.get(0)))
                     .collect::<rusqlite::Result<Vec<i64>>>()?;
@@ -231,7 +246,7 @@ mod tests {
             })
             .unwrap();
         assert_eq!(version, 11);
-        assert_eq!(counts, [1, 1, 1, 1, 1, 1, 1, 1], "every row survives the rebuild");
+        assert_eq!(counts, [1; 11], "every row survives the rebuild");
         assert!(violations.is_empty(), "{violations:?}");
 
         let kept: (String, String, String, String, String) = store
@@ -270,6 +285,12 @@ mod tests {
         assert!(insert("gemini").is_ok());
         assert!(insert("aider").is_ok());
         assert!(insert("kimi").is_err(), "an agent kind Rust doesn't know is still refused");
+        // The providers table takes Ollama, and still refuses a kind Chorus doesn't know.
+        let provider = |kind: &str| {
+            store.with(|c| c.execute("INSERT INTO providers (kind, name, created_at) VALUES (?1, ?1, 1)", [kind]))
+        };
+        assert!(provider("ollama").is_ok());
+        assert!(provider("nobody").is_err());
         // Foreign keys are back on, and the other tables still point at `sessions`.
         assert!(store
             .with(|c| c.execute(
