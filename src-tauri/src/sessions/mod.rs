@@ -974,7 +974,7 @@ impl SessionManager {
             route_args = route.args;
             opencode_provider = route.opencode_provider;
         }
-        // opencode: its server's password, which the server and `attach` both read from the
+        // opencode: its server's password, which the server and its TUI both read from the
         // environment (and which is redacted like a key), and the options as server configuration.
         let server_password = (row.agent == AgentKind::Opencode).then(random_token);
         if let Some(p) = &server_password {
@@ -1021,7 +1021,7 @@ impl SessionManager {
         let mut args = launch.args.clone();
         let (server, resumed) = if let Some(password) = &server_password {
             let (server, conversation, existed) =
-                self.start_opencode(&row, &options, &launch, &env, password, &state_dir, &job, &mut notes)?;
+                self.start_opencode(&row, &options, &launch, &env, password, &job, (&parent, &state_dir), &mut notes)?;
             args.extend(oc::tui_args(server.url(), &conversation));
             (Some((server, conversation)), existed)
         } else {
@@ -1141,31 +1141,42 @@ impl SessionManager {
         launch: &agents::Launch,
         env: &BTreeMap<String, String>,
         password: &str,
-        state_dir: &Path,
         job: &Job,
+        (parent, state_dir): (&[(String, String)], &Path),
         notes: &mut Vec<String>,
     ) -> Result<(Server, String, bool), String> {
-        if options.model.is_some() || options.effort.is_some() {
-            agents::opencode::forget_tui_choice(state_dir);
+        // A 1.x can't be driven at all. A session relaunched at start-up can come before the first
+        // detection, so the version is read here then.
+        let detected = self.agents.get(AgentKind::Opencode).unwrap_or_else(|| agents::detect::detect(AgentKind::Opencode, parent, state_dir));
+        if let Some(refusal) = oc::too_old(detected.version.as_deref(), row.agent.spec().verified) {
+            return Err(refusal);
         }
         let server = Server::start(&launch.program, &launch.args, &row.cwd, env, password, job)?;
         let existing = match row.agent_session_id.as_deref() {
             Some(id) if server.api.session_exists(id)? => Some(id.to_owned()),
             _ => None,
         };
+        let variant = oc::wanted_variant(row.agent.spec(), options);
         let (conversation, existed) = match existing {
-            Some(id) => (id, true),
+            Some(id) => {
+                // The session keeps whatever its last prompt ran with, a model or effort picked in
+                // the TUI included; the run starts with the session's own.
+                if let Some(model) = &options.model
+                    && let Err(e) = server.api.set_model(&id, model, variant.as_deref())
+                {
+                    notes.push(format!("Chorus couldn't set the resumed conversation's model, so it keeps its last one: {e}"));
+                }
+                (id, true)
+            }
             None => {
-                let variant = oc::wanted_variant(row.agent.spec(), options);
                 let id = server.api.create_session(&row.name, &row.cwd, options.model.as_deref(), variant.as_deref())?;
                 rows::set_agent_session_id(&self.store, row.id, &id)?;
                 (id, false)
             }
         };
         if let Some(model) = &options.model {
-            let wanted = oc::wanted_variant(row.agent.spec(), options);
             match server.api.check_model(model) {
-                Ok(Some(check)) => notes.extend(oc::model_note(model, wanted.as_deref(), &check)),
+                Ok(Some(check)) => notes.extend(oc::model_note(model, variant.as_deref(), &check)),
                 Ok(None) => notes.push("opencode's model list isn't in the shape Chorus checked, so the model wasn't checked.".into()),
                 Err(e) => notes.push(format!("Chorus couldn't check the model with opencode: {e}")),
             }
@@ -1173,8 +1184,8 @@ impl SessionManager {
         Ok((server, conversation, existed))
     }
 
-    /// What each new opencode turn ran with, read back every few seconds while the run lives
-    /// (P3 moves this onto the server's events).
+    /// What each opencode turn ran with and the turn events, from the server's event stream while the
+    /// run lives. A dropped stream reconnects; opencode 2.1.1 has no way to replay what it missed.
     fn watch_opencode(self: &Arc<Self>, session_id: u32, run: &Arc<Run>, api: Api, conversation: String) {
         let name = format!("opencode-events-{}", run.id);
         let (m, run) = (self.clone(), run.clone());

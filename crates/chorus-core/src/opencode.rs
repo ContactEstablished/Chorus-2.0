@@ -20,6 +20,24 @@ pub const USERNAME: &str = "opencode";
 pub const PASSWORD_VAR: &str = "OPENCODE_SERVER_PASSWORD";
 pub const CONFIG_VAR: &str = "OPENCODE_CONFIG_CONTENT";
 
+/// opencode 2.0 moved the API under `/api/` and replaced `attach` with `--server` (LESSONS L41), so
+/// Chorus can't drive an older one at all.
+pub const OLDEST_MAJOR: u32 = 2;
+
+/// Why the installed opencode can't be driven, naming the version Chorus checked (`verified`);
+/// `None` for 2.x and later, and for a version that couldn't be read, which is tried and reported
+/// (LESSONS L7).
+pub fn too_old(found: Option<&str>, verified: Option<&str>) -> Option<String> {
+    let found = found?;
+    let version = crate::cli::parse_version(found)?;
+    (version.major < OLDEST_MAJOR).then(|| {
+        format!(
+            "opencode {found} is too old: Chorus drives opencode {OLDEST_MAJOR}.x (checked {}), whose server and terminal UI work differently. Update it with npm install -g @opencode/cli.",
+            verified.unwrap_or("2.x")
+        )
+    })
+}
+
 /// Port 0 lets the system choose, so the port is read from the server's output.
 pub fn serve_args() -> Vec<String> {
     ["serve", "--port", "0", "--hostname", "127.0.0.1"].map(str::to_owned).to_vec()
@@ -59,6 +77,21 @@ pub fn config_content(spec: &Spec, o: &LaunchOptions, provider: Option<&Value>) 
     (!root.is_empty()).then(|| Value::Object(root).to_string())
 }
 
+/// What New session's summary shows for options already passed through [`Spec::resolve`]: the
+/// configuration's entries and the variant the session is created with, each as `key=value`.
+pub fn summary_entries(spec: &Spec, o: &LaunchOptions) -> Vec<String> {
+    let config = config_content(spec, o, None).and_then(|c| serde_json::from_str::<Map<String, Value>>(&c).ok()).unwrap_or_default();
+    let mut out: Vec<String> = config
+        .into_iter()
+        .map(|(key, value)| match value {
+            Value::String(s) => format!("{key}={s}"),
+            other => format!("{key}={other}"),
+        })
+        .collect();
+    out.extend(wanted_variant(spec, o).map(|v| format!("variant={v}")));
+    out
+}
+
 /// The server's address from its output (`server listening on http://127.0.0.1:4096`). Only a
 /// loopback address is taken.
 pub fn listening_url(output: &str) -> Option<String> {
@@ -86,18 +119,31 @@ pub fn listed(body: &str) -> usize {
     data(body).and_then(|d| d.as_array().map(Vec::len)).unwrap_or(0)
 }
 
+/// A session's model as the API names it, `{providerID, id, variant}`, from `provider/model`.
+fn model_ref(model: &str, variant: Option<&str>) -> Option<Value> {
+    let (provider, id) = model.split_once('/')?;
+    let mut m = json!({ "providerID": provider, "id": id });
+    if let Some(v) = variant {
+        m["variant"] = json!(v);
+    }
+    Some(m)
+}
+
 /// `POST /api/session`'s body: the title, the folder, and the model with its effort variant. The
 /// variant only takes effect on the session (a `#variant` in the configuration's model doesn't).
 pub fn create_session_body(title: &str, cwd: &str, model: Option<&str>, variant: Option<&str>) -> Value {
     let mut body = json!({ "title": title, "location": { "directory": cwd } });
-    if let Some((provider, id)) = model.and_then(|m| m.split_once('/')) {
-        let mut m = json!({ "providerID": provider, "id": id });
-        if let Some(v) = variant {
-            m["variant"] = json!(v);
-        }
+    if let Some(m) = model.and_then(|m| model_ref(m, variant)) {
         body["model"] = m;
     }
     body
+}
+
+/// `POST /api/session/{id}/model`'s body. A session keeps the model and variant its last prompt
+/// ran with, one picked in the TUI included, so a resumed run sets the session's own again. (2.x's
+/// TUI keeps no `model.json`; the one LESSONS L5 and L35 describe is 1.x's.)
+pub fn set_model_body(model: &str, variant: Option<&str>) -> Option<Value> {
+    Some(json!({ "model": model_ref(model, variant)? }))
 }
 
 /// The session id from `POST /api/session`'s answer.
@@ -112,18 +158,46 @@ pub enum ModelCheck {
     NoSuchProvider,
     /// The provider is switched off, so its models won't run.
     NotConnected,
+    /// The provider needs a key or a login and has neither.
+    NoKey,
     NoSuchModel,
 }
 
-/// From `GET /api/provider` and `GET /api/model`; `None` when either isn't the shape 2.1.1 gives.
-pub fn check_model(providers_body: &str, models_body: &str, model: &str) -> Option<ModelCheck> {
+/// The integration a provider signs in through, from `GET /api/integration`'s list.
+fn integration<'a>(integrations: &'a Value, id: &str) -> Option<&'a Value> {
+    integrations.as_array()?.iter().find(|i| i.get("id").and_then(Value::as_str) == Some(id))
+}
+
+/// Whether an integration has a key or a login: one connection is enough, and a key in the
+/// server's environment counts as one (`{"type": "env", "name": "OPENROUTER_API_KEY"}`).
+fn connected(integration: &Value) -> Option<bool> {
+    Some(!integration.get("connections")?.as_array()?.is_empty())
+}
+
+/// From `GET /api/provider`, `GET /api/model` and `GET /api/integration`; `None` when the provider
+/// or model list isn't the shape 2.1.1 gives. An integration list that isn't is passed over, so
+/// the check never claims a key is missing without seeing it.
+///
+/// 2.1.1 lists a provider only once it can run: without a key, `anthropic` is in neither list but
+/// is an integration. A listed provider with a key in its own settings (opencode's free tier has
+/// `"public"`) or with no integration (Ollama) needs nothing more.
+pub fn check_model(providers_body: &str, models_body: &str, integrations_body: &str, model: &str) -> Option<ModelCheck> {
     let (provider, id) = model.split_once('/')?;
     let providers = data(providers_body)?;
+    let integrations = data(integrations_body).unwrap_or(Value::Null);
     let Some(p) = providers.as_array()?.iter().find(|p| p.get("id").and_then(Value::as_str) == Some(provider)) else {
-        return Some(ModelCheck::NoSuchProvider);
+        return Some(match integration(&integrations, provider).and_then(connected) {
+            Some(false) => ModelCheck::NoKey,
+            _ => ModelCheck::NoSuchProvider,
+        });
     };
     if p.get("activation").and_then(Value::as_str) == Some("disabled") {
         return Some(ModelCheck::NotConnected);
+    }
+    let own_key = p.pointer("/settings/apiKey").and_then(Value::as_str).is_some_and(|k| !k.is_empty());
+    let signs_in = p.get("integrationID").and_then(Value::as_str).and_then(|i| integration(&integrations, i));
+    if !own_key && signs_in.and_then(connected) == Some(false) {
+        return Some(ModelCheck::NoKey);
     }
     let models = data(models_body)?;
     let Some(m) = models
@@ -152,6 +226,11 @@ pub fn model_note(model: &str, wanted: Option<&str>, check: &ModelCheck) -> Opti
     match check {
         ModelCheck::NoSuchProvider => Some(format!("opencode doesn't know the provider {provider:?}, so {model} won't run.")),
         ModelCheck::NotConnected => Some(format!("opencode's {provider} provider is switched off, so {model} won't run.")),
+        // A session's opencode keeps its data in the session's own folder, so a login made in the
+        // user's own opencode isn't there.
+        ModelCheck::NoKey => {
+            Some(format!("opencode has no key or login for {provider} in this session, so {model} won't run. Run it on a provider from Settings."))
+        }
         ModelCheck::NoSuchModel => Some(format!("opencode's {provider} provider has no model {id:?}.")),
         ModelCheck::Known { variants } => {
             let wanted = wanted?;
@@ -464,36 +543,82 @@ mod tests {
         assert_eq!(created_session_id(r#"{"data":{"id":"--fork"}}"#), None);
     }
 
-    // The shapes 2.1.1 answers with (trimmed).
+    // The shapes 2.1.1 answers with in a fresh data folder with no keys (trimmed). The `disabled`
+    // provider is made up: no provider here was switched off.
     const PROVIDERS: &str = r#"{"location":{"directory":"C:\\w"},"data":[
-        {"id":"opencode","name":"OpenCode Zen","activation":"enabled","package":"x"},
-        {"id":"anthropic","name":"Anthropic","activation":"disabled","package":"x"}]}"#;
+        {"id":"openrouter","integrationID":"openrouter","name":"OpenRouter","activation":"enabled","settings":{"baseURL":"https://openrouter.ai/api/v1"}},
+        {"id":"opencode","integrationID":"opencode","name":"OpenCode","activation":"enabled","settings":{"apiKey":"public","baseURL":"https://opencode.ai/inference/openai/v1"}},
+        {"id":"ollama","name":"Ollama","activation":"enabled","settings":{"apiKey":"","baseURL":"http://127.0.0.1:11434/v1","provider":"ollama"}},
+        {"id":"switched","name":"Off","activation":"disabled"}]}"#;
     const MODELS: &str = r#"{"location":{"directory":"C:\\w"},"data":[
         {"id":"deepseek-v4.1-flash-free","providerID":"opencode","variants":[{"id":"max"},{"id":"low"},{"id":"high"}]},
-        {"id":"big-pickle","providerID":"opencode","variants":[]}]}"#;
+        {"id":"big-pickle","providerID":"opencode","variants":[]},
+        {"id":"deepseek/deepseek-v4.1-flash","providerID":"openrouter","variants":[{"id":"high"}]},
+        {"id":"qwen3","providerID":"ollama","variants":[]}]}"#;
+    const NO_KEYS: &str = r#"{"data":[
+        {"id":"anthropic","name":"Anthropic","methods":[{"type":"key"},{"type":"env","names":["ANTHROPIC_API_KEY"]}],"connections":[]},
+        {"id":"openrouter","name":"OpenRouter","methods":[{"type":"key"},{"type":"env","names":["OPENROUTER_API_KEY"]}],"connections":[]},
+        {"id":"opencode","name":"OpenCode Console","methods":[{"type":"key"},{"type":"env","names":["OPENCODE_API_KEY"]}],"connections":[]}]}"#;
+    /// The same with `OPENROUTER_API_KEY` in the server's environment.
+    const ENV_KEY: &str = r#"{"data":[
+        {"id":"openrouter","name":"OpenRouter","methods":[{"type":"key"},{"type":"env","names":["OPENROUTER_API_KEY"]}],"connections":[{"type":"env","name":"OPENROUTER_API_KEY"}]}]}"#;
 
     #[test]
     fn a_list_answer_is_counted() {
-        assert_eq!(listed(PROVIDERS), 2);
+        assert_eq!(listed(PROVIDERS), 4);
         assert_eq!(listed(r#"{"location":{},"data":[]}"#), 0);
         assert_eq!(listed("[]"), 0);
     }
 
     #[test]
     fn the_model_is_checked_against_the_server() {
-        let known = check_model(PROVIDERS, MODELS, "opencode/deepseek-v4.1-flash-free").unwrap();
+        let known = check_model(PROVIDERS, MODELS, NO_KEYS, "opencode/deepseek-v4.1-flash-free").unwrap();
         assert_eq!(known, ModelCheck::Known { variants: vec!["low".into(), "high".into(), "max".into()] });
         assert_eq!(model_note("opencode/deepseek-v4.1-flash-free", Some("high"), &known), None);
         assert_eq!(
             model_note("opencode/deepseek-v4.1-flash-free", Some("medium"), &known).unwrap(),
             "opencode/deepseek-v4.1-flash-free has no medium effort (it has low, high, max), so opencode uses its default."
         );
-        let none = check_model(PROVIDERS, MODELS, "opencode/big-pickle").unwrap();
+        let none = check_model(PROVIDERS, MODELS, NO_KEYS, "opencode/big-pickle").unwrap();
         assert!(model_note("opencode/big-pickle", Some("low"), &none).unwrap().contains("no effort settings"));
-        assert_eq!(check_model(PROVIDERS, MODELS, "anthropic/claude-sonnet-4-6"), Some(ModelCheck::NotConnected));
-        assert_eq!(check_model(PROVIDERS, MODELS, "nobody/x"), Some(ModelCheck::NoSuchProvider));
-        assert_eq!(check_model(PROVIDERS, MODELS, "opencode/nope"), Some(ModelCheck::NoSuchModel));
-        assert_eq!(check_model("[]", MODELS, "opencode/x"), None);
+        assert_eq!(check_model(PROVIDERS, MODELS, NO_KEYS, "switched/x"), Some(ModelCheck::NotConnected));
+        assert_eq!(check_model(PROVIDERS, MODELS, NO_KEYS, "nobody/x"), Some(ModelCheck::NoSuchProvider));
+        assert_eq!(check_model(PROVIDERS, MODELS, NO_KEYS, "opencode/nope"), Some(ModelCheck::NoSuchModel));
+        assert_eq!(check_model("[]", MODELS, NO_KEYS, "opencode/x"), None);
+    }
+
+    #[test]
+    fn a_provider_without_a_key_is_named() {
+        // Listed, but nothing to sign in with: it fails its first turn with a 401.
+        let routed = "openrouter/deepseek/deepseek-v4.1-flash";
+        assert_eq!(check_model(PROVIDERS, MODELS, NO_KEYS, routed), Some(ModelCheck::NoKey));
+        assert_eq!(
+            model_note(routed, None, &ModelCheck::NoKey).unwrap(),
+            "opencode has no key or login for openrouter in this session, so openrouter/deepseek/deepseek-v4.1-flash won't run. Run it on a provider from Settings."
+        );
+        // A key in the environment is a connection.
+        assert!(matches!(check_model(PROVIDERS, MODELS, ENV_KEY, routed), Some(ModelCheck::Known { .. })));
+        // Not listed at all, but opencode has it as an integration: it's the key that's missing.
+        assert_eq!(check_model(PROVIDERS, MODELS, NO_KEYS, "anthropic/claude-sonnet-4-6"), Some(ModelCheck::NoKey));
+        // opencode's free tier has its own key, and Ollama signs in with nothing.
+        assert!(matches!(check_model(PROVIDERS, MODELS, NO_KEYS, "opencode/big-pickle"), Some(ModelCheck::Known { .. })));
+        assert!(matches!(check_model(PROVIDERS, MODELS, NO_KEYS, "ollama/qwen3"), Some(ModelCheck::Known { .. })));
+        // No integration list to go on: no claim about keys.
+        assert!(matches!(check_model(PROVIDERS, MODELS, "<html>", routed), Some(ModelCheck::Known { .. })));
+        assert_eq!(check_model(PROVIDERS, MODELS, "<html>", "anthropic/x"), Some(ModelCheck::NoSuchProvider));
+    }
+
+    #[test]
+    fn a_resumed_session_is_given_its_model_again() {
+        assert_eq!(
+            set_model_body("opencode/deepseek-v4.1-flash-free", Some("high")),
+            Some(json!({ "model": { "providerID": "opencode", "id": "deepseek-v4.1-flash-free", "variant": "high" } }))
+        );
+        assert_eq!(
+            set_model_body("openrouter/deepseek/deepseek-v4.1-flash", None),
+            Some(json!({ "model": { "providerID": "openrouter", "id": "deepseek/deepseek-v4.1-flash" } }))
+        );
+        assert_eq!(set_model_body("no-provider", Some("high")), None);
     }
 
     /// One event as the stream sends it: `{ id, type, data }`.
@@ -579,6 +704,29 @@ mod tests {
         buf.push_str("pe\":\"c\"}\n\n");
         assert_eq!(take_sse_events(&mut buf)[0]["type"], "c");
         assert!(buf.is_empty());
+    }
+
+    #[test]
+    fn the_summary_names_what_the_server_and_session_get() {
+        let o = opts(Some(Effort::Deep), Some(Permission::Plan), Some("opencode/deepseek-v4.1-flash-free"));
+        assert_eq!(summary_entries(spec(), &o), ["default_agent=plan", "model=opencode/deepseek-v4.1-flash-free", "variant=high"]);
+        let manual = summary_entries(spec(), &opts(None, Some(Permission::FullAccess), None));
+        assert_eq!(manual, [r#"permissions=[{"action":"*","effect":"allow","resource":"*"}]"#]);
+        assert!(summary_entries(spec(), &opts(None, None, None)).is_empty());
+    }
+
+    #[test]
+    fn a_1x_opencode_is_refused_by_name() {
+        let refusal = too_old(Some("1.19.3"), Some("2.1.1")).unwrap();
+        assert_eq!(
+            refusal,
+            "opencode 1.19.3 is too old: Chorus drives opencode 2.x (checked 2.1.1), whose server and terminal UI work differently. Update it with npm install -g @opencode/cli."
+        );
+        assert_eq!(too_old(Some("2.1.1"), Some("2.1.1")), None);
+        assert_eq!(too_old(Some("2.4.0"), Some("2.1.1")), None, "newer is tried and reported");
+        assert_eq!(too_old(Some("3.0.0"), Some("2.1.1")), None);
+        assert_eq!(too_old(None, Some("2.1.1")), None, "an unread version is tried");
+        assert_eq!(too_old(Some("garbled"), Some("2.1.1")), None);
     }
 
     #[test]

@@ -21,7 +21,7 @@ impl fmt::Display for Version {
 }
 
 /// The first `x.y.z` in the first non-empty line, as each CLI prints it: `2.1.300 (Claude Code)`,
-/// `codex-cli 0.162.1`, `1.19.3`, `grok 1.0.62 (1474f9cbdd91) [stable]`.
+/// `codex-cli 0.162.1`, `opencode v2.1.1`, `grok 1.0.62 (1474f9cbdd91) [stable]`.
 pub fn parse_version(output: &str) -> Option<Version> {
     let line = output.lines().map(str::trim).find(|l| !l.is_empty())?;
     line.split(|c: char| c.is_whitespace() || c == '(' || c == ')')
@@ -95,6 +95,7 @@ mod tests {
         assert_eq!(parse_version("2.1.300 (Claude Code)\n"), Some(v(2, 1, 300)));
         assert_eq!(parse_version("codex-cli 0.162.1"), Some(v(0, 162, 1)));
         assert_eq!(parse_version("\n1.19.3\r\n"), Some(v(1, 19, 3)));
+        assert_eq!(parse_version("opencode v2.1.1\n"), Some(v(2, 1, 1)));
         assert_eq!(parse_version("grok 1.0.62 (1474f9cbdd91) [stable]"), Some(v(1, 0, 62)));
         assert_eq!(parse_version("v0.9.2-beta.1"), Some(v(0, 9, 2)));
         assert_eq!(parse_version("unknown option --version"), None);

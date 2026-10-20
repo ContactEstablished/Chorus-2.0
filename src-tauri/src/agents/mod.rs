@@ -58,7 +58,7 @@ pub fn resolve(kind: AgentKind, parent_env: &[(String, String)], scratch: &Path)
             Ok(Launch { program, args, additions: vec![] })
         }
         AgentKind::Opencode => {
-            // The session runs `serve` and `attach` with these (ARCHITECTURE §5, `opencode`). Its
+            // The session runs `serve` and `--server` with these (ARCHITECTURE §5, `opencode`). Its
             // conversations live in the session's own data folder, which is how they resume.
             let (program, args) = through_shim(&path, "opencode.cmd")?;
             let state = opencode::state_home(scratch);

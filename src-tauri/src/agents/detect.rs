@@ -29,6 +29,7 @@ const MAX_VERSION_BYTES: u64 = 4096;
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Detection {
+    /// Whether a launch can use it: found, and not a version Chorus can't drive at all.
     pub found: bool,
     /// The program a launch runs (behind any npm shim).
     pub program: Option<String>,
@@ -91,8 +92,15 @@ pub fn detect(kind: AgentKind, parent_env: &[(String, String)], scratch: &Path) 
     match run_version(&launch.program, &launch.args, &env, scratch) {
         Ok(out) => {
             let version = parse_version(&out);
+            let fit = Some(fit(version, verified));
+            let shown = version.map(|v| v.to_string());
+            if kind == AgentKind::Opencode
+                && let Some(refusal) = chorus_core::opencode::too_old(shown.as_deref(), kind.spec().verified)
+            {
+                return Detection { found: false, program, version: shown, fit, problem: Some(refusal) };
+            }
             let problem = version.is_none().then(|| format!("couldn't read a version from {:?}", first_line(&out)));
-            Detection { found: true, program, version: version.map(|v| v.to_string()), fit: Some(fit(version, verified)), problem }
+            Detection { found: true, program, version: shown, fit, problem }
         }
         Err(e) => Detection { found: true, program, version: None, fit: Some(VersionFit::Unreadable), problem: Some(e) },
     }

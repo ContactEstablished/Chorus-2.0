@@ -85,10 +85,14 @@ pub async fn agents_list(state: State<'_, Arc<SessionManager>>, refresh: bool) -
 
 /// The arguments a launch of `agent` with `options` adds, from the same functions the launch uses:
 /// New session's summary shows them. For an agent with `optionsInConfig`, the server configuration
-/// entries instead. A provider adds its own on top.
+/// entries instead, as `key=value`. A provider adds its own on top.
 #[tauri::command]
 #[specta::specta]
 pub fn launch_args(agent: AgentKind, options: LaunchOptions) -> Result<Vec<String>, String> {
     let spec = agent.spec();
-    Ok(spec.option_args(&spec.resolve(&options)?))
+    let resolved = spec.resolve(&options)?;
+    Ok(match spec.carrier {
+        Carrier::ServerConfig => chorus_core::opencode::summary_entries(spec, &resolved),
+        Carrier::Argv => spec.option_args(&resolved),
+    })
 }

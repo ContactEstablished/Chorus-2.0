@@ -30,7 +30,7 @@ export const commands = {
 	/**
 	 *  The arguments a launch of `agent` with `options` adds, from the same functions the launch uses:
 	 *  New session's summary shows them. For an agent with `optionsInConfig`, the server configuration
-	 *  entries instead. A provider adds its own on top.
+	 *  entries instead, as `key=value`. A provider adds its own on top.
 	 */
 	launchArgs: (agent: AgentKind, options: LaunchOptions) => typedError<string[], string>(__TAURI_INVOKE("launch_args", { agent, options })),
 	providersList: () => typedError<ProviderSummary[], string>(__TAURI_INVOKE("providers_list")),
@@ -358,6 +358,7 @@ export type CredentialUse = {
 
 /**  What Chorus found for one agent. */
 export type Detection = {
+	/**  Whether a launch can use it: found, and not a version Chorus can't drive at all. */
 	found: boolean,
 	/**  The program a launch runs (behind any npm shim). */
 	program: string | null,

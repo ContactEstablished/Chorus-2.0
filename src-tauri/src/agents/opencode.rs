@@ -20,6 +20,8 @@ use crate::sessions::job::Job;
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 /// The first start in a new data folder sets that folder up.
 const START_TIMEOUT: Duration = Duration::from_secs(30);
+/// How long a server whose output has closed gets to exit, so its status can be reported.
+const EXIT_WAIT: Duration = Duration::from_secs(2);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 /// A new server lists no providers for a few seconds while it loads them (LESSONS L41).
 const PROVIDERS_WAIT: Duration = Duration::from_secs(10);
@@ -29,16 +31,11 @@ pub const RECONNECT_TRIES: u32 = 30;
 /// An event stream that never completes an event is cut off here.
 const MAX_EVENT_BUFFER: usize = 4 * 1024 * 1024;
 
-/// The state folder `agents::resolve` gives opencode inside a session's folder. Its TUI keeps the
-/// last variant it used per model there, and that beats the configuration (LESSONS L5).
+/// The state folder `agents::resolve` gives opencode inside a session's folder, so its TUI's tabs
+/// and prompt history stay out of the user's own. (1.x's TUI also remembered a variant per model
+/// there, LESSONS L5; 2.1.1 keeps the model on the session instead.)
 pub fn state_home(scratch: &Path) -> PathBuf {
     scratch.join("xdg-state")
-}
-
-/// Drops the TUI's remembered model choices, so a run starts with the model and effort the
-/// session asks for. The folder is the session's own, never the user's opencode state.
-pub fn forget_tui_choice(scratch: &Path) {
-    let _ = std::fs::remove_file(state_home(scratch).join("opencode").join("model.json"));
 }
 
 /// The server's API, shared with the run's read-back thread.
@@ -96,12 +93,19 @@ impl Server {
         });
         let url = match rx.recv_timeout(START_TIMEOUT) {
             Ok(url) => url,
-            Err(_) => {
-                let exited = child.try_wait().ok().flatten();
+            Err(e) => {
+                // Its output closed before the address: it is exiting, so give it a moment to.
+                let mut exited = child.try_wait().ok().flatten();
+                let until = std::time::Instant::now() + EXIT_WAIT;
+                while exited.is_none() && e == mpsc::RecvTimeoutError::Disconnected && std::time::Instant::now() < until {
+                    std::thread::sleep(Duration::from_millis(50));
+                    exited = child.try_wait().ok().flatten();
+                }
                 let _ = child.kill();
-                return Err(match exited {
-                    Some(status) => format!("opencode serve exited ({status}) before it was ready"),
-                    None => format!("opencode serve wasn't ready in {} s", START_TIMEOUT.as_secs()),
+                return Err(match (exited, e) {
+                    (Some(status), _) => format!("opencode serve exited ({status}) before it was ready"),
+                    (None, mpsc::RecvTimeoutError::Disconnected) => "opencode serve closed its output before it was ready".into(),
+                    (None, mpsc::RecvTimeoutError::Timeout) => format!("opencode serve wasn't ready in {} s", START_TIMEOUT.as_secs()),
                 });
             }
         };
@@ -163,6 +167,17 @@ impl Api {
         opencode::created_session_id(&body).ok_or_else(|| "opencode's new session had no id Chorus recognises".into())
     }
 
+    /// Sets an existing session's model and effort variant, which a prompt from the TUI may have
+    /// changed (`POST /api/session/{id}/model`).
+    pub fn set_model(&self, id: &str, model: &str, variant: Option<&str>) -> Result<(), String> {
+        let body = opencode::set_model_body(model, variant).ok_or("the model isn't provider/model")?;
+        let (status, _) = self.send(self.client.post(format!("{}/api/session/{id}/model", self.url)).json(&body))?;
+        match status {
+            200..=299 => Ok(()),
+            _ => Err(format!("opencode answered {status} when asked to set the session's model")),
+        }
+    }
+
     /// What the server knows of `model`; `None` when its answers aren't the shape Chorus checked.
     pub fn check_model(&self, model: &str) -> Result<Option<ModelCheck>, String> {
         let deadline = std::time::Instant::now() + PROVIDERS_WAIT;
@@ -180,7 +195,12 @@ impl Api {
         if status != 200 {
             return Err(format!("opencode answered {status} when asked for its models"));
         }
-        Ok(opencode::check_model(&providers, &models, model))
+        // Which providers have a key or login. Without this answer the check makes no claim.
+        let integrations = match self.get("/api/integration")? {
+            (200, body) => body,
+            _ => String::new(),
+        };
+        Ok(opencode::check_model(&providers, &models, &integrations, model))
     }
 
     /// The server's event stream (`GET /api/event`), open until the server ends.
