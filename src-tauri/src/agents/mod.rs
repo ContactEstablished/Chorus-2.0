@@ -216,19 +216,7 @@ pub fn claude_trust_folder(parent_env: &[(String, String)], folder: &str) -> Res
 pub fn conversation_exists(kind: AgentKind, id: &str, parent_env: &[(String, String)]) -> bool {
     let home = || env_value(parent_env, "USERPROFILE").map(PathBuf::from);
     if kind == AgentKind::Gemini {
-        // `<home>\.gemini\tmp\<project>\chats\session-<ms>-<id's first 8>.jsonl`. The project
-        // folder is derived from the working directory, so every one is searched. `--session-id`
-        // refuses an id that already exists, which is why this matters.
-        let Some(short) = id.get(..8) else { return false };
-        let Some(tmp) = home().map(|h| h.join(".gemini").join("tmp")) else { return false };
-        let suffix = format!("-{short}.jsonl");
-        return std::fs::read_dir(tmp).into_iter().flatten().flatten().any(|project| {
-            std::fs::read_dir(project.path().join("chats"))
-                .into_iter()
-                .flatten()
-                .flatten()
-                .any(|f| f.file_name().to_string_lossy().ends_with(&suffix))
-        });
+        return gemini_chat_state(id, parent_env) == GeminiChat::Resumable;
     }
     let (root, file) = match kind {
         AgentKind::Claude => {
@@ -244,6 +232,47 @@ pub fn conversation_exists(kind: AgentKind, id: &str, parent_env: &[(String, Str
         return false;
     };
     folders.flatten().any(|f| f.path().join(&file).exists())
+}
+
+/// What Gemini CLI would find in the chat file for `id`. Its own rule decides resumability
+/// (`chorus_core::gemini`), and the two are not the same question: a file with no turn in it can't
+/// be resumed and can't be created again either.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GeminiChat {
+    /// No chat file: `--session-id <id>` makes one.
+    Missing,
+    /// A chat file with no turn: `--resume` refuses it, `--session-id` finds the id taken.
+    Empty,
+    /// At least one turn: `--resume <id>` continues it.
+    Resumable,
+}
+
+/// Gemini CLI 0.64.0 keeps `<home>\.gemini\tmp\<project>\chats\session-<ms>-<id's first 8>.jsonl`.
+/// The project folder follows the working directory, so every one is searched; the name only holds
+/// the id's first 8 characters, so the record's `sessionId` is checked too.
+pub fn gemini_chat_state(id: &str, parent_env: &[(String, String)]) -> GeminiChat {
+    let Some(short) = id.get(..8) else { return GeminiChat::Missing };
+    let Some(tmp) = env_value(parent_env, "USERPROFILE").map(|h| PathBuf::from(h).join(".gemini").join("tmp")) else {
+        return GeminiChat::Missing;
+    };
+    let suffix = format!("-{short}.jsonl");
+    let mut found = GeminiChat::Missing;
+    for project in std::fs::read_dir(tmp).into_iter().flatten().flatten() {
+        for file in std::fs::read_dir(project.path().join("chats")).into_iter().flatten().flatten() {
+            if !file.file_name().to_string_lossy().ends_with(&suffix) {
+                continue;
+            }
+            let record = std::fs::read_to_string(file.path()).unwrap_or_default();
+            if !record.contains(id) {
+                continue;
+            }
+            if chorus_core::gemini::chat_state(&record) == chorus_core::gemini::ChatState::Resumable {
+                return GeminiChat::Resumable;
+            }
+            found = GeminiChat::Empty;
+        }
+    }
+    found
 }
 
 #[cfg(test)]

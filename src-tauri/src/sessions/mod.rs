@@ -1048,7 +1048,18 @@ impl SessionManager {
             args.extend(route_args);
             args.extend(hook_args);
             args.extend(spec.option_args(&options));
-            let conversation = row.agent_session_id.as_deref();
+            // Gemini CLI refuses to create an id whose chat file already exists, and to resume one
+            // with no turns in it. A session that ended before its first prompt has exactly that,
+            // so it gets a fresh id rather than a launch that fails with exit 42.
+            let renewed = (row.agent == AgentKind::Gemini)
+                .then_some(row.agent_session_id.as_deref())
+                .flatten()
+                .filter(|id| agents::gemini_chat_state(id, &parent) == agents::GeminiChat::Empty)
+                .map(|_| uuid_v4(vault::random_bytes(16).try_into().expect("16 bytes")));
+            if let Some(id) = &renewed {
+                rows::set_agent_session_id(&self.store, row.id, id)?;
+            }
+            let conversation = renewed.as_deref().or(row.agent_session_id.as_deref());
             let exists = conversation.is_some_and(|id| agents::conversation_exists(row.agent, id, &parent));
             args.extend(spec.conversation_args(conversation, exists));
             (None, exists && spec.resume.kind() != ResumeKind::None)
