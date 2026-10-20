@@ -5,7 +5,7 @@
  * the highlighted item; Esc closes. Typed, pasted or dictated text only filters: nothing runs
  * until Enter or a click.
  */
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Icon from '../components/Icon.vue'
 import { useSessionsStore } from '../stores/sessions'
 import { useProjectsStore } from '../stores/projects'
@@ -137,7 +137,12 @@ function onKey(e: KeyboardEvent): void {
   }
 }
 
+// Focus goes back where it was (the terminal, usually) unless running an item moved it.
+const before = document.activeElement instanceof HTMLElement ? document.activeElement : null
 onMounted(() => input.value?.focus())
+onBeforeUnmount(() => {
+  if (before?.isConnected) before.focus()
+})
 </script>
 
 <template>
