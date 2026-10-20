@@ -23,7 +23,8 @@ const body = computed(() => {
 
 const timing = computed(() => {
   const x = s.value
-  const ran = x.live && x.runStartedAtSecs ? shortDuration(props.now - x.runStartedAtSecs) : x.live ? 'starting' : 'stopped'
+  const up = x.runStartedAtSecs ? props.now - x.runStartedAtSecs : 0
+  const ran = !x.live ? 'stopped' : up < 60 ? 'just started' : shortDuration(up)
   const updated = x.latestAtSecs || x.runStartedAtSecs || x.createdAtSecs
   return `${ran} · updated ${ago(updated, props.now)}`
 })

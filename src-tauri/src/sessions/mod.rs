@@ -470,6 +470,18 @@ pub struct SessionManager {
     agents: Detector,
     /// The event listener's port, or why it isn't running.
     hook_listener: OnceLock<Result<u16, String>>,
+    /// How far the restore at start has got, for the splash.
+    restore: Mutex<RestoreProgress>,
+}
+
+/// The sessions Chorus relaunches at start, and how many are back (each started or failed).
+#[derive(Debug, Clone, Default, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RestoreProgress {
+    pub total: u32,
+    pub restored: u32,
+    /// Each relaunching session's project colour, or none for the theme's accent.
+    pub colours: Vec<Option<String>>,
 }
 
 impl SessionManager {
@@ -482,7 +494,12 @@ impl SessionManager {
             notify,
             agents: Detector::default(),
             hook_listener: OnceLock::new(),
+            restore: Mutex::new(RestoreProgress::default()),
         })
+    }
+
+    pub fn restore_progress(&self) -> RestoreProgress {
+        self.restore.lock().expect("restore lock").clone()
     }
 
     /// Where hooks post to (`events::listener`); launches after this get hooks.
@@ -724,7 +741,13 @@ impl SessionManager {
             let _ = history::close_open_turns(&self.store, row.id);
         }
         let _ = history::prune_events(&self.store, EVENT_LOG_KEEP_MS);
-        Ok(open.iter().map(|r| r.id).filter(|id| plan.relaunch.contains(id)).collect())
+        let relaunch: Vec<&SessionRow> = open.iter().filter(|r| plan.relaunch.contains(&r.id)).collect();
+        let colours = relaunch
+            .iter()
+            .map(|r| r.project_id.and_then(|p| project_rows::get(&self.store, p).ok().flatten()).map(|p| p.colour))
+            .collect();
+        *self.restore.lock().expect("restore lock") = RestoreProgress { total: relaunch.len() as u32, restored: 0, colours };
+        Ok(relaunch.iter().map(|r| r.id).collect())
     }
 
     /// The second half: launches each session again. It can take seconds (an opencode session
@@ -736,6 +759,7 @@ impl SessionManager {
             if let Err(e) = self.start_run(&live) {
                 self.record_failure(&live, &e);
             }
+            self.restore.lock().expect("restore lock").restored += 1;
         }
     }
 

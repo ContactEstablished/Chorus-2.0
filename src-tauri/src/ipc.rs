@@ -65,7 +65,8 @@ pub fn builder() -> Builder<tauri::Wry> {
             v::dev_leak_check,
             fleet::spike_fleet_open,
             fleet::spike_fleet_probe,
-            splash::spike_splash_open,
+            splash::restore_progress,
+            splash::splash_replay,
         ])
         .events(collect_events![app::BackendPulse, sessions::SessionUpdated, fleet::FleetClick])
 }

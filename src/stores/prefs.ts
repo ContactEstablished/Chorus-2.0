@@ -7,7 +7,7 @@ export const ZOOM_MIN = 0.8
 export const ZOOM_MAX = 1.6
 export const ZOOM_STEP = 0.1
 
-const DEFAULTS: Prefs = { theme: 'glacier', zoom: 1, groupBy: 'status', sessionStrip: true }
+const DEFAULTS: Prefs = { theme: 'glacier', zoom: 1, groupBy: 'status', sessionStrip: true, splash: true }
 
 /** One zoom step from `zoom`, rounded to the step and kept in range (as the back end does). */
 export function stepZoom(zoom: number, steps: number): number {

@@ -94,8 +94,15 @@ pub fn run() {
             })?;
             // The stored zoom, before the window shows anything. A failure is shown in Settings,
             // where the zoom can be set again.
-            if let Err(e) = prefs::apply_zoom(app.handle(), prefs::load(manager.store()).zoom) {
+            let shown = prefs::load(manager.store());
+            if let Err(e) = prefs::apply_zoom(app.handle(), shown.zoom) {
                 eprintln!("{e}");
+            }
+            // The splash plays beside the restore (already under way) and never holds it up.
+            if shown.splash
+                && let Err(e) = splash::open_at_start(app.handle(), shown.theme)
+            {
+                eprintln!("splash: {e}");
             }
             app.manage(manager);
             app::start_pulse(app.handle().clone());

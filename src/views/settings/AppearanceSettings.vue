@@ -2,8 +2,9 @@
 /** Theme (D25), text size (the window's zoom) and the Overview's default grouping. */
 import { computed } from 'vue'
 import ChorusMark from '../../components/ChorusMark.vue'
-import type { GroupBy, Theme } from '../../ipc'
+import { commands, type GroupBy, type Theme } from '../../ipc'
 import { usePrefsStore, ZOOM_MAX, ZOOM_MIN } from '../../stores/prefs'
+import { useNoticesStore } from '../../stores/notices'
 
 const prefs = usePrefsStore()
 
@@ -19,6 +20,12 @@ const GROUPS: { key: GroupBy; label: string }[] = [
 ]
 
 const zoom = computed(() => prefs.prefs.zoom ?? 1)
+
+const notices = useNoticesStore()
+async function replay(): Promise<void> {
+  const res = await commands.splashReplay(3, false)
+  if (res.status === 'error') notices.error("Couldn't open the splash.", res.error)
+}
 </script>
 
 <template>
@@ -54,6 +61,15 @@ const zoom = computed(() => prefs.prefs.zoom ?? 1)
       <button :disabled="zoom >= ZOOM_MAX" aria-label="Larger" @click="prefs.zoomBy(1)">+</button>
       <button class="quiet" :disabled="zoom === 1" @click="prefs.zoomBy(0)">Reset</button>
     </div>
+  </div>
+
+  <div class="group">
+    <h2>Start</h2>
+    <label class="check">
+      <input type="checkbox" :checked="prefs.prefs.splash" @change="prefs.update({ splash: ($event.target as HTMLInputElement).checked })" />
+      <span>Play the 3D splash as Chorus starts, with the count of sessions coming back (about 3 seconds; any key skips it)</span>
+    </label>
+    <button class="quiet replay" @click="replay">Play it now</button>
   </div>
 
   <div class="group">
@@ -152,6 +168,23 @@ h2 {
 .blurb {
   font-size: 12.5px;
   color: var(--text-2);
+}
+.check {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  font-size: 13.5px;
+  color: var(--text-2);
+  max-width: 60ch;
+  line-height: 1.5;
+}
+.check input {
+  margin-top: 3px;
+}
+.replay {
+  margin: 8px 0 0 22px;
+  padding: 3px 8px;
+  font-size: 12.5px;
 }
 .zoom {
   display: flex;

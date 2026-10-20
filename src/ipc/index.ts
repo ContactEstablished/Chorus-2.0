@@ -42,6 +42,7 @@ export type {
   ProviderKind,
   ProviderSave,
   ProviderSummary,
+  RestoreProgress,
   ResumeKind,
   Role,
   SessionHistory,

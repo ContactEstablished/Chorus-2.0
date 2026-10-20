@@ -273,7 +273,7 @@ h1 {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(460px, 100%), 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(380px, 100%), 1fr));
   grid-auto-rows: minmax(280px, 1fr);
   gap: 12px;
   overflow: auto;

@@ -35,11 +35,13 @@ pub struct Prefs {
     pub group_by: GroupBy,
     /// Whether the session view shows the strip of other sessions.
     pub session_strip: bool,
+    /// Whether the 3D splash plays as Chorus starts.
+    pub splash: bool,
 }
 
 impl Default for Prefs {
     fn default() -> Self {
-        Self { theme: Theme::Glacier, zoom: 1.0, group_by: GroupBy::Status, session_strip: true }
+        Self { theme: Theme::Glacier, zoom: 1.0, group_by: GroupBy::Status, session_strip: true, splash: true }
     }
 }
 

@@ -88,11 +88,14 @@ export const commands = {
 	 */
 	spikeFleetOpen: () => typedError<FleetProbe, string>(__TAURI_INVOKE("spike_fleet_open")),
 	spikeFleetProbe: () => typedError<FleetProbe, string>(__TAURI_INVOKE("spike_fleet_probe")),
+	/**  How far the restore at start has got: the splash asks as it plays. */
+	restoreProgress: () => __TAURI_INVOKE<RestoreProgress>("restore_progress"),
 	/**
-	 *  Opens the splash for `sessions` restoring sessions. `reduce_motion` forces the static version.
-	 *  Async: building a window inside a synchronous command deadlocks on Windows.
+	 *  Replays the splash with `sessions` simulated restores (Settings → Appearance). `reduce_motion`
+	 *  forces the static version. Async: building a window inside a synchronous command deadlocks on
+	 *  Windows.
 	 */
-	spikeSplashOpen: (sessions: number, reduceMotion: boolean) => typedError<null, string>(__TAURI_INVOKE("spike_splash_open", { sessions, reduceMotion })),
+	splashReplay: (sessions: number, reduceMotion: boolean) => typedError<null, string>(__TAURI_INVOKE("splash_replay", { sessions, reduceMotion })),
 };
 
 /** Events */
@@ -396,6 +399,8 @@ export type Prefs = {
 	groupBy: GroupBy,
 	/**  Whether the session view shows the strip of other sessions. */
 	sessionStrip: boolean,
+	/**  Whether the 3D splash plays as Chorus starts. */
+	splash: boolean,
 };
 
 export type Preset = 
@@ -505,6 +510,14 @@ export type ProviderSummary = {
 	catalogCount: number,
 	shortlist: string[],
 	agents: AgentRoute[],
+};
+
+/**  The sessions Chorus relaunches at start, and how many are back (each started or failed). */
+export type RestoreProgress = {
+	total: number,
+	restored: number,
+	/**  Each relaunching session's project colour, or none for the theme's accent. */
+	colours: (string | null)[],
 };
 
 /**  How a session's next run picks up the agent's conversation. */

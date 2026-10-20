@@ -1,31 +1,63 @@
 <script setup lang="ts">
 /**
- * The startup splash window (spike S7; built for real in P4). It runs beside session restore and
- * never holds it up: the back end restores sessions whatever the splash is doing, and this window
- * only reflects progress. Any key or click skips it. Reduced-motion users get a short static frame.
+ * The startup splash window (spike S7, P4). It runs beside session restore and never holds it up:
+ * the back end restores sessions whatever the splash is doing, and this window only reflects
+ * progress. Any key or click skips it. Reduced-motion users get a short static frame.
  *
- * In the spike, restore progress is simulated (`?sessions=N`); P4 feeds it from restore events.
+ * At start (`?live=1`) the count is real: it asks the back end how many sessions are coming back
+ * and how many are back, and each stream takes its session's project colour. The particles keep
+ * their planned ~2 s choreography. Without `live`, `?sessions=N` simulates N restores (dev).
  */
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import ChorusMark from '../components/ChorusMark.vue'
+import { commands, type RestoreProgress } from '../ipc'
 import type { Splash, SplashMetrics } from './scene'
 
 const params = new URLSearchParams(window.location.search)
-const total = Math.max(0, Math.min(24, Number(params.get('sessions') ?? 6)))
+const live = params.get('live') === '1'
+if (params.get('theme') === 'dusk') document.documentElement.dataset.theme = 'dusk'
 const reduced = params.get('motion') === 'reduce' || window.matchMedia('(prefers-reduced-motion: reduce)').matches
 const PROJECT_COLOURS = ['#1ec8f0', '#f472b6', '#e0a96d', '#a5b4fc', '#c4e05a', '#00e676', '#ffc400', '#4d7cff']
+const POLL_MS = 120
 
 const canvas = ref<HTMLCanvasElement | null>(null)
+const total = ref(live ? 0 : Math.max(0, Math.min(24, Number(params.get('sessions') ?? 6))))
 const restored = ref(0)
 const fading = ref(false)
-const label = computed(() =>
-  total === 0 ? 'Starting' : restored.value < total ? `Restoring ${restored.value} of ${total} sessions` : `${total} sessions restored`,
-)
+const label = computed(() => {
+  const n = total.value
+  if (n === 0) return 'Starting'
+  const s = n === 1 ? 'session' : 'sessions'
+  return restored.value < n ? `Restoring ${restored.value} of ${n} ${s}` : `${n} ${s} restored`
+})
 
-// Simulated restore times, spread over the first ~2 s (P4: real restore events).
-const restoredAtMs = Array.from({ length: total }, (_, i) => 350 + Math.round((1700 * (i + 0.5)) / Math.max(1, total)))
-const timers: number[] = restoredAtMs.map((at) => window.setTimeout(() => restored.value++, at))
+/** When each stream arrives, spread over the first ~2 s. */
+const schedule = (n: number) => Array.from({ length: n }, (_, i) => 350 + Math.round((1700 * (i + 0.5)) / Math.max(1, n)))
+const timers: number[] = []
+let poll: number | null = null
+
+/** Live: the real total, colours and count. Simulated: timers. Returns each stream's colour or null. */
+async function startProgress(): Promise<(string | null)[]> {
+  if (!live) {
+    for (const at of schedule(total.value)) timers.push(window.setTimeout(() => restored.value++, at))
+    return Array.from({ length: total.value }, (_, i) => PROJECT_COLOURS[i % PROJECT_COLOURS.length]!)
+  }
+  let first: RestoreProgress
+  try {
+    first = await commands.restoreProgress()
+  } catch {
+    return []
+  }
+  total.value = first.total
+  restored.value = first.restored
+  poll = window.setInterval(async () => {
+    const p = await commands.restoreProgress().catch(() => null)
+    if (p) restored.value = p.restored
+    if (!p || p.restored >= p.total) window.clearInterval(poll!)
+  }, POLL_MS)
+  return first.colours
+}
 
 let splash: Splash | null = null
 const report: { metrics: SplashMetrics | null; reduced: boolean; navToScriptMs: number; timeOrigin: number } = {
@@ -36,23 +68,8 @@ const report: { metrics: SplashMetrics | null; reduced: boolean; navToScriptMs: 
 }
 ;(window as unknown as { __splash: typeof report }).__splash = report
 
-/** Spike A/B switches left in shared storage by the harness. */
-function variant(): { bloom?: boolean; toneMapping?: boolean } {
-  try {
-    return JSON.parse(localStorage.getItem('chorus.spike.splash.variant') ?? '{}')
-  } catch {
-    return {}
-  }
-}
-
 function done(metrics: SplashMetrics | null): void {
   report.metrics = metrics
-  // Spike: leave the measurements where the main window's harness can read them (same origin).
-  try {
-    localStorage.setItem('chorus.spike.splash', JSON.stringify(report))
-  } catch {
-    /* storage unavailable */
-  }
   window.setTimeout(() => void getCurrentWindow().close(), 50)
 }
 
@@ -64,6 +81,7 @@ function skip(): void {
 onMounted(async () => {
   window.addEventListener('keydown', skip)
   window.addEventListener('pointerdown', skip)
+  const colours = await startProgress()
   if (reduced) {
     // Static frame: the mark and the count, then a short fade.
     window.setTimeout(() => (fading.value = true), 900)
@@ -73,15 +91,15 @@ onMounted(async () => {
   const { createSplash } = await import('./scene')
   const css = getComputedStyle(document.documentElement)
   const token = (name: string, fallback: string) => css.getPropertyValue(name).trim() || fallback
+  const accent = token('--accent', '#1ec8f0')
   splash = createSplash(
     canvas.value!,
     {
-      streams: Array.from({ length: Math.max(1, total) }, (_, i) => PROJECT_COLOURS[i % PROJECT_COLOURS.length]!),
-      restoredAtMs: total === 0 ? [500] : restoredAtMs,
-      accent: token('--accent', '#1ec8f0'),
+      streams: colours.length ? colours.map((c) => c ?? accent) : [accent],
+      restoredAtMs: colours.length ? schedule(colours.length) : [500],
+      accent,
       greys: [token('--logo-bar-low', '#3e4650'), token('--logo-bar-mid', '#4a535e'), token('--logo-bar-high', '#5a646f')],
       background: token('--bg', '#0a0f16'),
-      ...variant(),
     },
     (m) => {
       fading.value = true
@@ -92,6 +110,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   timers.forEach((t) => window.clearTimeout(t))
+  if (poll !== null) window.clearInterval(poll)
   window.removeEventListener('keydown', skip)
   window.removeEventListener('pointerdown', skip)
   splash?.dispose()

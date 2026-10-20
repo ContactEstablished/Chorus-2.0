@@ -68,7 +68,7 @@ watch(
     <Rail @new-project="view.openSettings('projects')" @edit-project="view.openSettings('projects')" />
     <div class="main">
       <TitleBar @palette="notices.info('The command palette arrives later in P4.')" />
-      <main class="view">
+      <main class="view scroll">
         <SettingsView v-if="view.name === 'settings'" />
         <SessionView v-else-if="view.name === 'session' && view.sessionId !== null" :session-id="view.sessionId" />
         <SessionsView v-else-if="view.name === 'sessions'" />
