@@ -275,16 +275,18 @@ pub fn observed_from_event(event: &Value, session_id: &str) -> Option<Observed> 
 
 /// Turns opencode 2.1.1's server events (`GET /api/event`, LESSONS L41) into [`AgentEvent`]s for one
 /// session. A turn is a user message: it starts when the inbox delivers it and ends when the
-/// session's execution succeeds, fails or is interrupted. Its reply is the text of the newest
-/// assistant step that had any.
+/// session's execution succeeds, fails or is interrupted. A prompt sent while a turn runs joins the
+/// same execution at its next step (opencode "steers" it), so each prompt of an execution ends with
+/// it, oldest first. A turn's reply is the text of its newest assistant step that had any.
 #[derive(Debug, Default)]
 pub struct EventParser {
     session_id: String,
     /// Inbox id → the prompt's text, until it's delivered.
     prompts: HashMap<String, String>,
-    turn: Option<String>,
-    /// The turn's assistant steps, in order, and their texts by ordinal.
-    steps: Vec<String>,
+    /// The execution's turns, oldest first, each with its assistant steps in order. Steps seen
+    /// before any delivery (the stream joined mid-turn) belong to a turn with no id.
+    turns: Vec<(Option<String>, Vec<String>)>,
+    /// Each step's texts by ordinal.
     texts: HashMap<String, BTreeMap<u64, String>>,
     /// Tool call id → its tool and target, named before the call runs.
     tools: HashMap<String, (String, Option<String>)>,
@@ -296,17 +298,24 @@ impl EventParser {
         Self { session_id: session_id.to_owned(), ..Default::default() }
     }
 
-    fn reply(&self) -> Option<String> {
-        self.steps.iter().rev().find_map(|step| {
+    fn reply(&self, steps: &[String]) -> Option<String> {
+        steps.iter().rev().find_map(|step| {
             let joined = self.texts.get(step)?.values().map(String::as_str).collect::<Vec<_>>().join("\n");
             (!joined.trim().is_empty()).then_some(joined)
         })
     }
 
-    fn end_turn(&mut self) -> Option<String> {
-        self.steps.clear();
+    /// The execution ended: one event per turn it held, oldest first (or one for no known turn),
+    /// each with its own reply.
+    fn end_turns(&mut self, end: impl Fn(Option<String>, Option<String>) -> AgentEvent) -> Vec<AgentEvent> {
+        let turns = std::mem::take(&mut self.turns);
+        let out = if turns.is_empty() {
+            vec![end(None, None)]
+        } else {
+            turns.into_iter().map(|(turn, steps)| end(turn, self.reply(&steps))).collect()
+        };
         self.texts.clear();
-        self.turn.take()
+        out
     }
 
     /// One event from the stream, as the events it means.
@@ -329,14 +338,19 @@ impl EventParser {
             "session.inbox.delivered" => {
                 let Some(id) = text(&d, "inboxID") else { return Vec::new() };
                 let prompt = self.prompts.remove(&id).filter(|p| !p.trim().is_empty());
-                self.steps.clear();
-                self.texts.clear();
-                self.turn = Some(id.clone());
+                self.turns.push((Some(id.clone()), Vec::new()));
                 vec![AgentEvent::TurnStarted { turn: Some(id), prompt }]
             }
             "session.step.started" => {
                 if let Some(step) = text(&d, "assistantMessageID") {
-                    self.steps.push(step);
+                    if self.turns.is_empty() {
+                        self.turns.push((None, Vec::new()));
+                    }
+                    let steps = &mut self.turns.last_mut().expect("a turn").1;
+                    // A step that retries (`session.retry.scheduled`) starts again under the same id.
+                    if steps.last() != Some(&step) {
+                        steps.push(step);
+                    }
                 }
                 Vec::new()
             }
@@ -368,10 +382,7 @@ impl EventParser {
                 let (tool, target) = call.as_ref().and_then(|c| self.tools.remove(c)).unwrap_or_else(|| ("tool".to_owned(), None));
                 vec![AgentEvent::ToolFinished { turn: None, call, tool, target, failed: kind == "session.tool.failed" }]
             }
-            "session.execution.succeeded" => {
-                let message = self.reply();
-                vec![AgentEvent::TurnEnded { turn: self.end_turn(), message }]
-            }
+            "session.execution.succeeded" => self.end_turns(|turn, message| AgentEvent::TurnEnded { turn, message }),
             "session.execution.failed" => {
                 let error = d
                     .pointer("/error/message")
@@ -379,9 +390,9 @@ impl EventParser {
                     .and_then(Value::as_str)
                     .unwrap_or("the turn failed")
                     .to_owned();
-                vec![AgentEvent::TurnFailed { turn: self.end_turn(), error }]
+                self.end_turns(|turn, _| AgentEvent::TurnFailed { turn, error: error.clone() })
             }
-            "session.execution.interrupted" => vec![AgentEvent::TurnInterrupted { turn: self.end_turn() }],
+            "session.execution.interrupted" => self.end_turns(|turn, _| AgentEvent::TurnInterrupted { turn }),
             "permission.asked" => vec![AgentEvent::ApprovalAsked {
                 turn: None,
                 ask: text(&d, "id"),
@@ -678,6 +689,54 @@ mod tests {
             p.push(&ev("permission.replied", json!({"sessionID":s,"requestID":"per_2","reply":"reject"}))),
             [AgentEvent::ApprovalAnswered { ask: Some("per_2".into()), allowed: false }]
         );
+    }
+
+    #[test]
+    fn a_prompt_sent_during_a_turn_ends_with_its_execution() {
+        // Measured on 2.1.1: the second prompt is delivered after the first one's step, and one
+        // execution answers both. Neither was interrupted.
+        let s = "ses_1";
+        let mut p = EventParser::new(s);
+        let mut all = Vec::new();
+        for e in [
+            ev("session.inbox.enqueued", json!({"inboxID":"msg_1","sessionID":s,"item":{"type":"user","payload":{"text":"Write a story."},"delivery":"steer"}})),
+            ev("session.execution.started", json!({"sessionID":s})),
+            ev("session.inbox.delivered", json!({"sessionID":s,"inboxID":"msg_1"})),
+            ev("session.step.started", json!({"sessionID":s,"assistantMessageID":"msg_a"})),
+            ev("session.inbox.enqueued", json!({"inboxID":"msg_2","sessionID":s,"item":{"type":"user","payload":{"text":"End it with FIN."},"delivery":"steer"}})),
+            // A retried step starts again under the same id.
+            ev("session.step.started", json!({"sessionID":s,"assistantMessageID":"msg_a"})),
+            ev("session.text.ended", json!({"sessionID":s,"assistantMessageID":"msg_a","ordinal":0,"text":"Once upon a time."})),
+            ev("session.step.ended", json!({"sessionID":s,"assistantMessageID":"msg_a","finish":"stop"})),
+            ev("session.inbox.delivered", json!({"sessionID":s,"inboxID":"msg_2"})),
+            ev("session.step.started", json!({"sessionID":s,"assistantMessageID":"msg_b"})),
+            ev("session.text.ended", json!({"sessionID":s,"assistantMessageID":"msg_b","ordinal":0,"text":"Once upon a time.\n\nFIN"})),
+            ev("session.execution.succeeded", json!({"sessionID":s})),
+        ] {
+            all.extend(p.push(&e));
+        }
+        assert_eq!(
+            all,
+            [
+                AgentEvent::TurnStarted { turn: Some("msg_1".into()), prompt: Some("Write a story.".into()) },
+                AgentEvent::TurnStarted { turn: Some("msg_2".into()), prompt: Some("End it with FIN.".into()) },
+                AgentEvent::TurnEnded { turn: Some("msg_1".into()), message: Some("Once upon a time.".into()) },
+                AgentEvent::TurnEnded { turn: Some("msg_2".into()), message: Some("Once upon a time.\n\nFIN".into()) },
+            ]
+        );
+        // A failed execution fails both; then nothing is left open.
+        p.push(&ev("session.inbox.delivered", json!({"sessionID":s,"inboxID":"msg_3"})));
+        p.push(&ev("session.inbox.delivered", json!({"sessionID":s,"inboxID":"msg_4"})));
+        let failed = p.push(&ev("session.execution.failed", json!({"sessionID":s,"error":{"message":"No cookie auth credentials found"}})));
+        assert_eq!(
+            failed,
+            [
+                AgentEvent::TurnFailed { turn: Some("msg_3".into()), error: "No cookie auth credentials found".into() },
+                AgentEvent::TurnFailed { turn: Some("msg_4".into()), error: "No cookie auth credentials found".into() },
+            ]
+        );
+        // An execution the stream saw no delivery for still ends, as a turn of its own.
+        assert_eq!(p.push(&ev("session.execution.succeeded", json!({"sessionID":s}))), [AgentEvent::TurnEnded { turn: None, message: None }]);
     }
 
     #[test]
