@@ -149,6 +149,9 @@ Free models only (`opencode/deepseek-v4.1-flash-free`); nothing was spent. Scree
   /api/session/{id}/permission` and `/form`; whether a session is running, with `GET /api/session/active`.
 - `opencode --server <url>` exits 1 at once with "Could not reach server" when nothing answers there.
 - Relative `XDG_*` paths break opencode (`EEXIST` on mkdir); give them absolute.
+- The TUI still drops what is written to it while it starts (L5 says so for 1.x). Text written about
+  the first 6 s after launch lands in the composer, but its Enter is lost (seen by the P14 session
+  driving the app over CDP).
 
 **Edits:**
 - LESSONS L5, after "that **overrides** configuration": add "(1.x; 2.x keeps the model on the session,
@@ -180,11 +183,24 @@ Free models only (`opencode/deepseek-v4.1-flash-free`); nothing was spent. Scree
 
 ## 10. Risks and known issues
 
-- **P14 conflicts with this and with `main`.** P14's Ollama commit (`10dbf4a`) was built on the 1.x
-  adapter: its `check_model` takes a `keyless` flag over 1.x's `connected` list, and its provider block
-  uses 1.x keys. Both conflict with `main` (D58) and with this branch's `check_model` signature. Note for
-  that merge: 2.1.1 already ships an `ollama` provider at `127.0.0.1:11434/v1`, and this branch's check
-  already treats a provider with no integration as keyless.
+- **P14 conflicts with this branch** (not with `main`: P14 has since rebased onto `45eb41f`). A merge
+  of the two conflicts in three files, all at `check_model`: P14 adds a `keyless` flag, this branch an
+  integrations argument. The resolution is `check_model(providers, models, integrations, model,
+  keyless)`, with `keyless` skipping both "switched off" and "no key". It was built and passed `npm run
+  check` twice, once here and once by the P14 session, which also resumed an Ollama session through this
+  branch's `set_model` with no note. The steps are in `_docs/HANDOFF-P14-OC2-MERGE.md` (main checkout,
+  untracked). The intended order is this branch first, then P14 rebases onto `main`.
+- **A different resolution exists as `oc2-rebased-onto-p14` (`e082dfe`). Don't merge it.** Another
+  session rebased this branch onto `feature/p14` and dropped `keyless`. `handoff/oc2` was put back to
+  `6db0057` (its backup, `oc2-before-rebase`, is the same commit). That ref only keeps the work; delete
+  it after the merge.
+- **P14's Ollama route fails its first turn** (found by that session, cause confirmed in P14's code, not
+  this branch's). opencode's model field must be `provider/model`, so the user types
+  `ollama/llama3.2:1b`. P14's Ollama check compares that with Ollama's bare names (a spurious "Ollama
+  doesn't list…" note), and its route prefixes `ollama/` again, so Ollama is asked for
+  `ollama/llama3.2:1b`: "model not found". Reported to P14 to fix on its branch.
+- This instance's data folder (`…chorus2.dev.oc2`) now holds P14's migration `0011` and an Ollama
+  provider row from that session. Delete the folder before running this branch's instance again.
 - **Port clash.** P14's worktree runs Vite on 1435, the port the plan gave `oc2` (P14's own is 1434). This
   instance used 1445. Nothing in the tracked `tauri*.conf.json` files was changed.
 - A launch that comes before the first detection (start-up relaunches) now runs `opencode --version`
