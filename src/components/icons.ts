@@ -33,7 +33,6 @@ export const PATHS = {
   key: 'M8 11a4 4 0 1 0 0 8a4 4 0 1 0 0-8M11 13.5l8.5-8.5M16 8.5l2.5 2.5M18 6.5l2 2',
   plug: 'M9 3v5M15 3v5M6.5 8h11v3a5.5 5.5 0 0 1-11 0zM12 16.5V21',
   agents: 'M8.5 5a3 3 0 1 0 0 6a3 3 0 1 0 0-6M15.5 5a3 3 0 1 0 0 6a3 3 0 1 0 0-6M3.5 19c.5-3 2.5-5 5-5s4.5 2 5 5M13.5 14.5c.6-.3 1.3-.5 2-.5c2.5 0 4.5 2 5 5',
-  upload: 'M12 16V4M7 9l5-5l5 5M4.5 16.5V20h15v-3.5',
 } as const
 
 export type IconName = keyof typeof PATHS

@@ -22,13 +22,6 @@ export const commands = {
 	/**  Deletes a project. Its sessions keep running, in no project. */
 	projectDelete: (id: number) => typedError<Project[], string>(__TAURI_INVOKE("project_delete", { id })),
 	sessionSetProject: (sessionId: number, projectId: number | null) => typedError<SessionSummary, string>(__TAURI_INVOKE("session_set_project", { sessionId, projectId })),
-	/**  Whether a Chorus 1 database is there to import from. */
-	chorus1ImportAvailable: () => __TAURI_INVOKE<boolean>("chorus1_import_available"),
-	/**
-	 *  Copies Chorus 1's projects (name, folder, colour, order, state) in, once each. Chorus 1's
-	 *  database is opened read only and never written (D33).
-	 */
-	chorus1Import: () => typedError<ImportReport, string>(__TAURI_INVOKE("chorus1_import")),
 	/**
 	 *  Every agent and what it declares. With `refresh`, looks for each CLI again first (a second or
 	 *  two); otherwise returns what the last detection found.
@@ -326,13 +319,6 @@ export type FleetProbe = {
 
 export type GroupBy = "status" | "project" | "none";
 
-export type ImportReport = {
-	added: number,
-	/**  Already here, from an earlier import or with the same folder. */
-	skipped: number,
-	projects: Project[],
-};
-
 /**
  *  What a session asks for. An empty field means the agent's declared default, or for the model,
  *  the CLI's own choice.
@@ -453,8 +439,6 @@ export type Project = {
 	folder: string | null,
 	colour: string,
 	state: ProjectState,
-	/**  `chorus1` when it came from the import. */
-	importedFrom: string | null,
 };
 
 export type ProjectInput = {

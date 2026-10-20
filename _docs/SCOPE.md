@@ -31,7 +31,7 @@ From the Harness mockups, confirmed as the UI direction (D9), plus one setup aid
 | Documents | Plans, specs and reports produced by sessions, tagged by project and linked to the session | P8 |
 | Notes | Project-tagged context for agents and future-you; untagged notes apply everywhere. Injected into agent instructions. | P8 |
 | Themes | Glacier (default) and Dusk (D25) | P4 |
-| Import projects from Chorus 1 | One-time, read-only import of each project's path, name, colour and order from Chorus 1's database. Never writes to it; keys are not imported (D5) | P4 |
+| Import projects from Chorus 1 | Dropped on 2026-10-20 (D50): Matthew brings projects over by hand | — |
 
 ## Kept features and where they live
 

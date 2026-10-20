@@ -26,6 +26,7 @@ const MIGRATION_FILES: &[(&str, &str)] = &[
     ("0005_history.sql", include_str!("../../migrations/0005_history.sql")),
     ("0006_transcripts.sql", include_str!("../../migrations/0006_transcripts.sql")),
     ("0007_projects.sql", include_str!("../../migrations/0007_projects.sql")),
+    ("0008_projects_no_import.sql", include_str!("../../migrations/0008_projects_no_import.sql")),
 ];
 
 pub struct Store {

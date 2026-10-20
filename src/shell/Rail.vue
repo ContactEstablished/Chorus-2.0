@@ -93,9 +93,6 @@ function go(name: ViewName): void {
       </li>
       <li v-if="!projects.active.length" class="empty label">
         <button class="quiet link" @click="emit('newProject')">Add a project</button>
-        <template v-if="projects.importAvailable">
-          or <button class="quiet link" @click="view.openSettings('projects')">bring them from Chorus 1</button>
-        </template>
       </li>
     </ul>
 

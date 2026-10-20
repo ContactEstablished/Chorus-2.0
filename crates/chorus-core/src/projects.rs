@@ -1,6 +1,6 @@
 //! Projects (PLAN P4): named folders that group sessions, with a colour and a place in the rail.
 //! A session belongs to the project whose folder holds its working folder, unless chosen
-//! otherwise. Chorus 1's projects can be imported once, read only (D33).
+//! otherwise.
 
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -79,11 +79,6 @@ pub fn project_for_folder<'a>(projects: impl IntoIterator<Item = (u32, &'a str)>
         .map(|(id, _)| id)
 }
 
-/// Chorus 1's `projects.status` as a 2.0 state (`active`, `hidden` or `archived`).
-pub fn chorus1_state(status: &str) -> ProjectState {
-    ProjectState::parse(status).unwrap_or(ProjectState::Active)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -108,12 +103,5 @@ mod tests {
         assert_eq!(project_for_folder(projects, r"C:\work"), Some(1));
         assert_eq!(project_for_folder(projects, r"C:\workshop"), None, "a longer sibling name isn't inside");
         assert_eq!(project_for_folder(projects, r"E:\x"), None);
-    }
-
-    #[test]
-    fn chorus_1_states_map_across() {
-        assert_eq!(chorus1_state("hidden"), ProjectState::Hidden);
-        assert_eq!(chorus1_state("archived"), ProjectState::Archived);
-        assert_eq!(chorus1_state("odd"), ProjectState::Active);
     }
 }

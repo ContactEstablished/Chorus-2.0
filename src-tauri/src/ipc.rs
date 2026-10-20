@@ -29,8 +29,6 @@ pub fn builder() -> Builder<tauri::Wry> {
             projects::projects_reorder,
             projects::project_delete,
             projects::session_set_project,
-            projects::chorus1_import_available,
-            projects::chorus1_import,
             agents::commands::agents_list,
             providers::commands::providers_list,
             providers::commands::provider_save,

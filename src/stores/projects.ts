@@ -1,12 +1,11 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
-import { commands, unwrap, type ImportReport, type Project, type ProjectInput, type ProjectState } from '../ipc'
+import { commands, unwrap, type Project, type ProjectInput, type ProjectState } from '../ipc'
 import { useNoticesStore } from './notices'
 
 /** Projects as the back end keeps them, in rail order. Every change returns the whole list. */
 export const useProjectsStore = defineStore('projects', () => {
   const list = ref<Project[]>([])
-  const importAvailable = ref(false)
 
   const byId = computed(() => new Map(list.value.map((p) => [p.id, p])))
   /** In the rail: active ones only. */
@@ -26,7 +25,6 @@ export const useProjectsStore = defineStore('projects', () => {
 
   async function load(): Promise<void> {
     await run("Couldn't load projects.", () => unwrap(commands.projectsList()))
-    importAvailable.value = await commands.chorus1ImportAvailable().catch(() => false)
   }
 
   const save = (id: number | null, input: ProjectInput) =>
@@ -36,17 +34,5 @@ export const useProjectsStore = defineStore('projects', () => {
   const reorder = (ids: number[]) => run("Couldn't reorder projects.", () => unwrap(commands.projectsReorder(ids)))
   const remove = (id: number) => run("Couldn't delete the project.", () => unwrap(commands.projectDelete(id)))
 
-  /** The one-time, read-only import of Chorus 1's projects (D33). */
-  async function importChorus1(): Promise<ImportReport | null> {
-    try {
-      const report = await unwrap(commands.chorus1Import())
-      list.value = report.projects
-      return report
-    } catch (e) {
-      useNoticesStore().error("Couldn't import Chorus 1's projects.", e)
-      return null
-    }
-  }
-
-  return { list, byId, active, usable, importAvailable, load, save, setState, reorder, remove, importChorus1 }
+  return { list, byId, active, usable, load, save, setState, reorder, remove }
 })

@@ -1,10 +1,9 @@
 <script setup lang="ts">
 /**
- * Projects (PLAN P4): add, rename, recolour, reorder by dragging, hide, archive and delete, and the
- * one-time, read-only import from Chorus 1 (D33). Hidden projects leave the rail; archived ones
- * also leave the Overview's chips and can't take new sessions.
+ * Projects (PLAN P4): add, rename, recolour, reorder by dragging, hide, archive and delete. Hidden
+ * projects leave the rail; archived ones also leave the Overview's chips and can't take new sessions.
  */
-import { computed, onMounted, ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import Icon from '../../components/Icon.vue'
 import { commands, type Project, type ProjectState } from '../../ipc'
 import { useProjectsStore } from '../../stores/projects'
@@ -85,19 +84,6 @@ async function nudge(p: Project, by: number): Promise<void> {
   await projects.reorder(ids)
 }
 
-// The Chorus 1 import.
-const importing = ref(false)
-const imported = computed(() => projects.list.some((p) => p.importedFrom === 'chorus1'))
-async function importChorus1(): Promise<void> {
-  importing.value = true
-  const report = await projects.importChorus1()
-  importing.value = false
-  if (report) {
-    const skipped = report.skipped ? ` ${report.skipped} already here, skipped.` : ''
-    notices.success(`Brought ${report.added} project${report.added === 1 ? '' : 's'} over from Chorus 1.${skipped}`)
-  }
-}
-
 const STATE_LABELS: Record<ProjectState, string> = { active: 'In the rail', hidden: 'Hidden', archived: 'Archived' }
 </script>
 
@@ -120,18 +106,6 @@ const STATE_LABELS: Record<ProjectState, string> = { active: 'In the rail', hidd
       <button class="primary" type="submit" :disabled="!newName.trim()">Add</button>
       <button type="button" class="quiet" @click="adding = false">Cancel</button>
     </form>
-
-    <div v-if="projects.importAvailable" class="import">
-      <Icon name="upload" :size="18" />
-      <div class="body">
-        <p class="title">Bring your projects over from Chorus 1</p>
-        <p class="hint">
-          Copies each project's name, folder, colour, order and state. Chorus 1's database is opened read only, and nothing
-          in Chorus 1 changes. Projects already here are skipped, so running it twice is harmless.
-        </p>
-      </div>
-      <button :disabled="importing" @click="importChorus1">{{ importing ? 'Importing…' : imported ? 'Import again' : 'Import' }}</button>
-    </div>
 
     <p v-if="!projects.list.length" class="empty">No projects yet.</p>
     <ul class="list">
@@ -174,7 +148,6 @@ const STATE_LABELS: Record<ProjectState, string> = { active: 'In the rail', hidd
           <p class="name">
             {{ p.name }}
             <span v-if="p.state !== 'active'" class="state">{{ STATE_LABELS[p.state] }}</span>
-            <span v-if="p.importedFrom === 'chorus1'" class="state">from Chorus 1</span>
           </p>
           <p class="folder">{{ p.folder ?? 'No folder: sessions join it only when you choose it' }}</p>
         </div>
@@ -245,30 +218,6 @@ h2 {
   min-width: 200px;
   font-family: var(--font-mono);
   font-size: 12.5px;
-}
-.import {
-  display: flex;
-  gap: 12px;
-  align-items: flex-start;
-  padding: 14px;
-  margin-bottom: 16px;
-  border-radius: 12px;
-  border: 1px solid var(--accent-line);
-  background: var(--accent-soft);
-}
-.import > .icon {
-  color: var(--accent);
-  margin-top: 2px;
-}
-.import .body {
-  flex: 1;
-}
-.import .title {
-  margin: 0 0 4px;
-  font-weight: 600;
-}
-.import .hint {
-  margin: 0;
 }
 .empty {
   color: var(--text-muted);

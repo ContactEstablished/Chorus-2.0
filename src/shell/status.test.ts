@@ -6,7 +6,7 @@ function s(id: number, attention: Attention, over: Partial<SessionSummary> = {})
   return { id, attention, projectId: null, latestAtSecs: 0, runStartedAtSecs: null, createdAtSecs: id, ...over } as SessionSummary
 }
 
-const project = (id: number, name: string): Project => ({ id, name, folder: null, colour: '#f472b6', state: 'active', importedFrom: null })
+const project = (id: number, name: string): Project => ({ id, name, folder: null, colour: '#f472b6', state: 'active' })
 
 describe('overview status', () => {
   const list = [s(1, 'done'), s(2, 'working'), s(3, 'failed'), s(4, 'approval'), s(5, 'running'), s(6, 'input')]

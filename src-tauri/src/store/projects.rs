@@ -1,4 +1,4 @@
-//! Projects (migration 0007). Names and colours arrive checked (`chorus_core::projects`).
+//! Projects (migrations 0007 and 0008). Names and colours arrive checked (`chorus_core::projects`).
 
 use chorus_core::projects::ProjectState;
 use rusqlite::{OptionalExtension, Row, params};
@@ -12,10 +12,9 @@ pub struct ProjectRow {
     pub folder: Option<String>,
     pub colour: String,
     pub state: ProjectState,
-    pub imported_from: Option<String>,
 }
 
-const COLUMNS: &str = "id, name, folder, colour, state, imported_from";
+const COLUMNS: &str = "id, name, folder, colour, state";
 
 fn project_from(r: &Row<'_>) -> rusqlite::Result<ProjectRow> {
     let state: String = r.get(4)?;
@@ -25,7 +24,6 @@ fn project_from(r: &Row<'_>) -> rusqlite::Result<ProjectRow> {
         folder: r.get(2)?,
         colour: r.get(3)?,
         state: ProjectState::parse(&state).unwrap_or(ProjectState::Active),
-        imported_from: r.get(5)?,
     })
 }
 
@@ -33,19 +31,15 @@ pub struct NewProject<'a> {
     pub name: &'a str,
     pub folder: Option<&'a str>,
     pub colour: &'a str,
-    pub state: ProjectState,
-    pub imported_from: Option<&'a str>,
-    pub imported_id: Option<&'a str>,
 }
 
-/// Adds a project at the end of the rail.
+/// Adds an active project at the end of the rail.
 pub fn insert(store: &Store, p: &NewProject<'_>) -> Result<u32, String> {
     store.with(|c| {
         let next: i64 = c.query_row("SELECT COALESCE(MAX(position), -1) + 1 FROM projects", [], |r| r.get(0))?;
         c.execute(
-            "INSERT INTO projects (name, folder, colour, position, state, imported_from, imported_id, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-            params![p.name, p.folder, p.colour, next, p.state.as_str(), p.imported_from, p.imported_id, now_ms()],
+            "INSERT INTO projects (name, folder, colour, position, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![p.name, p.folder, p.colour, next, now_ms()],
         )?;
         Ok(c.last_insert_rowid() as u32)
     })
@@ -92,15 +86,6 @@ pub fn list(store: &Store) -> Result<Vec<ProjectRow>, String> {
     })
 }
 
-/// Whether a project imported from `source` with that id is already here.
-pub fn imported_exists(store: &Store, source: &str, imported_id: &str) -> Result<bool, String> {
-    store.with(|c| {
-        c.query_row("SELECT 1 FROM projects WHERE imported_from = ?1 AND imported_id = ?2", params![source, imported_id], |_| Ok(()))
-            .optional()
-            .map(|o| o.is_some())
-    })
-}
-
 pub fn count(store: &Store) -> Result<usize, String> {
     store.with(|c| c.query_row("SELECT COUNT(*) FROM projects", [], |r| r.get::<_, i64>(0))).map(|n| n as usize)
 }
@@ -110,7 +95,7 @@ mod tests {
     use super::*;
 
     fn add(s: &Store, name: &str) -> u32 {
-        insert(s, &NewProject { name, folder: None, colour: "#f472b6", state: ProjectState::Active, imported_from: None, imported_id: None }).unwrap()
+        insert(s, &NewProject { name, folder: None, colour: "#f472b6" }).unwrap()
     }
 
     #[test]
@@ -127,6 +112,6 @@ mod tests {
         assert_eq!(get(&s, b).unwrap().unwrap().state, ProjectState::Archived);
         assert!(delete(&s, c).unwrap());
         assert_eq!(count(&s).unwrap(), 2);
-        assert!(!imported_exists(&s, "chorus1", "x").unwrap());
+        assert_eq!(get(&s, a).unwrap().unwrap().state, ProjectState::Active, "a new project starts in the rail");
     }
 }
