@@ -21,6 +21,8 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 /// The first start in a new data folder sets that folder up.
 const START_TIMEOUT: Duration = Duration::from_secs(30);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
+/// A new server lists no providers for a few seconds while it loads them (LESSONS L41).
+const PROVIDERS_WAIT: Duration = Duration::from_secs(10);
 /// How long a dropped event stream waits before reconnecting, and how many times it tries.
 pub const RECONNECT_WAIT: Duration = Duration::from_secs(1);
 pub const RECONNECT_TRIES: u32 = 30;
@@ -163,10 +165,17 @@ impl Api {
 
     /// What the server knows of `model`; `None` when its answers aren't the shape Chorus checked.
     pub fn check_model(&self, model: &str) -> Result<Option<ModelCheck>, String> {
-        let (status, providers) = self.get("/api/provider")?;
-        if status != 200 {
-            return Err(format!("opencode answered {status} when asked for its providers"));
-        }
+        let deadline = std::time::Instant::now() + PROVIDERS_WAIT;
+        let providers = loop {
+            let (status, body) = self.get("/api/provider")?;
+            if status != 200 {
+                return Err(format!("opencode answered {status} when asked for its providers"));
+            }
+            if opencode::listed(&body) > 0 || std::time::Instant::now() >= deadline {
+                break body;
+            }
+            std::thread::sleep(Duration::from_millis(250));
+        };
         let (status, models) = self.get("/api/model")?;
         if status != 200 {
             return Err(format!("opencode answered {status} when asked for its models"));

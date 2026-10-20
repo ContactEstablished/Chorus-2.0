@@ -80,6 +80,12 @@ fn data(body: &str) -> Option<Value> {
     Some(v.get_mut("data")?.take())
 }
 
+/// How many items an API list answer holds; 0 when it isn't one. A new server answers its provider
+/// list empty for a moment while it loads (LESSONS L41).
+pub fn listed(body: &str) -> usize {
+    data(body).and_then(|d| d.as_array().map(Vec::len)).unwrap_or(0)
+}
+
 /// `POST /api/session`'s body: the title, the folder, and the model with its effort variant. The
 /// variant only takes effect on the session (a `#variant` in the configuration's model doesn't).
 pub fn create_session_body(title: &str, cwd: &str, model: Option<&str>, variant: Option<&str>) -> Value {
@@ -465,6 +471,13 @@ mod tests {
     const MODELS: &str = r#"{"location":{"directory":"C:\\w"},"data":[
         {"id":"deepseek-v4.1-flash-free","providerID":"opencode","variants":[{"id":"max"},{"id":"low"},{"id":"high"}]},
         {"id":"big-pickle","providerID":"opencode","variants":[]}]}"#;
+
+    #[test]
+    fn a_list_answer_is_counted() {
+        assert_eq!(listed(PROVIDERS), 2);
+        assert_eq!(listed(r#"{"location":{},"data":[]}"#), 0);
+        assert_eq!(listed("[]"), 0);
+    }
 
     #[test]
     fn the_model_is_checked_against_the_server() {
