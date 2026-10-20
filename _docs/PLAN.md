@@ -129,6 +129,11 @@ liveness extender only.
 **Exit:** across 20 real turns per agent, ≥95% of turns are recorded with start and end, and every
 prompt sent survives a forced kill of the app mid-turn.
 
+*Closed 2026-10-19 on Matthew's call: 20 of 20 turns recorded with start and end for Claude Code, Codex
+and opencode, and each one's prompt survived a forced kill mid-turn. Grok has no event channel yet
+(OPEN-QUESTIONS Q18), so it isn't covered. Bundling the Codex hook relay in the installer is still to do
+(D46).*
+
 ### P4 — App shell and Overview
 The Harness shell, branded Chorus with the seven-bar mark (D24): rail (Overview, Sessions, Bots,
 Automations, Documents, Notes, Settings, plus projects), custom title bar, status bar, themes (Glacier
