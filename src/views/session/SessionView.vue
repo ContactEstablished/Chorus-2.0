@@ -53,7 +53,7 @@ const readiness = computed(() => {
   if (!x) return null
   const r = READINESS[x.attention]
   if (x.attention === 'failed' && x.live) return { title: 'Its last turn failed.', text: 'The agent is still running. Tell it how to recover in the terminal.' }
-  if (x.attention === 'running' && (x.agent === 'shell' || x.agent === 'grok')) {
+  if (x.attention === 'running' && !x.hasEventChannel) {
     return { title: 'Running.', text: `${AGENT_LABELS[x.agent]} has no event channel, so Chorus can't tell whether it's busy. Watch the terminal.` }
   }
   if (x.attention === 'working' && x.noSignal) return { title: 'No signal.', text: 'Working, but neither an event nor any output for a while. It may be stuck, or thinking.' }

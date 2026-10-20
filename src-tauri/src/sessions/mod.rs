@@ -106,6 +106,8 @@ pub struct SessionSummary {
     pub id: u32,
     pub name: String,
     pub agent: AgentKind,
+    /// The agent reports turns to Chorus; without it a running session is only "Running" (D47).
+    pub has_event_channel: bool,
     pub cwd: String,
     pub status: SessionStatus,
     /// A process is running now. `status` can be `running` without one for a moment while a
@@ -669,6 +671,7 @@ impl SessionManager {
             id: row.id,
             name: row.name.clone(),
             agent: row.agent,
+            has_event_channel: row.agent.spec().has_event_channel,
             cwd: row.cwd.clone(),
             status: row.state.into(),
             live: run.is_some(),

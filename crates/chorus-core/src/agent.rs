@@ -159,24 +159,33 @@ pub struct Spec {
     /// The CLI version these arguments were checked against.
     pub verified: Option<&'static str>,
     pub carrier: Carrier,
+    /// Whether the agent tells Chorus what it is doing: hooks, a server Chorus runs, or a transcript
+    /// file. Without one a session is only "Running" (D47), and the UI says so in those words. A new
+    /// agent is `false` until its channel is built, so nothing has to remember to change a list.
+    pub has_event_channel: bool,
     pub efforts: &'static [(Effort, &'static [&'static str])],
     pub default_effort: Option<Effort>,
     pub permissions: &'static [(Permission, &'static [&'static str])],
     pub default_permission: Option<Permission>,
     pub model: Option<ModelArg>,
     pub resume: Resume,
+    /// Where the agent sits among Pair's preferred reviewers: a lower number is preferred. `None`
+    /// keeps it out of the list (the shell). See [`crate::launch::partner_order`].
+    pub partner_rank: Option<u8>,
 }
 
 const SHELL: Spec = Spec {
     kind: AgentKind::Shell,
     verified: None,
     carrier: Carrier::Argv,
+    has_event_channel: false,
     efforts: &[],
     default_effort: None,
     permissions: &[],
     default_permission: None,
     model: None,
     resume: Resume::None,
+    partner_rank: None,
 };
 
 /// Claude Code 2.1.300: `--effort` (low, medium, high, xhigh, max) and `--permission-mode`. Chorus 1's
@@ -185,6 +194,7 @@ const CLAUDE: Spec = Spec {
     kind: AgentKind::Claude,
     verified: Some("2.1.300"),
     carrier: Carrier::Argv,
+    has_event_channel: true,
     efforts: &[
         (Effort::Fast, &["--effort", "medium"]),
         (Effort::Balanced, &["--effort", "high"]),
@@ -201,6 +211,7 @@ const CLAUDE: Spec = Spec {
     default_permission: Some(Permission::Auto),
     model: Some(ModelArg::Flag("--model")),
     resume: Resume::Assigned { create: "--session-id", resume: "--resume" },
+    partner_rank: Some(1),
 };
 
 /// Codex 0.162.1. Options travel as `-c` overrides: Chorus 1 measured that only `-c` survives the
@@ -210,6 +221,7 @@ const CODEX: Spec = Spec {
     kind: AgentKind::Codex,
     verified: Some("0.162.1"),
     carrier: Carrier::Argv,
+    has_event_channel: true,
     efforts: &[
         (Effort::Fast, &["-c", "model_reasoning_effort=\"low\""]),
         (Effort::Balanced, &["-c", "model_reasoning_effort=\"medium\""]),
@@ -227,6 +239,7 @@ const CODEX: Spec = Spec {
     default_permission: Some(Permission::FullAccess),
     model: Some(ModelArg::CodexConfig("model")),
     resume: Resume::Discovered { subcommand: "resume" },
+    partner_rank: Some(2),
 };
 
 /// opencode 2.1.1 runs as a server plus a TUI connected to it (LESSONS L41). An effort is a model
@@ -239,6 +252,7 @@ const OPENCODE: Spec = Spec {
     kind: AgentKind::Opencode,
     verified: Some("2.1.1"),
     carrier: Carrier::ServerConfig,
+    has_event_channel: true,
     efforts: &[
         (Effort::Fast, &["variant", "\"low\""]),
         (Effort::Balanced, &["variant", "\"medium\""]),
@@ -267,6 +281,7 @@ const OPENCODE: Spec = Spec {
     default_permission: None,
     model: Some(ModelArg::ServerConfig),
     resume: Resume::Server,
+    partner_rank: Some(3),
 };
 
 /// Grok 1.0.62: `--reasoning-effort` and `--permission-mode`. A permission mode is always passed,
@@ -276,6 +291,8 @@ const GROK: Spec = Spec {
     kind: AgentKind::Grok,
     verified: Some("1.0.62"),
     carrier: Carrier::Argv,
+    // No hooks, server or transcript: a Grok session is only "Running" (D47).
+    has_event_channel: false,
     efforts: &[
         (Effort::Fast, &["--reasoning-effort", "low"]),
         (Effort::Balanced, &["--reasoning-effort", "medium"]),
@@ -292,6 +309,8 @@ const GROK: Spec = Spec {
     default_permission: Some(Permission::Auto),
     model: Some(ModelArg::Flag("-m")),
     resume: Resume::Assigned { create: "--session-id", resume: "--resume" },
+    // Last, until it has an event channel: Pair prefers an agent Chorus can watch.
+    partner_rank: Some(6),
 };
 
 pub const MAX_MODEL_CHARS: usize = 200;
@@ -428,6 +447,18 @@ mod tests {
     const EFFORTS: [Effort; 4] = [Effort::Fast, Effort::Balanced, Effort::Deep, Effort::Max];
     const PERMISSIONS: [Permission; 5] =
         [Permission::Manual, Permission::Auto, Permission::AcceptEdits, Permission::Plan, Permission::FullAccess];
+
+    #[test]
+    fn only_the_shell_is_kept_out_of_pair_and_every_rank_is_used_once() {
+        assert_eq!(AgentKind::Shell.spec().partner_rank, None);
+        assert!(!AgentKind::Shell.spec().has_event_channel);
+        let mut ranks: Vec<u8> = AgentKind::ALL.iter().filter_map(|k| k.spec().partner_rank).collect();
+        let declared = ranks.len();
+        assert_eq!(declared, AgentKind::ALL.len() - 1, "every agent but the shell declares a rank");
+        ranks.sort_unstable();
+        ranks.dedup();
+        assert_eq!(ranks.len(), declared, "two agents can't share a rank");
+    }
 
     #[test]
     fn names_round_trip() {

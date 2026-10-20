@@ -40,6 +40,7 @@ function session(id: number, over: Partial<SessionSummary> = {}): SessionSummary
     id,
     name: `Shell ${id}`,
     agent: 'shell',
+    hasEventChannel: false,
     cwd: 'C:\\work',
     status: 'running',
     live: true,

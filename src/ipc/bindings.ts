@@ -161,6 +161,8 @@ export type AgentInfo = {
 	takesModel: boolean,
 	/**  Options go into the configuration of a server Chorus starts (opencode), not argv. */
 	optionsInConfig: boolean,
+	/**  The agent reports turns to Chorus. Without it, a running session is only "Running" (D47). */
+	hasEventChannel: boolean,
 	/**  An effort applies only with a model named beside it (opencode, LESSONS L5). */
 	effortNeedsModel: boolean,
 	resume: ResumeKind,
@@ -819,6 +821,8 @@ export type SessionSummary = {
 	id: number,
 	name: string,
 	agent: AgentKind,
+	/**  The agent reports turns to Chorus; without it a running session is only "Running" (D47). */
+	hasEventChannel: boolean,
 	cwd: string,
 	status: SessionStatus,
 	/**

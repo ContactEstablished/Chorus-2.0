@@ -65,13 +65,19 @@ impl Preset {
     }
 }
 
-/// Who reviews, in order of preference. A list rather than "any other agent", so the shell never
-/// becomes a reviewer by accident.
-pub const PARTNER_ORDER: [AgentKind; 4] = [AgentKind::Claude, AgentKind::Codex, AgentKind::Grok, AgentKind::Opencode];
+/// Who reviews, in order of preference: each agent's [`crate::agent::Spec::partner_rank`]. A list
+/// rather than "any other agent", so the shell (which declares no rank) never becomes a reviewer by
+/// accident, and adding an agent is one field rather than an edit here.
+pub fn partner_order() -> Vec<AgentKind> {
+    let mut ranked: Vec<(u8, AgentKind)> =
+        AgentKind::ALL.iter().filter_map(|k| k.spec().partner_rank.map(|r| (r, *k))).collect();
+    ranked.sort();
+    ranked.into_iter().map(|(_, k)| k).collect()
+}
 
-/// The first agent in [`PARTNER_ORDER`] that isn't the builder and was found on this machine.
+/// The first agent in [`partner_order`] that isn't the builder and was found on this machine.
 pub fn partner_for(builder: AgentKind, installed: &[AgentKind]) -> Option<AgentKind> {
-    PARTNER_ORDER.into_iter().find(|k| *k != builder && installed.contains(k))
+    partner_order().into_iter().find(|k| *k != builder && installed.contains(k))
 }
 
 /// One session a launch makes. The first slot is the session the user set up; the others are
@@ -141,6 +147,14 @@ mod tests {
     fn solo_is_one_session() {
         assert_eq!(plan(Preset::Solo, Codex, &[], 1).unwrap(), [Slot { agent: Codex, role: None }]);
         assert_eq!(plan(Preset::Solo, Shell, &[], 1).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn partners_follow_their_declared_rank() {
+        assert_eq!(partner_order().first(), Some(&Claude));
+        assert!(!partner_order().contains(&Shell), "the shell is never a reviewer");
+        assert_eq!(partner_for(Claude, &[Shell, Claude]), None);
+        assert_eq!(partner_for(Codex, &[Codex, Shell]), None);
     }
 
     #[test]
