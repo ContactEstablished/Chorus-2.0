@@ -20,15 +20,6 @@ and its TUI can attach with `--remote`, the same shape as opencode's serve + att
 app-server + `--remote` behind a capability flag; until then Friendly says "plan not available for
 Codex".* Blocks: P6.
 
-**Q20 — What should 2.0 be called in the Start menu, on the desktop and in Apps while Chorus 1 is
-installed?** (From spike S8.) With the product name "Chorus", 2.0's installer creates `Chorus.lnk` at the
-exact paths of Chorus 1's Start-menu and desktop shortcuts and would overwrite them; Apps would also list
-two "Chorus" entries. Options: (a) install 2.0 as **"Chorus 2"** (folder, shortcuts and Apps entry) while
-the window still says Chorus, and drop the "2" when Chorus 1 is retired (that rename needs a migration
-step in P14); (b) keep "Chorus" and write a custom installer template that puts the shortcut in a folder
-and skips the desktop one; (c) keep "Chorus" and uninstall Chorus 1 before installing 2.0. *Default: (a).*
-Until then, test installs use `/NS` (no shortcuts). Blocks: the first real install.
-
 ## Resolved 2026-10-18
 
 Matthew kept the name Chorus, accepted every recommended default, and moved voice to a separate
@@ -50,7 +41,7 @@ dictation app (D22, D23).
 | Q12 Notes as the memory replacement | Yes, plain notes, no graph | D17 |
 | Q13 Repo visibility | Public (confirmed on GitHub) | D32 |
 | Q14 Windows only? | Yes, for v1 | D21 |
-| Q15 Import projects from Chorus 1? | Yes: one-time and read-only, a small P4 task | D33 |
+| Q15 Import projects from Chorus 1? | Yes: one-time and read-only, a small P4 task (dropped on 2026-10-20: D50) | D33 |
 | Q16 Automation triggers | Schedules first; GitHub triggers later via `gh` polling | D34 |
 | Q17 Remote control alternatives | Noted; decided at P13 | D35 |
 
@@ -59,3 +50,9 @@ dictation app (D22, D23).
 | Question | Answer | Decision |
 |---|---|---|
 | Q7b What is the JEV AI key for? | TypeSafe's Jev API: typed decisions with calibrated probabilities, not text. Stored with a connection test in P2; uses decided per phase | D40 |
+
+## Resolved 2026-10-20
+
+| Question | Answer | Decision |
+|---|---|---|
+| Q20 What is 2.0 called once installed beside Chorus 1? | "Chorus 2": its own folder, shortcuts and Apps entry; the window still says Chorus. The "2" goes when Chorus 1 is retired | D51 |

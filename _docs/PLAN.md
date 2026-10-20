@@ -141,8 +141,8 @@ default, and Dusk, D25), text zoom, in-app notices.
 **Overview:** status-grouped session cards (or by project, or none), filters, project tags, headline
 counts. **Sessions:** searchable list, and the Wall layout of live Raw terminals (D26). **Session view:**
 header, status, Raw mode, the session facts panel, and the session strip (filmstrip) for fast switching.
-Projects: add, reorder, colours, hide, archive, delete, and a one-time read-only import from Chorus 1
-(D33). Command palette (Ctrl+K), project switcher (Ctrl+G), New session flow, prompt history panel with
+Projects: add, reorder, colours, hide, archive and delete (no import from Chorus 1: D50). Command
+palette (Ctrl+K), project switcher (Ctrl+G), New session flow, prompt history panel with
 copy. **3D startup splash.** Dictation compatibility (D23): the composer and the Raw terminal accept
 text inserted or pasted by another app, and never submit it on their own.
 
@@ -209,7 +209,8 @@ whether Claude Code's and Codex's built-in remote control modes complement it (D
 
 ### P14 — More agents and ship
 Gemini CLI, Aider, and Ollama (via opencode) adapters; installer polish, code signing decision, update
-channel; secret scanning in CI.
+channel; secret scanning in CI. Once Chorus 1 is retired, the installed name drops its "2" (D51), with a
+step that moves an existing "Chorus 2" install.
 
 ## 5. Ways of working
 
