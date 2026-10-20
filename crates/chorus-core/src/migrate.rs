@@ -19,6 +19,9 @@ pub enum MigrateError {
     NotContiguous { expected: u32, found: u32 },
     /// The database was written by a newer Chorus. Running against it could lose data.
     DatabaseIsNewer { database: u32, latest: u32 },
+    /// A migration asks the runner for something this build doesn't know. Refused rather than run
+    /// half-applied: a newer branch may have relied on it for a table rebuild.
+    UnknownDirective(String),
 }
 
 impl fmt::Display for MigrateError {
@@ -33,6 +36,9 @@ impl fmt::Display for MigrateError {
                 "the database is at schema {database}, but this build only knows up to {latest}; \
                  it was written by a newer Chorus"
             ),
+            Self::UnknownDirective(directive) => {
+                write!(f, "a migration asks for {directive:?}, which this build doesn't know")
+            }
         }
     }
 }
@@ -53,6 +59,36 @@ pub fn parse_file_name(file_name: &str) -> Result<(u32, &str), MigrateError> {
         return Err(bad());
     }
     Ok((version, name))
+}
+
+/// What a migration asks the runner to do around its transaction, from `-- chorus: <directive>`
+/// comment lines in its header (the comment lines before its first statement).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Directives {
+    /// Run this file with `PRAGMA foreign_keys=OFF`, then refuse to commit if
+    /// `PRAGMA foreign_key_check` finds anything. That is SQLite's documented 12-step table
+    /// rebuild, and the only way to change a CHECK: with foreign keys on, dropping the old table
+    /// would cascade-delete the rows other tables point at.
+    pub foreign_keys_off: bool,
+}
+
+/// Reads the header directives of one migration. A directive this build doesn't know is an error,
+/// not a warning: running the file without it could apply half a rebuild.
+pub fn directives(sql: &str) -> Result<Directives, MigrateError> {
+    let mut out = Directives::default();
+    for line in sql.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let Some(comment) = line.strip_prefix("--") else { break };
+        let Some(directive) = comment.trim().strip_prefix("chorus:") else { continue };
+        match directive.trim() {
+            "foreign_keys off" => out.foreign_keys_off = true,
+            other => return Err(MigrateError::UnknownDirective(other.to_owned())),
+        }
+    }
+    Ok(out)
 }
 
 /// Builds the ordered migration list from `(file name, sql)` pairs, checking the numbering.
@@ -104,6 +140,24 @@ mod tests {
         assert_eq!(
             from_files(&[("0001_a.sql", ""), ("0001_b.sql", "")]),
             Err(MigrateError::NotContiguous { expected: 2, found: 1 })
+        );
+    }
+
+    #[test]
+    fn reads_header_directives_and_refuses_unknown_ones() {
+        assert_eq!(directives("CREATE TABLE t (x);").unwrap(), Directives::default());
+        assert_eq!(directives("-- P14: a rebuild.\n\nCREATE TABLE t (x);").unwrap(), Directives::default());
+        let rebuild = directives("-- P14: a rebuild.\n-- chorus: foreign_keys off\n\nCREATE TABLE t (x);").unwrap();
+        assert!(rebuild.foreign_keys_off);
+        // Only the header counts: the same words after the first statement are not a directive.
+        assert_eq!(directives("CREATE TABLE t (x);\n-- chorus: foreign_keys off\n").unwrap(), Directives::default());
+        assert_eq!(
+            directives("-- chorus: legacy_alter_table on\nCREATE TABLE t (x);"),
+            Err(MigrateError::UnknownDirective("legacy_alter_table on".into()))
+        );
+        assert_eq!(
+            directives("-- chorus: foreign_keys off\n-- chorus: something else\n").unwrap_err().to_string(),
+            "a migration asks for \"something else\", which this build doesn't know"
         );
     }
 
