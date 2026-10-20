@@ -23,8 +23,10 @@ pub const PREFLIGHT_MARKER: &str = "Every candidate endpoint was removed during 
 /// The only steps a removal clause may name. A clause naming another is a step mismatch: if
 /// OpenRouter renamed the Guardrails step, the target would otherwise find no clause and read
 /// as "nothing removed", the one wrong answer a renamed step must never produce. Funnel steps
-/// without a clause (`Apply Status Sorting` removes nothing) stay allowed.
-pub const PREFLIGHT_KNOWN_CLAUSE_STEPS: [&str; 3] = ["Filter by Guardrails", "Filter by Data Policy", "Filter by Fallback"];
+/// without a clause (`Apply Status Sorting` removes nothing) stay allowed. 2.0 adds the two
+/// steps OpenRouter's answer named on 2026-10-20 (LESSONS L40), which aren't the account's.
+pub const PREFLIGHT_KNOWN_CLAUSE_STEPS: [&str; 5] =
+    ["Filter by Guardrails", "Filter by Data Policy", "Filter by Fallback", "Filter by Regional Surcharge", "Filter by Tier Endpoint Rows"];
 const INITIAL_STEP: &str = "Initial Endpoints";
 
 /// Which of the account's filters a preflight reads.
@@ -468,9 +470,31 @@ mod tests {
         assert_eq!(parse_clause("Filter by A removed  removed b"), Some(("Filter by A", " removed b")));
     }
 
+    /// The answer's shape on 2026-10-20: two new steps, neither Guardrails nor Data Policy, so
+    /// both checks read "nothing removed". Tags are illustrative; the steps and counts are real.
+    #[test]
+    fn the_2026_10_20_funnel_reads_as_nothing_removed() {
+        let body = json!({ "error": {
+            "message": format!("{PREFIX}Filter by Regional Surcharge removed fireworks/us; Filter by Tier Endpoint Rows removed deepinfra/fp8/flex, deepinfra/fp8/priority; Filter by Fallback removed a, b, c."),
+            "metadata": { "routing_funnel": [
+                { "step": "Initial Endpoints", "endpoint_count": 6 },
+                { "step": "Filter by Regional Surcharge", "endpoint_count": 5 },
+                { "step": "Filter by Tier Endpoint Rows", "endpoint_count": 3 },
+                { "step": "Apply Status Sorting", "endpoint_count": 3 },
+                { "step": "Filter by Fallback", "endpoint_count": 0 }
+            ] }
+        } });
+        let rows = BTreeMap::new();
+        assert_eq!(parse_preflight(404, &body, Guardrails, &rows), Ok(Vec::new()));
+        assert_eq!(parse_preflight(404, &body, DataPolicy, &rows), Ok(Vec::new()));
+    }
+
     #[test]
     fn m1_an_unknown_clause_step_reads_as_unknown_never_as_nothing_removed() {
-        assert_eq!(PREFLIGHT_KNOWN_CLAUSE_STEPS, ["Filter by Guardrails", "Filter by Data Policy", "Filter by Fallback"]);
+        assert_eq!(
+            PREFLIGHT_KNOWN_CLAUSE_STEPS,
+            ["Filter by Guardrails", "Filter by Data Policy", "Filter by Fallback", "Filter by Regional Surcharge", "Filter by Tier Endpoint Rows"]
+        );
         // The real guardrails body with its step renamed in the message and the funnel.
         let mut renamed = guardrails_fixture()["body"].clone();
         let message = renamed["error"]["message"].as_str().unwrap().replace("Filter by Guardrails removed", "Filter by Guardrail Policy removed");
