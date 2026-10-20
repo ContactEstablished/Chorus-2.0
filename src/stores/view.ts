@@ -26,6 +26,8 @@ export const useViewStore = defineStore('view', () => {
   /** Whether the New session dialog is open. */
   const newSessionOpen = ref(false)
   const sessionsLayout = ref<'list' | 'wall'>('list')
+  /** The command palette (Ctrl+K), or its projects-only form (Ctrl+G). */
+  const palette = ref<'all' | 'projects' | null>(null)
 
   const name = computed(() => place.value.name)
   const sessionId = computed(() => place.value.sessionId)
@@ -71,6 +73,7 @@ export const useViewStore = defineStore('view', () => {
     settingsSection,
     newSessionOpen,
     sessionsLayout,
+    palette,
     canGoBack: computed(() => back.value.length > 0),
     go,
     openSession,

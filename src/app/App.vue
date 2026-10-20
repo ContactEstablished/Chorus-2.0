@@ -23,6 +23,7 @@ import SessionView from '../views/session/SessionView.vue'
 
 const SettingsView = defineAsyncComponent(() => import('../views/SettingsView.vue'))
 const NewSessionDialog = defineAsyncComponent(() => import('../views/NewSessionDialog.vue'))
+const CommandPalette = defineAsyncComponent(() => import('../shell/CommandPalette.vue'))
 
 const app = useAppStore()
 const sessions = useSessionsStore()
@@ -33,13 +34,19 @@ const notices = useNoticesStore()
 
 function onKey(e: KeyboardEvent): void {
   if (!e.ctrlKey || e.altKey || e.metaKey) return
-  // Captured before the terminal sees it: these never reach an agent.
-  const zoom = e.key === '=' || e.key === '+' ? 1 : e.key === '-' ? -1 : e.key === '0' ? 0 : null
+  // Captured before the terminal sees them: these never reach an agent.
+  const key = e.key.toLowerCase()
+  const zoom = key === '=' || key === '+' ? 1 : key === '-' ? -1 : key === '0' ? 0 : null
   if (zoom !== null) {
-    e.preventDefault()
-    e.stopPropagation()
     void prefs.zoomBy(zoom)
+  } else if ((key === 'k' || key === 'g') && !e.shiftKey) {
+    const mode = key === 'k' ? 'all' : 'projects'
+    view.palette = view.palette === mode ? null : mode
+  } else {
+    return
   }
+  e.preventDefault()
+  e.stopPropagation()
 }
 
 onMounted(async () => {
@@ -67,7 +74,7 @@ watch(
   <div class="frame">
     <Rail @new-project="view.openSettings('projects')" @edit-project="view.openSettings('projects')" />
     <div class="main">
-      <TitleBar @palette="notices.info('The command palette arrives later in P4.')" />
+      <TitleBar @palette="view.palette = 'all'" />
       <main class="view scroll">
         <SettingsView v-if="view.name === 'settings'" />
         <SessionView v-else-if="view.name === 'session' && view.sessionId !== null" :session-id="view.sessionId" />
@@ -105,6 +112,7 @@ watch(
       <StatusBar />
     </div>
     <NewSessionDialog v-if="view.newSessionOpen" />
+    <CommandPalette v-if="view.palette" :key="view.palette" :mode="view.palette" />
     <Notices />
   </div>
 </template>
