@@ -4,6 +4,8 @@ dist/
 target/
 src-tauri/target/
 src-tauri/gen/
+# Built by scripts/build-hook.mjs for the installer
+src-tauri/binaries/
 .vite/
 coverage/
 *.tsbuildinfo

@@ -13,10 +13,6 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js'
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
 
-// three.js is untyped here (see three.d.ts): @types/three isn't on the approved list, so its objects
-// are `any`.
-type Three = any
-
 export interface SplashOptions {
   /** One colour per restoring session (its project colour). */
   streams: string[]
@@ -102,7 +98,7 @@ const easeOutCubic = (k: number) => 1 - Math.pow(1 - k, 3)
 const easeOutBack = (k: number) => 1 + 2.4 * Math.pow(k - 1, 3) + 1.4 * Math.pow(k - 1, 2)
 const clamp01 = (k: number) => Math.min(1, Math.max(0, k))
 
-function roundedBar(height: number): Three {
+function roundedBar(height: number): THREE.ExtrudeGeometry {
   const w = 6 * UNIT
   const h = height * UNIT
   const r = w / 2
@@ -118,7 +114,7 @@ function roundedBar(height: number): Three {
 }
 
 /** The page's backdrop (`radial-gradient(ellipse at 50% 45%, #10202c, bg 62%)`) as a texture. */
-function backdrop(bg: string): Three {
+function backdrop(bg: string): THREE.CanvasTexture {
   const c = document.createElement('canvas')
   c.width = 512
   c.height = 320
@@ -218,8 +214,8 @@ export function createSplash(canvas: HTMLCanvasElement, opts: SplashOptions, onD
 
   // ── The mark and lights, compiled off the critical path.
   const mark = new THREE.Group()
-  const markMaterials: Three[] = []
-  let accentMaterial: Three = null
+  const markMaterials: THREE.MeshStandardMaterial[] = []
+  let accentMaterial: THREE.MeshStandardMaterial | null = null
   HEIGHTS.forEach((h, i) => {
     const tone = TONES[i]!
     const m =
@@ -242,8 +238,8 @@ export function createSplash(canvas: HTMLCanvasElement, opts: SplashOptions, onD
   glow.position.set(0, 0, 4)
   scene.add(glow)
 
-  let composer: Three = null
-  let bloom: Three = null
+  let composer: EffectComposer | null = null
+  let bloom: UnrealBloomPass | null = null
   const t0 = performance.now()
   void renderer.compileAsync(scene, camera).then(() => {
     metrics.markReadyMs = Math.round(performance.now())

@@ -221,6 +221,7 @@ Anything not on this list needs Matthew's approval first (CLAUDE.md).
 | Front end | `vue` 3.5, `pinia`, `vite`, `typescript`, `vue-tsc`, `vitest` | Chosen stack |
 | Terminal | `@xterm/xterm` 6 + `addon-fit`, `addon-webgl`, `addon-search`, `addon-unicode11` | Same as Chorus 1; search covers scrollback search |
 | Splash | `three` | 3D splash (alternative: hand-written WebGL, if you'd rather not add it) |
+| Splash types | `@types/three` (dev only, approved 2026-10-19) | three.js ships no types (S7). Its own dependencies install with it but are never bundled |
 | Fonts | Bricolage Grotesque, Instrument Sans, JetBrains Mono, bundled locally (OFL) | The mockup's type; no network at runtime |
 
 ## 11. Port map (Chorus 1 → 2.0)

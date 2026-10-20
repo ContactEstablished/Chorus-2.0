@@ -225,6 +225,13 @@ and effort (P2, opencode 1.19.3).** Measured with the TUI attached in Chorus's P
   assistant message id avoids a second, promptless turn. A tool part's input is empty on its first
   event and filled in later.
 
+**L38 — Tauri's `externalBin` is checked by every cargo build, not only when bundling.** With
+`bundle.externalBin` in the configuration, `tauri-build` fails any `cargo build`, `test` or `clippy`
+with "resource path `binaries\<name>-<target triple>.exe` doesn't exist" until that file is there
+(Tauri 2.12.4). 2.0 therefore keeps it in `src-tauri/tauri.bundle.conf.json`, which only
+`npm run build` uses; its `beforeBuildCommand` builds `chorus-hook` and copies it in, and the installer
+ships it beside `chorus.exe` as `chorus-hook.exe`. Dev builds keep building it beside the debug exe.
+
 ## Money and models
 
 **L16 — Read-then-revoke under-reports OpenRouter spend.** Reading a capped key's usage right after the

@@ -11,6 +11,7 @@ use tauri_specta::{Builder, collect_commands, collect_events};
 use crate::{agents, app, fleet, lock, prefs, projects, providers, sessions, splash, vault};
 
 /// Where the generated bindings live, relative to this crate.
+#[cfg_attr(not(debug_assertions), allow(dead_code, reason = "debug builds and tests regenerate the bindings"))]
 pub const BINDINGS_FILE: &str = "../src/ipc/bindings.ts";
 
 pub fn builder() -> Builder<tauri::Wry> {
@@ -71,6 +72,7 @@ pub fn builder() -> Builder<tauri::Wry> {
         .events(collect_events![app::BackendPulse, sessions::SessionUpdated, fleet::FleetClick])
 }
 
+#[cfg_attr(not(debug_assertions), allow(dead_code, reason = "debug builds and tests regenerate the bindings"))]
 pub fn export_bindings(builder: &Builder<tauri::Wry>, path: &Path) -> Result<(), specta_typescript::Error> {
     builder.export(
         Typescript::default().header("// Source: src-tauri/src/ipc.rs. Regenerate with `npm run bindings`.\n"),

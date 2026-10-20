@@ -9,7 +9,7 @@
   },
   "scripts": {
     "dev": "tauri dev --config src-tauri/tauri.dev.conf.json",
-    "build": "tauri build",
+    "build": "tauri build --config src-tauri/tauri.bundle.conf.json",
     "web:dev": "vite",
     "web:build": "vue-tsc --noEmit && vite build",
     "typecheck": "vue-tsc --noEmit",
@@ -31,6 +31,7 @@
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.12.3",
+    "@types/three": "^0.186.0",
     "@vitejs/plugin-vue": "^6.0.10",
     "typescript": "~6.0.3",
     "vite": "^8.3.4",
