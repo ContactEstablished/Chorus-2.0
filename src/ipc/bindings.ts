@@ -27,6 +27,12 @@ export const commands = {
 	 *  two); otherwise returns what the last detection found.
 	 */
 	agentsList: (refresh: boolean) => typedError<AgentInfo[], string>(__TAURI_INVOKE("agents_list", { refresh })),
+	/**
+	 *  The arguments a launch of `agent` with `options` adds, from the same functions the launch uses:
+	 *  New session's summary shows them. For an agent with `optionsInConfig`, the server configuration
+	 *  entries instead. A provider adds its own on top.
+	 */
+	launchArgs: (agent: AgentKind, options: LaunchOptions) => typedError<string[], string>(__TAURI_INVOKE("launch_args", { agent, options })),
 	providersList: () => typedError<ProviderSummary[], string>(__TAURI_INVOKE("providers_list")),
 	providerSave: (input: ProviderSave) => typedError<ProviderSummary, string>(__TAURI_INVOKE("provider_save", { input })),
 	/**  Sessions on it keep their runs; their next launch says the provider is gone. */

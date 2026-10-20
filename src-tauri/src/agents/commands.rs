@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use chorus_core::agent::{AgentKind, Carrier, Effort, Permission, ResumeKind, Spec};
+use chorus_core::agent::{AgentKind, Carrier, Effort, LaunchOptions, Permission, ResumeKind, Spec};
 use serde::Serialize;
 use specta::Type;
 use tauri::State;
@@ -81,4 +81,14 @@ pub async fn agents_list(state: State<'_, Arc<SessionManager>>, refresh: bool) -
     })
     .await
     .map_err(|e| e.to_string())
+}
+
+/// The arguments a launch of `agent` with `options` adds, from the same functions the launch uses:
+/// New session's summary shows them. For an agent with `optionsInConfig`, the server configuration
+/// entries instead. A provider adds its own on top.
+#[tauri::command]
+#[specta::specta]
+pub fn launch_args(agent: AgentKind, options: LaunchOptions) -> Result<Vec<String>, String> {
+    let spec = agent.spec();
+    Ok(spec.option_args(&spec.resolve(&options)?))
 }

@@ -4,7 +4,6 @@
  * that couldn't start are reported.
  */
 import { nextTick, onMounted, onUnmounted, ref } from 'vue'
-import Icon from '../components/Icon.vue'
 import NewSessionForm from './newSession/NewSessionForm.vue'
 import type { LaunchRequest } from '../ipc'
 import { useSessionsStore } from '../stores/sessions'
@@ -63,8 +62,7 @@ async function launch(request: LaunchRequest): Promise<void> {
 
 <template>
   <div class="backdrop" @mousedown.self="!busy && close()">
-    <div ref="dialog" class="dialog scroll" role="dialog" aria-modal="true" aria-label="New session">
-      <button class="quiet x" aria-label="Close" title="Close (Esc)" :disabled="busy" @click="close"><Icon name="close" :size="16" /></button>
+    <div ref="dialog" class="dialog" role="dialog" aria-modal="true" aria-label="New session">
       <NewSessionForm :keys="keys.keys" :busy="busy" :initial-project="initialProject" @launch="launch" @cancel="close" />
     </div>
   </div>
@@ -88,9 +86,9 @@ async function launch(request: LaunchRequest): Promise<void> {
 }
 .dialog {
   position: relative;
-  width: min(680px, 100%);
+  width: min(880px, 100%);
   max-height: calc(100vh - 48px);
-  padding: 20px 24px 24px;
+  overflow: hidden;
   border-radius: 16px;
   background: var(--surface-raised);
   border: 1px solid var(--border-strong);
@@ -102,13 +100,5 @@ async function launch(request: LaunchRequest): Promise<void> {
     opacity: 0;
     transform: translateY(10px);
   }
-}
-.x {
-  position: absolute;
-  top: 16px;
-  right: 16px;
-  z-index: 1;
-  padding: 5px;
-  display: grid;
 }
 </style>

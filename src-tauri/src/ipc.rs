@@ -30,6 +30,7 @@ pub fn builder() -> Builder<tauri::Wry> {
             projects::project_delete,
             projects::session_set_project,
             agents::commands::agents_list,
+            agents::commands::launch_args,
             providers::commands::providers_list,
             providers::commands::provider_save,
             providers::commands::provider_delete,

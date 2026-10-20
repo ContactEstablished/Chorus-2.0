@@ -4,6 +4,8 @@ export interface Choice<T> {
   label: string
   title?: string
   disabled?: boolean
+  /** Shown beside the chosen option in a `radios` group (the argument it adds). */
+  hint?: string
 }
 
 /**
