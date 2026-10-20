@@ -157,7 +157,8 @@ impl Recorder {
                     }
                 };
                 if let Some(r) = row {
-                    let _ = history::tool_finished(store, r, *failed);
+                    let target = target.as_deref().map(|t| self.clean(t));
+                    let _ = history::tool_finished(store, r, *failed, target.as_deref());
                 }
             }
             AgentEvent::ApprovalAsked { turn, ask, tool, target } => {

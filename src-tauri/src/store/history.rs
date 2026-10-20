@@ -48,9 +48,15 @@ pub fn tool_started(store: &Store, session_id: u32, turn_id: Option<i64>, call_r
     })
 }
 
-pub fn tool_finished(store: &Store, tool_call_id: i64, failed: bool) -> Result<(), String> {
+/// A call ends; its target is filled in if the start didn't have it (opencode sends the input
+/// after the first event).
+pub fn tool_finished(store: &Store, tool_call_id: i64, failed: bool, target: Option<&str>) -> Result<(), String> {
     store.with(|c| {
-        c.execute("UPDATE tool_calls SET ended_at = ?2, failed = ?3 WHERE id = ?1", params![tool_call_id, now_ms(), failed]).map(|_| ())
+        c.execute(
+            "UPDATE tool_calls SET ended_at = ?2, failed = ?3, target = COALESCE(target, ?4) WHERE id = ?1",
+            params![tool_call_id, now_ms(), failed, target],
+        )
+        .map(|_| ())
     })
 }
 
@@ -237,7 +243,7 @@ mod tests {
         let call = tool_started(&s, id, Some(turn), Some("t1"), "Write", Some("a.txt")).unwrap();
         let ask = open_ask(&s, id, Some(turn), "approval", None, "Write a.txt").unwrap();
         answer_ask(&s, ask, "allowed").unwrap();
-        tool_finished(&s, call, false).unwrap();
+        tool_finished(&s, call, false, None).unwrap();
         close_turn(&s, turn, "done", Some("Done.")).unwrap();
         close_turn(&s, turn, "lost", None).unwrap();
 

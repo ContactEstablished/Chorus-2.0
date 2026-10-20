@@ -191,6 +191,8 @@ pub struct EventParser {
     /// Message id → its text parts, by part id, in arrival order.
     texts: std::collections::HashMap<String, Vec<(String, String)>>,
     tools_started: std::collections::HashSet<String>,
+    /// Assistant messages already taken as a turn's end: opencode sends a finished one twice.
+    replies_done: std::collections::HashSet<String>,
 }
 
 impl EventParser {
@@ -233,8 +235,12 @@ impl EventParser {
                     }
                     Some("assistant") => {
                         let parent = text(&info, "parentID");
+                        if self.replies_done.contains(&id) {
+                            return Vec::new();
+                        }
                         if let Some(error) = info.get("error").filter(|e| !e.is_null()) {
                             let name = text(error, "name").unwrap_or_default();
+                            self.replies_done.insert(id.clone());
                             if name.contains("Abort") {
                                 return vec![AgentEvent::TurnInterrupted { turn: parent }];
                             }
@@ -243,6 +249,7 @@ impl EventParser {
                         }
                         let completed = info.pointer("/time/completed").is_some_and(|t| !t.is_null());
                         if completed && info.get("finish").and_then(Value::as_str) == Some("stop") {
+                            self.replies_done.insert(id.clone());
                             return vec![AgentEvent::TurnEnded { turn: parent, message: self.text_of(&id) }];
                         }
                         Vec::new()
@@ -490,6 +497,8 @@ mod tests {
             ev("question.replied", json!({"sessionID":s,"requestID":"que_1","answers":[["hi"]]})),
             ev("message.updated", json!({"sessionID":s,"info":{"id":"msg_a","role":"assistant","parentID":"msg_u","time":{"completed":5},"finish":"tool-calls"}})),
             ev("message.part.updated", json!({"sessionID":s,"part":{"type":"text","text":"Created hello.txt.","messageID":"msg_b","id":"prt_9"}})),
+            ev("message.updated", json!({"sessionID":s,"info":{"id":"msg_b","role":"assistant","parentID":"msg_u","time":{"completed":9},"finish":"stop"}})),
+            // opencode sends a finished reply twice; the turn ends once.
             ev("message.updated", json!({"sessionID":s,"info":{"id":"msg_b","role":"assistant","parentID":"msg_u","time":{"completed":9},"finish":"stop"}})),
             ev("session.idle", json!({"sessionID":"other"})),
         ] {
