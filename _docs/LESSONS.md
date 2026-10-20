@@ -206,6 +206,25 @@ and effort (P2, opencode 1.19.3).** Measured with the TUI attached in Chorus's P
 - `tauri dev` kills the app on a rebuild, without a clean quit, so a run's key isn't revoked then. The
   start-up sweep revoked it.
 
+**L37 — Agent events, measured in the real app (P3, 2026-10-19).**
+- **Codex 0.162.1 runs command hooks under PowerShell here** (the relay saw `PSModulePath`), not
+  `cmd` as its source's default suggests. A quoted path followed by an argument is then a parse error,
+  so every hook "exited with code 1" and never started the relay. Give the relay unquoted (its 8.3
+  short path if it has spaces).
+- **Codex unescapes a `-c` value's backslashes twice:** `C:\\Projects\\x.exe` inside the TOML string
+  reached the shell as `C:Projectsx.exe`. Use forward slashes in paths passed through `-c`.
+- Codex's `/hooks` screen lists hooks from `-c` as "Session flags" needing review even with
+  `--dangerously-bypass-hook-trust`; they still run. It shows each hook's command as parsed, which is
+  the quickest check. Its `Interrupt` hook fires on Esc and carries the `turn_id`, so an interrupted
+  turn closes at once.
+- **Claude Code's `prompt_id` is the same on `UserPromptSubmit` and its `Stop`**, and Codex's
+  `turn_id` likewise, so turns pair exactly. Claude Code sends nothing when a turn is interrupted. Its
+  transcript gets a user message `[Request interrupted by user]` at once (watched every 2 s), and
+  `Notification: idle_prompt` comes after about a minute.
+- **opencode sends a finished assistant message twice** on its event stream. Ending a turn once per
+  assistant message id avoids a second, promptless turn. A tool part's input is empty on its first
+  event and filled in later.
+
 ## Money and models
 
 **L16 — Read-then-revoke under-reports OpenRouter spend.** Reading a capped key's usage right after the
