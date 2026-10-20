@@ -38,6 +38,8 @@ pub struct Recorder {
     tools: HashMap<String, i64>,
     unnamed_tools: Vec<(String, i64)>,
     asks: Vec<OpenAsk>,
+    /// The agent's full transcript, from the first hook payload that names it.
+    transcript: Option<String>,
 }
 
 impl Recorder {
@@ -55,7 +57,16 @@ impl Recorder {
             tools: HashMap::new(),
             unnamed_tools: Vec::new(),
             asks: Vec::new(),
+            transcript: None,
         }
+    }
+
+    pub fn transcript_path(&self) -> Option<String> {
+        self.transcript.clone()
+    }
+
+    pub fn has_open_turn(&self) -> bool {
+        self.tracker.open_turns() > 0
     }
 
     pub fn activity(&self) -> Activity {
@@ -77,6 +88,12 @@ impl Recorder {
     /// Records one payload from an agent and the events it carried. The writes are done before
     /// this returns, so a prompt is durable before the agent acts on it.
     pub fn record(&mut self, store: &Store, source: &str, raw: &Value, events: &[AgentEvent], now_ms: i64) {
+        if self.transcript.is_none()
+            && let Some(path) = raw.get("transcript_path").and_then(Value::as_str).filter(|p| p.len() <= 1024 && std::path::Path::new(p).is_absolute())
+        {
+            self.transcript = Some(path.to_owned());
+            let _ = history::set_run_transcript(store, self.run_id, path);
+        }
         let body = self.clean(&compact_for_log(raw));
         let _ = history::record_event(store, self.session_id, Some(self.run_id), source, hook_event_name(raw).as_deref(), &body);
         for event in events {

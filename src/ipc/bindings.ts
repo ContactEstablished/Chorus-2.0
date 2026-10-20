@@ -445,6 +445,8 @@ export type SessionHistory = {
 	ended: number,
 	/**  Turns whose prompt was recorded. */
 	withPrompt: number,
+	/**  Where the agent keeps the full transcript (Claude Code's JSONL, Codex's rollout). */
+	transcriptPath: string | null,
 };
 
 export type SessionStatus = "running" | "exited" | "closed";

@@ -10,6 +10,22 @@ pub const TRUST_NOTE_BEFORE: &str =
 pub const TRUST_NOTE_AFTER: &str =
     "Claude Code exited at its question about trusting this folder (its default answer is No). Restart and choose Yes.";
 
+/// Whether a line of Claude Code's transcript records the user interrupting a turn. Claude Code
+/// sends no hook for that (LESSONS L24); its transcript gets a user message
+/// `[Request interrupted by user]` (2.1.300).
+pub fn transcript_line_interrupts(line: &str) -> bool {
+    let Ok(v) = serde_json::from_str::<Value>(line) else { return false };
+    if v.get("type").and_then(Value::as_str) != Some("user") {
+        return false;
+    }
+    let starts = |t: &str| t.starts_with("[Request interrupted by user");
+    match v.pointer("/message/content") {
+        Some(Value::String(s)) => starts(s),
+        Some(Value::Array(parts)) => parts.iter().any(|p| p.get("text").and_then(Value::as_str).is_some_and(starts)),
+        _ => false,
+    }
+}
+
 fn norm(path: &str) -> String {
     path.replace('\\', "/").trim_end_matches('/').to_lowercase()
 }
@@ -53,5 +69,16 @@ mod tests {
         assert_eq!(folder_trusted(CONFIG, r"D:\other"), Some(false));
         assert_eq!(folder_trusted("{}", r"C:\x"), Some(false));
         assert_eq!(folder_trusted("not json", r"C:\x"), None);
+    }
+
+    #[test]
+    fn an_interrupt_is_spotted_in_the_transcript() {
+        assert!(transcript_line_interrupts(
+            r#"{"type":"user","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user]"}]}}"#
+        ));
+        assert!(transcript_line_interrupts(r#"{"type":"user","message":{"content":"[Request interrupted by user for tool use]"}}"#));
+        assert!(!transcript_line_interrupts(r#"{"type":"user","message":{"content":"please [Request interrupted by user]"}}"#));
+        assert!(!transcript_line_interrupts(r#"{"type":"assistant","message":{"content":"[Request interrupted by user]"}}"#));
+        assert!(!transcript_line_interrupts("{partial"));
     }
 }

@@ -234,6 +234,10 @@ const MAX_CWD_BYTES: usize = 1024;
 /// How long Close and Restart wait for a run's output to drain before moving on.
 const FINISH_TIMEOUT: Duration = Duration::from_secs(5);
 const BOUNDARY_RESTARTED: &str = "── Restarted ──";
+/// How often an open Claude Code turn's transcript is checked for an interrupt.
+const TRANSCRIPT_POLL: Duration = Duration::from_secs(2);
+/// The most of a transcript read in one check.
+const MAX_TRANSCRIPT_READ: u64 = 4 * 1024 * 1024;
 /// The most turns one history request returns.
 const MAX_HISTORY_TURNS: u32 = 500;
 /// How often "no signal" is checked.
@@ -257,6 +261,19 @@ fn check_size(cols: u16, rows: u16) -> Result<PtySize, String> {
 /// A fresh secret for a run (opencode's server password, a hook token): 24 random bytes as hex.
 fn random_token() -> String {
     vault::random_bytes(24).iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// The complete lines between `from` and `to` in a file, and how many bytes they took (a line
+/// still being written is left for next time).
+fn read_new_lines(path: &str, from: u64, to: u64) -> Option<(Vec<String>, u64)> {
+    use std::io::{Seek, SeekFrom};
+    let mut f = std::fs::File::open(path).ok()?;
+    f.seek(SeekFrom::Start(from)).ok()?;
+    let mut buf = Vec::new();
+    f.take((to - from).min(MAX_TRANSCRIPT_READ)).read_to_end(&mut buf).ok()?;
+    let end = buf.iter().rposition(|b| *b == b'\n').map_or(0, |i| i + 1);
+    let lines = String::from_utf8_lossy(&buf[..end]).lines().map(str::to_owned).collect();
+    Some((lines, end as u64))
 }
 
 fn version_note(kind: AgentKind, d: &agents::detect::Detection) -> Option<String> {
@@ -502,7 +519,13 @@ impl SessionManager {
     pub fn history(&self, id: u32, limit: u32) -> Result<history::SessionHistory, String> {
         self.row(id)?;
         let (total, ended, with_prompt) = history::turn_counts(&self.store, id)?;
-        Ok(history::SessionHistory { turns: history::recent_turns(&self.store, id, limit.clamp(1, MAX_HISTORY_TURNS))?, total, ended, with_prompt })
+        Ok(history::SessionHistory {
+            turns: history::recent_turns(&self.store, id, limit.clamp(1, MAX_HISTORY_TURNS))?,
+            total,
+            ended,
+            with_prompt,
+            transcript_path: history::session_transcript(&self.store, id)?,
+        })
     }
 
     /// Every few seconds: tells the front end when a session starts or stops showing "no signal".
@@ -974,6 +997,9 @@ impl SessionManager {
         if let (Some(server), Some(conversation)) = (&run.server, conversation) {
             self.watch_opencode(row.id, &run, server.api.clone(), conversation);
         }
+        if row.agent == AgentKind::Claude && run.hook_token.is_some() {
+            self.watch_claude_transcript(row.id, &run);
+        }
         self.spawn_threads(live.clone(), run, child, reader, StreamScrubber::new(redact, builtin_patterns()));
         self.notify_id(row.id);
         Ok(())
@@ -1040,6 +1066,47 @@ impl SessionManager {
                 tries += 1;
                 if run.wait_finished(agents::opencode::RECONNECT_WAIT) {
                     break;
+                }
+            }
+        });
+    }
+
+    /// Claude Code sends no hook when the user interrupts a turn (LESSONS L24), but its transcript
+    /// records it. While a turn is open, new transcript lines are checked every couple of seconds;
+    /// while none is, the reader just keeps up with the file's end.
+    fn watch_claude_transcript(self: &Arc<Self>, session_id: u32, run: &Arc<Run>) {
+        let name = format!("claude-transcript-{}", run.id);
+        let (m, run) = (self.clone(), run.clone());
+        let _ = std::thread::Builder::new().name(name).spawn(move || {
+            let mut seen: Option<(String, u64)> = None;
+            while !run.wait_finished(TRANSCRIPT_POLL) {
+                let (path, open) = {
+                    let r = run.recorder.lock().expect("recorder lock");
+                    (r.transcript_path(), r.has_open_turn())
+                };
+                let Some(path) = path else { continue };
+                let len = std::fs::metadata(&path).map(|md| md.len()).unwrap_or(0);
+                let from = match &seen {
+                    Some((p, at)) if *p == path && *at <= len => *at,
+                    _ => len,
+                };
+                if !open || len == from {
+                    seen = Some((path, len));
+                    continue;
+                }
+                let Some((lines, read)) = read_new_lines(&path, from, len) else { continue };
+                seen = Some((path, from + read));
+                if lines.iter().any(|l| chorus_core::claude::transcript_line_interrupts(l)) {
+                    let event = chorus_core::events::AgentEvent::TurnInterrupted { turn: None };
+                    let changed = {
+                        let mut r = run.recorder.lock().expect("recorder lock");
+                        let before = r.activity();
+                        r.record(&m.store, "claude-transcript", &serde_json::json!({ "interrupted": true }), &[event], crate::store::now_ms());
+                        before != r.activity()
+                    };
+                    if changed {
+                        m.notify_id(session_id);
+                    }
                 }
             }
         });

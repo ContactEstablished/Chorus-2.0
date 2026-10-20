@@ -47,6 +47,7 @@ const END_LABELS: Record<string, string> = {
       {{ history.total }} turn{{ history.total === 1 ? '' : 's' }} recorded · {{ history.ended }} with an end ·
       {{ history.withPrompt }} with the prompt
     </p>
+    <p v-if="history?.transcriptPath" class="counts">Full transcript: <code>{{ history.transcriptPath }}</code></p>
     <p v-if="history && !history.turns.length" class="hint">
       No turns yet. Turns are recorded from the agent's own events: Claude Code and Codex through hooks, opencode through
       its server.

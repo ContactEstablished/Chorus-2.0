@@ -87,6 +87,23 @@ pub fn record_event(store: &Store, session_id: u32, run_id: Option<u32>, source:
     })
 }
 
+/// Where a run's full transcript is, as its agent reported it.
+pub fn set_run_transcript(store: &Store, run_id: u32, path: &str) -> Result<(), String> {
+    store.with(|c| c.execute("UPDATE runs SET transcript_path = ?2 WHERE id = ?1", params![run_id, path]).map(|_| ()))
+}
+
+/// The newest transcript path a session's runs recorded.
+pub fn session_transcript(store: &Store, session_id: u32) -> Result<Option<String>, String> {
+    store.with(|c| {
+        c.query_row(
+            "SELECT transcript_path FROM runs WHERE session_id = ?1 AND transcript_path IS NOT NULL ORDER BY id DESC LIMIT 1",
+            [session_id],
+            |r| r.get(0),
+        )
+        .optional()
+    })
+}
+
 /// Drops raw events older than `older_than_ms`; the history rows stay.
 pub fn prune_events(store: &Store, older_than_ms: i64) -> Result<usize, String> {
     store.with(|c| c.execute("DELETE FROM agent_events WHERE at < ?1", [now_ms() - older_than_ms]))
@@ -187,6 +204,8 @@ pub struct SessionHistory {
     pub ended: u32,
     /// Turns whose prompt was recorded.
     pub with_prompt: u32,
+    /// Where the agent keeps the full transcript (Claude Code's JSONL, Codex's rollout).
+    pub transcript_path: Option<String>,
 }
 
 /// How complete a session's turn records are: (turns, with a start and an end, with a prompt).
