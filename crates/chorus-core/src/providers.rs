@@ -180,6 +180,38 @@ pub fn route(
     }
 }
 
+/// An opencode route on OpenRouter with a routing tier (D57). A ranked tier's `provider` object
+/// becomes the model's `options.provider`, pinning its endpoints. Nitro sends `<model>:nitro`
+/// instead: the model's entry moves to that id and declares its effort variants, because opencode
+/// drops a `:nitro` id's effort without them (Chorus 1 K6); `catalog_efforts` are the catalog's,
+/// `launch_effort` the variant the launch asks for.
+pub fn apply_routing(
+    route: &mut Route,
+    model: &str,
+    selection: &crate::routing::launch::RoutingLaunchSelection,
+    catalog_efforts: Option<&[String]>,
+    launch_effort: Option<&str>,
+) {
+    use crate::routing::payload::{routing_variant_efforts, variants_value};
+    let Some(models) = route.opencode_provider.as_mut().and_then(|p| p.pointer_mut("/openrouter/models")).and_then(Value::as_object_mut) else {
+        return;
+    };
+    let mut entry = match models.remove(model) {
+        Some(Value::Object(entry)) => entry,
+        _ => serde_json::Map::new(),
+    };
+    if let Some(provider) = selection.provider_value() {
+        entry.insert("options".into(), json!({ "provider": provider }));
+    }
+    if selection.sent_model_id != model {
+        if let Some(variants) = variants_value(&routing_variant_efforts(catalog_efforts, launch_effort)) {
+            entry.insert("variants".into(), variants);
+        }
+        route.model = format!("openrouter/{}", selection.sent_model_id);
+    }
+    models.insert(selection.sent_model_id.clone(), Value::Object(entry));
+}
+
 /// `POST /analytics/query` with the management key: what a key has cost between two times.
 pub fn key_cost_query(hash: &str, from_ms: i64, to_ms: i64) -> String {
     json!({
@@ -494,6 +526,51 @@ mod tests {
         // Unknown to the catalog: still declared, so opencode runs it.
         let bare = route(AgentKind::Opencode, ProviderKind::Openrouter, "OpenRouter", "", "x/y", None).unwrap();
         assert_eq!(bare.opencode_provider.unwrap(), json!({ "openrouter": { "models": { "x/y": {} } } }));
+    }
+
+    #[test]
+    fn a_routing_tier_pins_endpoints_and_nitro_renames_the_model() {
+        use crate::routing::launch::{RoutingLaunchSelection, RoutingLaunchTier};
+        use crate::routing::types::{OpenRouterProviderPrefs, ProviderDataCollection};
+        let models = parse_catalog(CATALOG).unwrap();
+        let id = models[0].id.clone();
+        let pinned = OpenRouterProviderPrefs {
+            order: Some(vec!["coreweave/fp8".into()]),
+            allow_fallbacks: Some(false),
+            ..OpenRouterProviderPrefs::default()
+        };
+        let ranked = RoutingLaunchSelection {
+            tier: RoutingLaunchTier::Balanced,
+            model: id.clone(),
+            sent_model_id: id.clone(),
+            provider: Some(pinned),
+            endpoints: vec!["coreweave/fp8".into()],
+            computed_at_ms: 1,
+            snapshot_fetched_at_ms: Some(1),
+        };
+        let mut r = route(AgentKind::Opencode, ProviderKind::Openrouter, "OpenRouter", "", &id, Some(&models[0])).unwrap();
+        apply_routing(&mut r, &id, &ranked, Some(&models[0].efforts), None);
+        assert_eq!(r.model, format!("openrouter/{id}"));
+        let entry = &r.opencode_provider.as_ref().unwrap()["openrouter"]["models"][id.as_str()];
+        assert_eq!(entry["options"]["provider"]["order"], json!(["coreweave/fp8"]));
+        assert_eq!(entry["limit"]["context"], json!(1_000_000), "the catalog's entry stays");
+
+        let nitro = RoutingLaunchSelection {
+            tier: RoutingLaunchTier::Nitro,
+            sent_model_id: "x/y:nitro".into(),
+            model: "x/y".into(),
+            provider: Some(OpenRouterProviderPrefs { data_collection: Some(ProviderDataCollection::Deny), ..OpenRouterProviderPrefs::default() }),
+            endpoints: Vec::new(),
+            snapshot_fetched_at_ms: None,
+            computed_at_ms: 1,
+        };
+        let mut r = route(AgentKind::Opencode, ProviderKind::Openrouter, "OpenRouter", "", "x/y", None).unwrap();
+        apply_routing(&mut r, "x/y", &nitro, None, Some("high"));
+        assert_eq!(r.model, "openrouter/x/y:nitro");
+        let models = &r.opencode_provider.unwrap()["openrouter"]["models"];
+        assert!(models.get("x/y").is_none());
+        assert_eq!(models["x/y:nitro"]["variants"]["high"], json!({ "reasoning": { "effort": "high" } }));
+        assert_eq!(models["x/y:nitro"]["options"]["provider"], json!({ "data_collection": "deny" }));
     }
 
     #[test]

@@ -26,6 +26,7 @@ pub mod opencode;
 pub mod prefs;
 pub mod projects;
 pub mod providers;
+pub mod routing;
 pub mod scrollback;
 pub mod scrub;
 pub mod session;

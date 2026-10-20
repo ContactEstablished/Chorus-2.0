@@ -18,7 +18,7 @@ specta = { version = "=2.0.0-rc.25", features = ["derive"] }
 specta-typescript = "=0.0.12"
 tauri-specta = { version = "=2.0.0-rc.25", features = ["derive", "typescript"] }
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde_json = { version = "1", features = ["float_roundtrip"] }
 portable-pty = "0.9"
 # SQLite with the library compiled in (ARCHITECTURE §7, §10).
 rusqlite = { version = "0.40", features = ["bundled"] }
