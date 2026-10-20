@@ -113,6 +113,11 @@ pub struct Route {
     pub opencode_provider: Option<Value>,
 }
 
+/// opencode 2.1.1's model `variants`: one per effort, each sending OpenRouter its reasoning effort.
+fn opencode_variants<S: AsRef<str>>(efforts: &[S]) -> Value {
+    Value::Array(efforts.iter().map(|e| json!({ "id": e.as_ref(), "body": { "reasoning": { "effort": e.as_ref() } } })).collect())
+}
+
 /// The id Codex knows the route's provider by (`-c model_provider=`).
 pub const CODEX_PROVIDER_ID: &str = "chorus";
 
@@ -163,10 +168,7 @@ pub fn route(
                     entry.insert("limit".into(), json!({ "context": context, "output": output }));
                 }
                 if !c.efforts.is_empty() {
-                    // The shape opencode 1.19.3 gives its own OpenRouter models' variants.
-                    let variants: serde_json::Map<String, Value> =
-                        c.efforts.iter().map(|e| (e.clone(), json!({ "reasoning": { "effort": e } }))).collect();
-                    entry.insert("variants".into(), Value::Object(variants));
+                    entry.insert("variants".into(), opencode_variants(&c.efforts));
                 }
             }
             Ok(Route {
@@ -181,10 +183,10 @@ pub fn route(
 }
 
 /// An opencode route on OpenRouter with a routing tier (D57). A ranked tier's `provider` object
-/// becomes the model's `options.provider`, pinning its endpoints. Nitro sends `<model>:nitro`
-/// instead: the model's entry moves to that id and declares its effort variants, because opencode
-/// drops a `:nitro` id's effort without them (Chorus 1 K6); `catalog_efforts` are the catalog's,
-/// `launch_effort` the variant the launch asks for.
+/// goes into the model's request `body` (opencode 2.1.1; 1.x took `options.provider`), pinning its
+/// endpoints. Nitro sends `<model>:nitro` instead: the model's entry moves to that id and declares
+/// its effort variants, because opencode has none for an id it doesn't list (Chorus 1 K6);
+/// `catalog_efforts` are the catalog's, `launch_effort` the variant the launch asks for.
 pub fn apply_routing(
     route: &mut Route,
     model: &str,
@@ -192,7 +194,7 @@ pub fn apply_routing(
     catalog_efforts: Option<&[String]>,
     launch_effort: Option<&str>,
 ) {
-    use crate::routing::payload::{routing_variant_efforts, variants_value};
+    use crate::routing::payload::routing_variant_efforts;
     let Some(models) = route.opencode_provider.as_mut().and_then(|p| p.pointer_mut("/openrouter/models")).and_then(Value::as_object_mut) else {
         return;
     };
@@ -201,11 +203,12 @@ pub fn apply_routing(
         _ => serde_json::Map::new(),
     };
     if let Some(provider) = selection.provider_value() {
-        entry.insert("options".into(), json!({ "provider": provider }));
+        entry.insert("body".into(), json!({ "provider": provider }));
     }
     if selection.sent_model_id != model {
-        if let Some(variants) = variants_value(&routing_variant_efforts(catalog_efforts, launch_effort)) {
-            entry.insert("variants".into(), variants);
+        let efforts = routing_variant_efforts(catalog_efforts, launch_effort);
+        if !efforts.is_empty() {
+            entry.insert("variants".into(), opencode_variants(&efforts));
         }
         route.model = format!("openrouter/{}", selection.sent_model_id);
     }
@@ -521,7 +524,7 @@ mod tests {
         let r = route(AgentKind::Opencode, ProviderKind::Openrouter, "OpenRouter", "", &models[0].id, Some(&models[0])).unwrap();
         assert_eq!(r.model, "openrouter/minimax/minimax-m3.1-flash:free");
         let entry = &r.opencode_provider.unwrap()["openrouter"]["models"]["minimax/minimax-m3.1-flash:free"];
-        assert_eq!(entry["variants"]["high"], json!({ "reasoning": { "effort": "high" } }));
+        assert!(entry["variants"].as_array().unwrap().contains(&json!({ "id": "high", "body": { "reasoning": { "effort": "high" } } })));
         assert_eq!(entry["limit"], json!({ "context": 1_000_000, "output": 524_288 }));
         // Unknown to the catalog: still declared, so opencode runs it.
         let bare = route(AgentKind::Opencode, ProviderKind::Openrouter, "OpenRouter", "", "x/y", None).unwrap();
@@ -552,7 +555,7 @@ mod tests {
         apply_routing(&mut r, &id, &ranked, Some(&models[0].efforts), None);
         assert_eq!(r.model, format!("openrouter/{id}"));
         let entry = &r.opencode_provider.as_ref().unwrap()["openrouter"]["models"][id.as_str()];
-        assert_eq!(entry["options"]["provider"]["order"], json!(["coreweave/fp8"]));
+        assert_eq!(entry["body"]["provider"]["order"], json!(["coreweave/fp8"]));
         assert_eq!(entry["limit"]["context"], json!(1_000_000), "the catalog's entry stays");
 
         let nitro = RoutingLaunchSelection {
@@ -569,8 +572,8 @@ mod tests {
         assert_eq!(r.model, "openrouter/x/y:nitro");
         let models = &r.opencode_provider.unwrap()["openrouter"]["models"];
         assert!(models.get("x/y").is_none());
-        assert_eq!(models["x/y:nitro"]["variants"]["high"], json!({ "reasoning": { "effort": "high" } }));
-        assert_eq!(models["x/y:nitro"]["options"]["provider"], json!({ "data_collection": "deny" }));
+        assert_eq!(models["x/y:nitro"]["variants"], json!([{ "id": "high", "body": { "reasoning": { "effort": "high" } } }]));
+        assert_eq!(models["x/y:nitro"]["body"]["provider"], json!({ "data_collection": "deny" }));
     }
 
     #[test]

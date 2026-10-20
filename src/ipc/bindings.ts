@@ -507,7 +507,7 @@ export type NitroSelection_Serialize = {
 	likelyFailsRules: string[],
 };
 
-/**  What a turn really ran with, read back from opencode's stored message. */
+/**  What a turn really ran with. */
 export type Observed = {
 	/**  `provider/model`. */
 	model: string,

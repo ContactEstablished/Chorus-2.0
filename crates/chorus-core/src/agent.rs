@@ -229,15 +229,15 @@ const CODEX: Spec = Spec {
     resume: Resume::Discovered { subcommand: "resume" },
 };
 
-/// opencode 1.19.3 runs as a server plus an attached TUI, and its options are the server's
-/// configuration. An effort is a model "variant", which opencode applies only to the model named
-/// beside it and otherwise ignores in silence (LESSONS L5), so an effort needs a model. Each model
-/// has its own variants (`glm-5.3-flash-free` has low, high and max), and the run checks the
-/// chosen one against the server's list. Permissions are its `permission` rules and its built-in
-/// `plan` agent; it has nothing like Claude's Auto.
+/// opencode 2.1.1 runs as a server plus a TUI connected to it (LESSONS L41). An effort is a model
+/// "variant", set on the session with its model (LESSONS L5), so an effort needs a model. Each
+/// model has its own variants (`deepseek-v4.1-flash-free` has low, high and max), and the run checks
+/// the chosen one against the server's list. Permissions are rules in the server's configuration
+/// (the last matching rule wins, after the agent's own) and its built-in `plan` agent; it has
+/// nothing like Claude's Auto.
 const OPENCODE: Spec = Spec {
     kind: AgentKind::Opencode,
-    verified: Some("1.19.3"),
+    verified: Some("2.1.1"),
     carrier: Carrier::ServerConfig,
     efforts: &[
         (Effort::Fast, &["variant", "\"low\""]),
@@ -247,10 +247,22 @@ const OPENCODE: Spec = Spec {
     ],
     default_effort: None,
     permissions: &[
-        (Permission::Manual, &["permission", r#"{"edit":"ask","bash":"ask","webfetch":"ask","external_directory":"ask"}"#]),
-        (Permission::AcceptEdits, &["permission", r#"{"edit":"allow","bash":"ask","webfetch":"ask","external_directory":"ask"}"#]),
+        (
+            Permission::Manual,
+            &[
+                "permissions",
+                r#"[{"action":"edit","resource":"*","effect":"ask"},{"action":"shell","resource":"*","effect":"ask"},{"action":"webfetch","resource":"*","effect":"ask"},{"action":"external_directory","resource":"*","effect":"ask"}]"#,
+            ],
+        ),
+        (
+            Permission::AcceptEdits,
+            &[
+                "permissions",
+                r#"[{"action":"edit","resource":"*","effect":"allow"},{"action":"shell","resource":"*","effect":"ask"},{"action":"webfetch","resource":"*","effect":"ask"},{"action":"external_directory","resource":"*","effect":"ask"}]"#,
+            ],
+        ),
         (Permission::Plan, &["default_agent", "\"plan\""]),
-        (Permission::FullAccess, &["permission", "\"allow\""]),
+        (Permission::FullAccess, &["permissions", r#"[{"action":"*","resource":"*","effect":"allow"}]"#]),
     ],
     default_permission: None,
     model: Some(ModelArg::ServerConfig),

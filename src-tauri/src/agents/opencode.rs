@@ -1,6 +1,7 @@
 //! The `opencode serve` a run starts, and its API (the rules are in `chorus_core::opencode`). The
 //! server is a hidden child in the run's job, listening on loopback behind a password that travels
-//! only in the environment, and it dies with the run. `opencode attach` in the PTY is its TUI.
+//! only in the environment, and it dies with the run. `opencode --server` in the PTY is its TUI.
+//! opencode 2.x serves its API under `/api/` and its web app everywhere else (LESSONS L41).
 
 use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader};
@@ -12,7 +13,7 @@ use std::sync::{Mutex, mpsc};
 use std::time::Duration;
 
 use chorus_core::opencode::{self, ModelCheck};
-use serde_json::{Value, json};
+use serde_json::Value;
 
 use crate::sessions::job::Job;
 
@@ -143,31 +144,37 @@ impl Api {
         if !opencode::is_session_id(id) {
             return Ok(false);
         }
-        match self.get(&format!("/session/{id}"))? {
+        match self.get(&format!("/api/session/{id}"))? {
             (200, _) => Ok(true),
             (404, _) => Ok(false),
             (status, _) => Err(format!("opencode answered {status} when asked for its session")),
         }
     }
 
-    pub fn create_session(&self, title: &str) -> Result<String, String> {
-        let (status, body) = self.send(self.client.post(format!("{}/session", self.url)).json(&json!({ "title": title })))?;
+    /// A new session in `cwd`, running `model` (`provider/model`) at `variant`, the effort.
+    pub fn create_session(&self, title: &str, cwd: &str, model: Option<&str>, variant: Option<&str>) -> Result<String, String> {
+        let body = opencode::create_session_body(title, cwd, model, variant);
+        let (status, body) = self.send(self.client.post(format!("{}/api/session", self.url)).json(&body))?;
         if status != 200 {
             return Err(format!("opencode answered {status} when asked to start a session"));
         }
         opencode::created_session_id(&body).ok_or_else(|| "opencode's new session had no id Chorus recognises".into())
     }
 
-    /// What the server knows of `model`; `None` when its answer isn't the shape Chorus checked.
+    /// What the server knows of `model`; `None` when its answers aren't the shape Chorus checked.
     pub fn check_model(&self, model: &str) -> Result<Option<ModelCheck>, String> {
-        let (status, body) = self.get("/provider")?;
+        let (status, providers) = self.get("/api/provider")?;
+        if status != 200 {
+            return Err(format!("opencode answered {status} when asked for its providers"));
+        }
+        let (status, models) = self.get("/api/model")?;
         if status != 200 {
             return Err(format!("opencode answered {status} when asked for its models"));
         }
-        Ok(opencode::check_model(&body, model))
+        Ok(opencode::check_model(&providers, &models, model))
     }
 
-    /// The server's event stream (`GET /event`, S5), open until the server ends.
+    /// The server's event stream (`GET /api/event`), open until the server ends.
     pub fn events(&self) -> Result<EventStream, String> {
         // No overall timeout: the stream stays open for the whole run.
         let client = reqwest::Client::builder()
@@ -175,7 +182,7 @@ impl Api {
             .no_proxy()
             .build()
             .map_err(|e| format!("making the HTTP client: {e}"))?;
-        let request = client.get(format!("{}/event", self.url)).basic_auth(opencode::USERNAME, Some(&self.password));
+        let request = client.get(format!("{}/api/event", self.url)).basic_auth(opencode::USERNAME, Some(&self.password));
         let response = tauri::async_runtime::block_on(request.send()).map_err(|e| format!("opencode's event stream: {e}"))?;
         if !response.status().is_success() {
             return Err(format!("opencode answered {} for its event stream", response.status().as_u16()));

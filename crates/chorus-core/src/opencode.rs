@@ -1,8 +1,11 @@
-//! opencode as a server plus an attached TUI (S5, ARCHITECTURE §5). Each run starts
-//! `opencode serve` on loopback, creates or reuses the session through its API, and runs
-//! `opencode attach` in the PTY. The options are the server's configuration
-//! (`OPENCODE_CONFIG_CONTENT`), and what a turn really ran with is read back from its stored
-//! messages, the only proof opencode gives (LESSONS L5). Measured on opencode 1.19.3.
+//! opencode 2.x as a server plus a TUI connected to it (D42, as D58 updates it for 2.x; LESSONS L41).
+//! Each run starts `opencode serve` on loopback, creates or reuses the session through its API
+//! (paths under `/api/`, answers wrapped in `{"data": …}`) with the model and effort variant set on
+//! the session itself, and runs `opencode --server <url> --session <id>` in the PTY. Permissions and
+//! a provider route are the server's configuration (`OPENCODE_CONFIG_CONTENT`). What a turn really
+//! ran with is its `session.step.started` event. Measured on opencode 2.1.1.
+
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
@@ -13,23 +16,18 @@ use crate::events::AgentEvent;
 
 /// The basic-auth user `opencode serve` expects when only a password is set.
 pub const USERNAME: &str = "opencode";
-/// Both the server and `attach` read the password from this variable, so it never needs argv.
+/// Both the server and the TUI read the password from this variable, so it never needs argv.
 pub const PASSWORD_VAR: &str = "OPENCODE_SERVER_PASSWORD";
 pub const CONFIG_VAR: &str = "OPENCODE_CONFIG_CONTENT";
-/// How many of the newest messages a read-back fetches (`GET /session/{id}/message?limit=`).
-pub const READ_BACK_MESSAGES: u32 = 6;
 
-/// The agents an effort is set for: `build` (the default) and `plan`. A variant applies only to the
-/// agent whose block names the same model the turn runs.
-const EFFORT_AGENTS: [&str; 2] = ["build", "plan"];
-
-/// Port 0 lets opencode choose (it tries 4096 first), so the port is read from its output.
+/// Port 0 lets the system choose, so the port is read from the server's output.
 pub fn serve_args() -> Vec<String> {
     ["serve", "--port", "0", "--hostname", "127.0.0.1"].map(str::to_owned).to_vec()
 }
 
-pub fn attach_args(url: &str, session_id: &str) -> Vec<String> {
-    ["attach", url, "--session", session_id].map(str::to_owned).to_vec()
+/// The TUI, connected to the run's own server and session (2.x has no `attach`).
+pub fn tui_args(url: &str, session_id: &str) -> Vec<String> {
+    ["--server", url, "--session", session_id].map(str::to_owned).to_vec()
 }
 
 /// A table entry from the opencode spec: a key and its JSON value.
@@ -44,21 +42,16 @@ pub fn wanted_variant(spec: &Spec, o: &LaunchOptions) -> Option<String> {
 }
 
 /// The configuration for options already passed through [`Spec::resolve`], or `None` when nothing
-/// is set. The effort goes into an agent block beside the model, because opencode drops a variant
-/// whose model differs from the turn's. `provider` is a provider route's block
-/// (`providers::Route::opencode_provider`); `o.model` is then the model as opencode names it.
+/// is set: the model (its variant travels on the session, [`create_session_body`]), the permission
+/// rules or the `plan` agent, and a provider route's block (`providers::Route::opencode_provider`)
+/// under `providers`; `o.model` is then the model as opencode names it.
 pub fn config_content(spec: &Spec, o: &LaunchOptions, provider: Option<&Value>) -> Option<String> {
     let mut root = Map::new();
     if let Some(p) = provider {
-        root.insert("provider".into(), p.clone());
+        root.insert("providers".into(), p.clone());
     }
     if let Some(model) = &o.model {
         root.insert("model".into(), json!(model));
-        if let Some(variant) = wanted_variant(spec, o) {
-            let agents: Map<String, Value> =
-                EFFORT_AGENTS.iter().map(|a| ((*a).to_owned(), json!({ "model": model, "variant": variant }))).collect();
-            root.insert("agent".into(), Value::Object(agents));
-        }
     }
     if let Some((key, value)) = o.permission.and_then(|p| spec.permission_args(p)).and_then(entry) {
         root.insert(key, value);
@@ -66,8 +59,8 @@ pub fn config_content(spec: &Spec, o: &LaunchOptions, provider: Option<&Value>) 
     (!root.is_empty()).then(|| Value::Object(root).to_string())
 }
 
-/// The server's address from its output: `opencode server listening on http://127.0.0.1:4096`.
-/// Only a loopback address is taken.
+/// The server's address from its output (`server listening on http://127.0.0.1:4096`). Only a
+/// loopback address is taken.
 pub fn listening_url(output: &str) -> Option<String> {
     const MARK: &str = "listening on http://127.0.0.1:";
     let at = output.find(MARK)? + MARK.len();
@@ -81,39 +74,64 @@ pub fn is_session_id(s: &str) -> bool {
     s.len() <= 64 && s.strip_prefix("ses_").is_some_and(|r| !r.is_empty() && r.bytes().all(|b| b.is_ascii_alphanumeric()))
 }
 
-/// The session id from `POST /session`'s answer.
-pub fn created_session_id(body: &str) -> Option<String> {
-    let v: Value = serde_json::from_str(body).ok()?;
-    v.get("id")?.as_str().filter(|id| is_session_id(id)).map(str::to_owned)
+/// What an API answer holds (`{"data": …}`).
+fn data(body: &str) -> Option<Value> {
+    let mut v: Value = serde_json::from_str(body).ok()?;
+    Some(v.get_mut("data")?.take())
 }
 
-/// What the server says about a `provider/model` (`GET /provider`).
+/// `POST /api/session`'s body: the title, the folder, and the model with its effort variant. The
+/// variant only takes effect on the session (a `#variant` in the configuration's model doesn't).
+pub fn create_session_body(title: &str, cwd: &str, model: Option<&str>, variant: Option<&str>) -> Value {
+    let mut body = json!({ "title": title, "location": { "directory": cwd } });
+    if let Some((provider, id)) = model.and_then(|m| m.split_once('/')) {
+        let mut m = json!({ "providerID": provider, "id": id });
+        if let Some(v) = variant {
+            m["variant"] = json!(v);
+        }
+        body["model"] = m;
+    }
+    body
+}
+
+/// The session id from `POST /api/session`'s answer.
+pub fn created_session_id(body: &str) -> Option<String> {
+    data(body)?.get("id")?.as_str().filter(|id| is_session_id(id)).map(str::to_owned)
+}
+
+/// What the server says about a `provider/model`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ModelCheck {
     Known { variants: Vec<String> },
     NoSuchProvider,
-    /// The provider exists but has no key or login, so its models won't run.
+    /// The provider is switched off, so its models won't run.
     NotConnected,
     NoSuchModel,
 }
 
-/// `None` when the answer isn't the shape 1.19.3 gives.
-pub fn check_model(provider_body: &str, model: &str) -> Option<ModelCheck> {
-    let v: Value = serde_json::from_str(provider_body).ok()?;
+/// From `GET /api/provider` and `GET /api/model`; `None` when either isn't the shape 2.1.1 gives.
+pub fn check_model(providers_body: &str, models_body: &str, model: &str) -> Option<ModelCheck> {
     let (provider, id) = model.split_once('/')?;
-    let all = v.get("all")?.as_array()?;
-    let Some(p) = all.iter().find(|p| p.get("id").and_then(Value::as_str) == Some(provider)) else {
+    let providers = data(providers_body)?;
+    let Some(p) = providers.as_array()?.iter().find(|p| p.get("id").and_then(Value::as_str) == Some(provider)) else {
         return Some(ModelCheck::NoSuchProvider);
     };
-    let connected = v.get("connected")?.as_array()?;
-    if !connected.iter().any(|c| c.as_str() == Some(provider)) {
+    if p.get("activation").and_then(Value::as_str) == Some("disabled") {
         return Some(ModelCheck::NotConnected);
     }
-    let Some(m) = p.get("models")?.get(id) else {
+    let models = data(models_body)?;
+    let Some(m) = models
+        .as_array()?
+        .iter()
+        .find(|m| m.get("providerID").and_then(Value::as_str) == Some(provider) && m.get("id").and_then(Value::as_str) == Some(id))
+    else {
         return Some(ModelCheck::NoSuchModel);
     };
-    let mut variants: Vec<String> =
-        m.get("variants").and_then(Value::as_object).map(|o| o.keys().cloned().collect()).unwrap_or_default();
+    let mut variants: Vec<String> = m
+        .get("variants")
+        .and_then(Value::as_array)
+        .map(|vs| vs.iter().filter_map(|v| v.get("id").and_then(Value::as_str).map(str::to_owned)).collect())
+        .unwrap_or_default();
     // Lowest effort first; names off the ladder after it.
     variants.sort_by_key(|v| (LADDER.iter().position(|l| l == v).unwrap_or(LADDER.len()), v.clone()));
     Some(ModelCheck::Known { variants })
@@ -127,7 +145,7 @@ pub fn model_note(model: &str, wanted: Option<&str>, check: &ModelCheck) -> Opti
     let (provider, id) = model.split_once('/').unwrap_or((model, ""));
     match check {
         ModelCheck::NoSuchProvider => Some(format!("opencode doesn't know the provider {provider:?}, so {model} won't run.")),
-        ModelCheck::NotConnected => Some(format!("opencode has no key or login for {provider}, so {model} won't run.")),
+        ModelCheck::NotConnected => Some(format!("opencode's {provider} provider is switched off, so {model} won't run.")),
         ModelCheck::NoSuchModel => Some(format!("opencode's {provider} provider has no model {id:?}.")),
         ModelCheck::Known { variants } => {
             let wanted = wanted?;
@@ -142,7 +160,7 @@ pub fn model_note(model: &str, wanted: Option<&str>, check: &ModelCheck) -> Opti
     }
 }
 
-/// What a turn really ran with, read back from opencode's stored message.
+/// What a turn really ran with.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct Observed {
@@ -152,47 +170,40 @@ pub struct Observed {
     pub agent: Option<String>,
 }
 
-/// The newest user message's model, variant and agent, from `GET /session/{id}/message`.
-pub fn latest_user_turn(messages_body: &str) -> Option<Observed> {
-    let v: Value = serde_json::from_str(messages_body).ok()?;
-    let info = v.as_array()?.iter().rev().filter_map(|m| m.get("info")).find(|i| i.get("role").and_then(Value::as_str) == Some("user"))?;
-    let text = |o: &Value, k: &str| o.get(k).and_then(Value::as_str).map(str::to_owned);
-    let model = info.get("model")?;
-    Some(Observed {
-        model: format!("{}/{}", text(model, "providerID")?, text(model, "modelID")?),
-        variant: text(model, "variant"),
-        agent: text(info, "agent"),
-    })
-}
-
-/// What a user message on opencode's event stream says the turn ran with (its `info`).
-pub fn observed_from_user_info(info: &Value) -> Option<Observed> {
-    if info.get("role").and_then(Value::as_str) != Some("user") {
+/// A turn's model, variant and agent, from its `session.step.started` event in `session_id`.
+pub fn observed_from_event(event: &Value, session_id: &str) -> Option<Observed> {
+    if event.get("type").and_then(Value::as_str) != Some("session.step.started") {
+        return None;
+    }
+    let d = event.get("data")?;
+    if d.get("sessionID").and_then(Value::as_str) != Some(session_id) {
         return None;
     }
     let text = |o: &Value, k: &str| o.get(k).and_then(Value::as_str).map(str::to_owned);
-    let model = info.get("model")?;
+    let model = d.get("model")?;
     Some(Observed {
-        model: format!("{}/{}", text(model, "providerID")?, text(model, "modelID")?),
+        model: format!("{}/{}", text(model, "providerID")?, text(model, "id")?),
         variant: text(model, "variant"),
-        agent: text(info, "agent"),
+        agent: text(d, "agent"),
     })
 }
 
-/// Turns opencode 1.19.3's server events (`GET /event`, S5) into [`AgentEvent`]s for one session.
-/// It keeps a little state: which messages are the user's, their text, and which tool calls have
-/// started. A turn is a user message; it ends when an assistant message replying to it
-/// (`parentID`) finishes with `stop`, or fails or is aborted.
+/// Turns opencode 2.1.1's server events (`GET /api/event`, LESSONS L41) into [`AgentEvent`]s for one
+/// session. A turn is a user message: it starts when the inbox delivers it and ends when the
+/// session's execution succeeds, fails or is interrupted. Its reply is the text of the newest
+/// assistant step that had any.
 #[derive(Debug, Default)]
 pub struct EventParser {
     session_id: String,
-    user_messages: std::collections::HashSet<String>,
-    started: std::collections::HashSet<String>,
-    /// Message id → its text parts, by part id, in arrival order.
-    texts: std::collections::HashMap<String, Vec<(String, String)>>,
-    tools_started: std::collections::HashSet<String>,
-    /// Assistant messages already taken as a turn's end: opencode sends a finished one twice.
-    replies_done: std::collections::HashSet<String>,
+    /// Inbox id → the prompt's text, until it's delivered.
+    prompts: HashMap<String, String>,
+    turn: Option<String>,
+    /// The turn's assistant steps, in order, and their texts by ordinal.
+    steps: Vec<String>,
+    texts: HashMap<String, BTreeMap<u64, String>>,
+    /// Tool call id → its tool and target, named before the call runs.
+    tools: HashMap<String, (String, Option<String>)>,
+    started: HashSet<String>,
 }
 
 impl EventParser {
@@ -200,121 +211,125 @@ impl EventParser {
         Self { session_id: session_id.to_owned(), ..Default::default() }
     }
 
-    fn text_of(&self, message_id: &str) -> Option<String> {
-        let parts = self.texts.get(message_id)?;
-        let joined = parts.iter().map(|(_, t)| t.as_str()).collect::<Vec<_>>().join("\n");
-        (!joined.trim().is_empty()).then_some(joined)
+    fn reply(&self) -> Option<String> {
+        self.steps.iter().rev().find_map(|step| {
+            let joined = self.texts.get(step)?.values().map(String::as_str).collect::<Vec<_>>().join("\n");
+            (!joined.trim().is_empty()).then_some(joined)
+        })
     }
 
-    fn start(&mut self, message_id: &str) -> Option<AgentEvent> {
-        if !self.user_messages.contains(message_id) || self.started.contains(message_id) {
-            return None;
-        }
-        let prompt = self.text_of(message_id)?;
-        self.started.insert(message_id.to_owned());
-        Some(AgentEvent::TurnStarted { turn: Some(message_id.to_owned()), prompt: Some(prompt) })
+    fn end_turn(&mut self) -> Option<String> {
+        self.steps.clear();
+        self.texts.clear();
+        self.turn.take()
     }
 
     /// One event from the stream, as the events it means.
     pub fn push(&mut self, event: &Value) -> Vec<AgentEvent> {
         let kind = event.get("type").and_then(Value::as_str).unwrap_or_default();
-        let p = event.get("properties").cloned().unwrap_or(Value::Null);
+        let d = event.get("data").cloned().unwrap_or(Value::Null);
         let text = |o: &Value, k: &str| o.get(k).and_then(Value::as_str).map(str::to_owned);
-        let session = text(&p, "sessionID").or_else(|| p.pointer("/info/sessionID").and_then(Value::as_str).map(str::to_owned));
+        let session = text(&d, "sessionID").or_else(|| d.pointer("/form/sessionID").and_then(Value::as_str).map(str::to_owned));
         if session.as_deref() != Some(self.session_id.as_str()) {
             return Vec::new();
         }
         match kind {
-            "message.updated" => {
-                let info = p.get("info").cloned().unwrap_or(Value::Null);
-                let Some(id) = text(&info, "id") else { return Vec::new() };
-                match info.get("role").and_then(Value::as_str) {
-                    Some("user") => {
-                        self.user_messages.insert(id.clone());
-                        self.start(&id).into_iter().collect()
-                    }
-                    Some("assistant") => {
-                        let parent = text(&info, "parentID");
-                        if self.replies_done.contains(&id) {
-                            return Vec::new();
-                        }
-                        if let Some(error) = info.get("error").filter(|e| !e.is_null()) {
-                            let name = text(error, "name").unwrap_or_default();
-                            self.replies_done.insert(id.clone());
-                            if name.contains("Abort") {
-                                return vec![AgentEvent::TurnInterrupted { turn: parent }];
-                            }
-                            let message = error.pointer("/data/message").and_then(Value::as_str).map(str::to_owned).unwrap_or(name);
-                            return vec![AgentEvent::TurnFailed { turn: parent, error: message }];
-                        }
-                        let completed = info.pointer("/time/completed").is_some_and(|t| !t.is_null());
-                        if completed && info.get("finish").and_then(Value::as_str) == Some("stop") {
-                            self.replies_done.insert(id.clone());
-                            return vec![AgentEvent::TurnEnded { turn: parent, message: self.text_of(&id) }];
-                        }
-                        Vec::new()
-                    }
-                    _ => Vec::new(),
+            "session.inbox.enqueued" => {
+                if let (Some(id), Some("user")) = (text(&d, "inboxID"), d.pointer("/item/type").and_then(Value::as_str)) {
+                    let prompt = d.pointer("/item/payload/text").and_then(Value::as_str).unwrap_or_default();
+                    self.prompts.insert(id, prompt.to_owned());
                 }
+                Vec::new()
             }
-            "message.part.updated" => {
-                let part = p.get("part").cloned().unwrap_or(Value::Null);
-                let Some(message_id) = text(&part, "messageID") else { return Vec::new() };
-                match part.get("type").and_then(Value::as_str) {
-                    Some("text") => {
-                        let part_id = text(&part, "id").unwrap_or_default();
-                        let body = text(&part, "text").unwrap_or_default();
-                        let parts = self.texts.entry(message_id.clone()).or_default();
-                        match parts.iter_mut().find(|(id, _)| *id == part_id) {
-                            Some(slot) => slot.1 = body,
-                            None => parts.push((part_id, body)),
-                        }
-                        self.start(&message_id).into_iter().collect()
-                    }
-                    Some("tool") => {
-                        let call = text(&part, "callID");
-                        let tool = text(&part, "tool").unwrap_or_default();
-                        let state = part.get("state").cloned().unwrap_or(Value::Null);
-                        let target = state.get("input").and_then(crate::events::tool_target);
-                        let key = call.clone().unwrap_or_default();
-                        match state.get("status").and_then(Value::as_str) {
-                            Some("pending" | "running") if self.tools_started.insert(key.clone()) => {
-                                vec![AgentEvent::ToolStarted { turn: None, call, tool, target }]
-                            }
-                            Some(status @ ("completed" | "error")) => {
-                                vec![AgentEvent::ToolFinished { turn: None, call, tool, target, failed: status == "error" }]
-                            }
-                            _ => Vec::new(),
-                        }
-                    }
-                    _ => Vec::new(),
+            "session.inbox.delivered" => {
+                let Some(id) = text(&d, "inboxID") else { return Vec::new() };
+                let prompt = self.prompts.remove(&id).filter(|p| !p.trim().is_empty());
+                self.steps.clear();
+                self.texts.clear();
+                self.turn = Some(id.clone());
+                vec![AgentEvent::TurnStarted { turn: Some(id), prompt }]
+            }
+            "session.step.started" => {
+                if let Some(step) = text(&d, "assistantMessageID") {
+                    self.steps.push(step);
                 }
+                Vec::new()
             }
-            "permission.asked" => {
-                let target = p
-                    .pointer("/metadata/filepath")
-                    .or_else(|| p.pointer("/metadata/command"))
-                    .or_else(|| p.pointer("/patterns/0"))
+            "session.text.ended" => {
+                if let (Some(step), Some(body)) = (text(&d, "assistantMessageID"), text(&d, "text")) {
+                    let ordinal = d.get("ordinal").and_then(Value::as_u64).unwrap_or(0);
+                    self.texts.entry(step).or_default().insert(ordinal, body);
+                }
+                Vec::new()
+            }
+            "session.tool.input.started" => {
+                if let (Some(id), Some(name)) = (text(&d, "id"), text(&d, "name")) {
+                    self.tools.insert(id, (name, None));
+                }
+                Vec::new()
+            }
+            "session.tool.called" => {
+                let Some(call) = text(&d, "id") else { return Vec::new() };
+                if !self.started.insert(call.clone()) {
+                    return Vec::new();
+                }
+                let target = d.get("input").and_then(crate::events::tool_target);
+                let slot = self.tools.entry(call.clone()).or_insert_with(|| ("tool".to_owned(), None));
+                slot.1.clone_from(&target);
+                vec![AgentEvent::ToolStarted { turn: None, call: Some(call), tool: slot.0.clone(), target }]
+            }
+            "session.tool.success" | "session.tool.failed" => {
+                let call = text(&d, "id");
+                let (tool, target) = call.as_ref().and_then(|c| self.tools.remove(c)).unwrap_or_else(|| ("tool".to_owned(), None));
+                vec![AgentEvent::ToolFinished { turn: None, call, tool, target, failed: kind == "session.tool.failed" }]
+            }
+            "session.execution.succeeded" => {
+                let message = self.reply();
+                vec![AgentEvent::TurnEnded { turn: self.end_turn(), message }]
+            }
+            "session.execution.failed" => {
+                let error = d
+                    .pointer("/error/message")
+                    .or_else(|| d.get("message"))
                     .and_then(Value::as_str)
-                    .map(str::to_owned);
-                vec![AgentEvent::ApprovalAsked { turn: None, ask: text(&p, "id"), tool: text(&p, "permission").unwrap_or_default(), target }]
+                    .unwrap_or("the turn failed")
+                    .to_owned();
+                vec![AgentEvent::TurnFailed { turn: self.end_turn(), error }]
             }
-            "permission.replied" => vec![AgentEvent::ApprovalAnswered {
-                ask: text(&p, "requestID"),
-                allowed: p.get("reply").and_then(Value::as_str) != Some("reject"),
-            }],
-            "question.asked" => vec![AgentEvent::QuestionAsked {
+            "session.execution.interrupted" => vec![AgentEvent::TurnInterrupted { turn: self.end_turn() }],
+            "permission.asked" => vec![AgentEvent::ApprovalAsked {
                 turn: None,
-                ask: text(&p, "id"),
-                question: p.pointer("/questions/0/question").and_then(Value::as_str).unwrap_or_default().to_owned(),
+                ask: text(&d, "id"),
+                tool: text(&d, "action").unwrap_or_default(),
+                target: d.pointer("/resources/0").and_then(Value::as_str).map(str::to_owned),
             }],
-            "question.replied" => vec![AgentEvent::QuestionAnswered {
-                ask: text(&p, "requestID"),
-                answer: p.pointer("/answers/0/0").and_then(Value::as_str).map(str::to_owned),
+            "permission.replied" => vec![AgentEvent::ApprovalAnswered {
+                ask: text(&d, "requestID"),
+                allowed: d.get("reply").and_then(Value::as_str) != Some("reject"),
             }],
+            "permission.rejected" => vec![AgentEvent::ApprovalAnswered { ask: text(&d, "requestID").or_else(|| text(&d, "id")), allowed: false }],
+            "form.created" => {
+                let form = d.get("form").cloned().unwrap_or(Value::Null);
+                let question = form
+                    .pointer("/fields/0/description")
+                    .or_else(|| form.pointer("/fields/0/title"))
+                    .or_else(|| form.get("title"))
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned();
+                vec![AgentEvent::QuestionAsked { turn: None, ask: text(&form, "id"), question }]
+            }
+            "form.replied" => {
+                let answer = d.get("answer").and_then(Value::as_object).and_then(|a| a.values().next()).map(|v| match v {
+                    Value::String(s) => s.clone(),
+                    other => other.to_string(),
+                });
+                vec![AgentEvent::QuestionAnswered { ask: text(&d, "id"), answer }]
+            }
+            "form.cancelled" => vec![AgentEvent::QuestionAnswered { ask: text(&d, "id"), answer: None }],
             "session.error" => vec![AgentEvent::TurnFailed {
                 turn: None,
-                error: p.pointer("/error/data/message").and_then(Value::as_str).unwrap_or("the turn failed").to_owned(),
+                error: d.pointer("/error/message").or_else(|| d.get("message")).and_then(Value::as_str).unwrap_or("the turn failed").to_owned(),
             }],
             _ => Vec::new(),
         }
@@ -322,7 +337,7 @@ impl EventParser {
 }
 
 /// Splits a server-sent-events buffer into complete `data:` payloads, leaving any partial event
-/// in `buffer`.
+/// in `buffer`. Comment blocks (`: heartbeat`) carry no payload and are dropped.
 pub fn take_sse_events(buffer: &mut String) -> Vec<Value> {
     let mut out = Vec::new();
     while let Some(end) = buffer.find("\n\n") {
@@ -379,8 +394,6 @@ mod tests {
                 "ran the build agent, not plan"
             ]
         );
-        // Nothing asked: nothing to differ from, whatever the user picked in the TUI.
-        assert!(differences(spec(), &opts(None, None, None), &seen("opencode/big-pickle", None, "plan")).is_empty());
     }
 
     fn spec() -> &'static Spec {
@@ -392,115 +405,113 @@ mod tests {
     }
 
     #[test]
-    fn the_effort_travels_beside_its_model() {
+    fn the_effort_travels_on_the_session_and_the_plan_agent_in_the_configuration() {
         let o = opts(Some(Effort::Deep), Some(Permission::Plan), Some("opencode/glm-5.3-flash-free"));
         let c: Value = serde_json::from_str(&config_content(spec(), &o, None).unwrap()).unwrap();
-        assert_eq!(c["model"], "opencode/glm-5.3-flash-free");
-        for agent in ["build", "plan"] {
-            assert_eq!(c["agent"][agent], json!({ "model": "opencode/glm-5.3-flash-free", "variant": "high" }));
-        }
-        assert_eq!(c["default_agent"], "plan");
+        assert_eq!(c, json!({ "model": "opencode/glm-5.3-flash-free", "default_agent": "plan" }));
         assert_eq!(wanted_variant(spec(), &o).as_deref(), Some("high"));
+        let body = create_session_body("Nell", r"C:\w", o.model.as_deref(), Some("high"));
+        assert_eq!(
+            body,
+            json!({ "title": "Nell", "location": { "directory": r"C:\w" }, "model": { "providerID": "opencode", "id": "glm-5.3-flash-free", "variant": "high" } })
+        );
+        // OpenRouter's model ids keep their own slash.
+        let routed = create_session_body("x", r"C:\w", Some("openrouter/deepseek/deepseek-v4.1-flash:nitro"), None);
+        assert_eq!(routed["model"], json!({ "providerID": "openrouter", "id": "deepseek/deepseek-v4.1-flash:nitro" }));
+        assert!(create_session_body("x", r"C:\w", None, Some("high")).get("model").is_none());
     }
 
     #[test]
-    fn each_permission_becomes_its_configuration() {
+    fn each_permission_becomes_its_rules() {
         let c = |p| serde_json::from_str::<Value>(&config_content(spec(), &opts(None, Some(p), None), None).unwrap()).unwrap();
-        assert_eq!(c(Permission::FullAccess), json!({ "permission": "allow" }));
-        assert_eq!(c(Permission::Manual)["permission"]["edit"], "ask");
-        assert_eq!(c(Permission::AcceptEdits)["permission"]["edit"], "allow");
-        assert_eq!(c(Permission::AcceptEdits)["permission"]["bash"], "ask");
-        // A model alone sets the model and no agent block.
-        let only_model = config_content(spec(), &opts(None, None, Some("opencode/big-pickle")), None).unwrap();
-        assert_eq!(serde_json::from_str::<Value>(&only_model).unwrap(), json!({ "model": "opencode/big-pickle" }));
+        assert_eq!(c(Permission::FullAccess), json!({ "permissions": [{ "action": "*", "resource": "*", "effect": "allow" }] }));
+        let effect = |p, action: &str| {
+            c(p)["permissions"].as_array().unwrap().iter().find(|r| r["action"] == action).map(|r| r["effect"].as_str().unwrap().to_owned())
+        };
+        assert_eq!(effect(Permission::Manual, "edit").as_deref(), Some("ask"));
+        assert_eq!(effect(Permission::Manual, "shell").as_deref(), Some("ask"));
+        assert_eq!(effect(Permission::AcceptEdits, "edit").as_deref(), Some("allow"));
+        assert_eq!(effect(Permission::AcceptEdits, "shell").as_deref(), Some("ask"));
         assert_eq!(config_content(spec(), &opts(None, None, None), None), None);
-        // A route's provider block goes in as is.
+        // A route's provider block goes in under `providers`.
         let routed = config_content(spec(), &opts(None, None, Some("openrouter/x/y")), Some(&json!({ "openrouter": {} }))).unwrap();
-        assert_eq!(serde_json::from_str::<Value>(&routed).unwrap(), json!({ "provider": { "openrouter": {} }, "model": "openrouter/x/y" }));
+        assert_eq!(serde_json::from_str::<Value>(&routed).unwrap(), json!({ "providers": { "openrouter": {} }, "model": "openrouter/x/y" }));
     }
 
     #[test]
     fn reads_the_listening_line() {
-        assert_eq!(listening_url("opencode server listening on http://127.0.0.1:4096\n").as_deref(), Some("http://127.0.0.1:4096"));
-        assert_eq!(listening_url("noise\r\nopencode server listening on http://127.0.0.1:51234").as_deref(), Some("http://127.0.0.1:51234"));
-        assert_eq!(listening_url("opencode server listening on http://0.0.0.0:4096"), None);
+        assert_eq!(listening_url("server listening on http://127.0.0.1:4096\n").as_deref(), Some("http://127.0.0.1:4096"));
+        assert_eq!(listening_url("noise\r\nserver listening on http://127.0.0.1:51234").as_deref(), Some("http://127.0.0.1:51234"));
+        assert_eq!(listening_url("server listening on http://0.0.0.0:4096"), None);
         assert_eq!(listening_url("listening on http://127.0.0.1:0"), None);
         assert_eq!(listening_url("listening on http://127.0.0.1:99999"), None);
     }
 
     #[test]
     fn session_ids_are_checked() {
-        assert!(is_session_id("ses_eaa39d315ffeDlPW7mMYhRWT3t"));
+        assert!(is_session_id("ses_ea5c225b8ffeNh5sBFcKZ9hIn7"));
         for bad in ["", "ses_", "ses_a b", "sess_x", "ses_x/../y", "--session"] {
             assert!(!is_session_id(bad), "{bad}");
         }
-        assert_eq!(created_session_id(r#"{"id":"ses_abc1","title":"x"}"#).as_deref(), Some("ses_abc1"));
-        assert_eq!(created_session_id(r#"{"id":"--fork"}"#), None);
+        assert_eq!(created_session_id(r#"{"data":{"id":"ses_abc1","title":"x"}}"#).as_deref(), Some("ses_abc1"));
+        assert_eq!(created_session_id(r#"{"id":"ses_abc1"}"#), None, "1.x's bare answer isn't 2.x's");
+        assert_eq!(created_session_id(r#"{"data":{"id":"--fork"}}"#), None);
     }
 
-    const PROVIDERS: &str = r#"{"all":[
-        {"id":"opencode","models":{"glm-5.3-flash-free":{"variants":{"low":{},"high":{},"max":{}}},"big-pickle":{"variants":{}}}},
-        {"id":"anthropic","models":{"claude-sonnet-4-6":{}}}],
-        "default":{},"connected":["opencode"]}"#;
+    // The shapes 2.1.1 answers with (trimmed).
+    const PROVIDERS: &str = r#"{"location":{"directory":"C:\\w"},"data":[
+        {"id":"opencode","name":"OpenCode Zen","activation":"enabled","package":"x"},
+        {"id":"anthropic","name":"Anthropic","activation":"disabled","package":"x"}]}"#;
+    const MODELS: &str = r#"{"location":{"directory":"C:\\w"},"data":[
+        {"id":"deepseek-v4.1-flash-free","providerID":"opencode","variants":[{"id":"max"},{"id":"low"},{"id":"high"}]},
+        {"id":"big-pickle","providerID":"opencode","variants":[]}]}"#;
 
     #[test]
     fn the_model_is_checked_against_the_server() {
-        let known = check_model(PROVIDERS, "opencode/glm-5.3-flash-free").unwrap();
+        let known = check_model(PROVIDERS, MODELS, "opencode/deepseek-v4.1-flash-free").unwrap();
         assert_eq!(known, ModelCheck::Known { variants: vec!["low".into(), "high".into(), "max".into()] });
-        assert_eq!(model_note("opencode/glm-5.3-flash-free", Some("high"), &known), None);
+        assert_eq!(model_note("opencode/deepseek-v4.1-flash-free", Some("high"), &known), None);
         assert_eq!(
-            model_note("opencode/glm-5.3-flash-free", Some("medium"), &known).unwrap(),
-            "opencode/glm-5.3-flash-free has no medium effort (it has low, high, max), so opencode uses its default."
+            model_note("opencode/deepseek-v4.1-flash-free", Some("medium"), &known).unwrap(),
+            "opencode/deepseek-v4.1-flash-free has no medium effort (it has low, high, max), so opencode uses its default."
         );
-        let none = check_model(PROVIDERS, "opencode/big-pickle").unwrap();
+        let none = check_model(PROVIDERS, MODELS, "opencode/big-pickle").unwrap();
         assert!(model_note("opencode/big-pickle", Some("low"), &none).unwrap().contains("no effort settings"));
-        assert_eq!(model_note("opencode/big-pickle", None, &none), None);
-        assert_eq!(check_model(PROVIDERS, "anthropic/claude-sonnet-4-6"), Some(ModelCheck::NotConnected));
-        assert_eq!(check_model(PROVIDERS, "nobody/x"), Some(ModelCheck::NoSuchProvider));
-        assert_eq!(check_model(PROVIDERS, "opencode/nope"), Some(ModelCheck::NoSuchModel));
-        assert_eq!(check_model("[]", "opencode/x"), None);
+        assert_eq!(check_model(PROVIDERS, MODELS, "anthropic/claude-sonnet-4-6"), Some(ModelCheck::NotConnected));
+        assert_eq!(check_model(PROVIDERS, MODELS, "nobody/x"), Some(ModelCheck::NoSuchProvider));
+        assert_eq!(check_model(PROVIDERS, MODELS, "opencode/nope"), Some(ModelCheck::NoSuchModel));
+        assert_eq!(check_model("[]", MODELS, "opencode/x"), None);
     }
 
-    #[test]
-    fn reads_back_what_the_newest_turn_ran_with() {
-        // The shape 1.19.3 stores (trimmed): a user message carries the model and variant.
-        let body = r#"[
-            {"info":{"role":"user","agent":"build","model":{"providerID":"opencode","modelID":"glm-5.3-flash-free","variant":"high"}},"parts":[]},
-            {"info":{"role":"assistant","providerID":"opencode","modelID":"glm-5.3-flash-free","variant":"high"},"parts":[]},
-            {"info":{"role":"user","agent":"plan","model":{"providerID":"opencode","modelID":"big-pickle"}},"parts":[]},
-            {"info":{"role":"assistant"},"parts":[]}]"#;
-        assert_eq!(
-            latest_user_turn(body),
-            Some(Observed { model: "opencode/big-pickle".into(), variant: None, agent: Some("plan".into()) })
-        );
-        assert_eq!(latest_user_turn("[]"), None);
-        assert_eq!(latest_user_turn("{}"), None);
+    /// One event as the stream sends it: `{ id, type, data }`.
+    fn ev(kind: &str, data: Value) -> Value {
+        json!({ "id": "evt_1", "type": kind, "data": data })
     }
 
     #[test]
     fn server_events_become_a_turn() {
-        // Shapes from S5's capture of opencode's /event stream (trimmed).
+        // The sequence measured on 2.1.1 with a question, an approval and a shell call (trimmed).
         let s = "ses_1";
-        let ev = |kind: &str, props: Value| json!({ "type": kind, "properties": props });
         let mut p = EventParser::new(s);
         let mut all = Vec::new();
         for e in [
-            ev("message.updated", json!({"sessionID":s,"info":{"id":"msg_u","role":"user","sessionID":s,"agent":"build","model":{"providerID":"opencode","modelID":"big-pickle"}}})),
-            ev("message.part.updated", json!({"sessionID":s,"part":{"type":"text","text":"make hello.txt","messageID":"msg_u","id":"prt_1"}})),
-            ev("session.status", json!({"sessionID":s,"status":{"type":"busy"}})),
-            ev("message.part.updated", json!({"sessionID":s,"part":{"type":"tool","tool":"write","callID":"c1","messageID":"msg_a","state":{"status":"pending","input":{}}}})),
-            ev("message.part.updated", json!({"sessionID":s,"part":{"type":"tool","tool":"write","callID":"c1","messageID":"msg_a","state":{"status":"running","input":{"filePath":"hello.txt"}}}})),
-            ev("permission.asked", json!({"id":"per_1","sessionID":s,"permission":"edit","patterns":["hello.txt"],"metadata":{"filepath":"C:\\w\\hello.txt"}})),
+            ev("server.connected", json!({})),
+            ev("session.inbox.enqueued", json!({"inboxID":"msg_u","sessionID":s,"item":{"type":"user","payload":{"text":"make hello.txt"},"delivery":"steer"}})),
+            ev("session.execution.started", json!({"sessionID":s})),
+            ev("session.inbox.delivered", json!({"sessionID":s,"inboxID":"msg_u"})),
+            ev("session.step.started", json!({"sessionID":s,"agent":"build","model":{"id":"big-pickle","providerID":"opencode","variant":"default"},"assistantMessageID":"msg_a"})),
+            ev("session.tool.input.started", json!({"sessionID":s,"assistantMessageID":"msg_a","id":"c1","name":"shell"})),
+            ev("session.tool.called", json!({"sessionID":s,"assistantMessageID":"msg_a","id":"c1","input":{"command":"type hello.txt"},"executed":false})),
+            ev("permission.asked", json!({"id":"per_1","sessionID":s,"action":"shell","resources":["type hello.txt"],"save":["type *"]})),
             ev("permission.replied", json!({"sessionID":s,"requestID":"per_1","reply":"once"})),
-            ev("message.part.updated", json!({"sessionID":s,"part":{"type":"tool","tool":"write","callID":"c1","messageID":"msg_a","state":{"status":"completed","input":{"filePath":"hello.txt"},"output":"ok"}}})),
-            ev("question.asked", json!({"id":"que_1","sessionID":s,"questions":[{"question":"Which greeting?"}]})),
-            ev("question.replied", json!({"sessionID":s,"requestID":"que_1","answers":[["hi"]]})),
-            ev("message.updated", json!({"sessionID":s,"info":{"id":"msg_a","role":"assistant","parentID":"msg_u","time":{"completed":5},"finish":"tool-calls"}})),
-            ev("message.part.updated", json!({"sessionID":s,"part":{"type":"text","text":"Created hello.txt.","messageID":"msg_b","id":"prt_9"}})),
-            ev("message.updated", json!({"sessionID":s,"info":{"id":"msg_b","role":"assistant","parentID":"msg_u","time":{"completed":9},"finish":"stop"}})),
-            // opencode sends a finished reply twice; the turn ends once.
-            ev("message.updated", json!({"sessionID":s,"info":{"id":"msg_b","role":"assistant","parentID":"msg_u","time":{"completed":9},"finish":"stop"}})),
-            ev("session.idle", json!({"sessionID":"other"})),
+            ev("session.tool.success", json!({"sessionID":s,"assistantMessageID":"msg_a","id":"c1","content":[],"executed":false})),
+            ev("form.created", json!({"form":{"id":"frm_1","sessionID":s,"title":"Questions","fields":[{"key":"q0","title":"Colour","description":"Which colour?"}]}})),
+            ev("form.replied", json!({"id":"frm_1","sessionID":s,"answer":{"q0":"Red"}})),
+            ev("session.step.ended", json!({"sessionID":s,"assistantMessageID":"msg_a","finish":"tool-calls"})),
+            ev("session.step.started", json!({"sessionID":s,"agent":"build","model":{"id":"big-pickle","providerID":"opencode"},"assistantMessageID":"msg_b"})),
+            ev("session.text.ended", json!({"sessionID":s,"assistantMessageID":"msg_b","ordinal":0,"text":"Created hello.txt."})),
+            ev("session.execution.succeeded", json!({"sessionID":s})),
+            ev("session.execution.succeeded", json!({"sessionID":"other"})),
         ] {
             all.extend(p.push(&e));
         }
@@ -508,27 +519,48 @@ mod tests {
             all,
             [
                 AgentEvent::TurnStarted { turn: Some("msg_u".into()), prompt: Some("make hello.txt".into()) },
-                AgentEvent::ToolStarted { turn: None, call: Some("c1".into()), tool: "write".into(), target: None },
-                AgentEvent::ApprovalAsked { turn: None, ask: Some("per_1".into()), tool: "edit".into(), target: Some("C:\\w\\hello.txt".into()) },
+                AgentEvent::ToolStarted { turn: None, call: Some("c1".into()), tool: "shell".into(), target: Some("type hello.txt".into()) },
+                AgentEvent::ApprovalAsked { turn: None, ask: Some("per_1".into()), tool: "shell".into(), target: Some("type hello.txt".into()) },
                 AgentEvent::ApprovalAnswered { ask: Some("per_1".into()), allowed: true },
-                AgentEvent::ToolFinished { turn: None, call: Some("c1".into()), tool: "write".into(), target: Some("hello.txt".into()), failed: false },
-                AgentEvent::QuestionAsked { turn: None, ask: Some("que_1".into()), question: "Which greeting?".into() },
-                AgentEvent::QuestionAnswered { ask: Some("que_1".into()), answer: Some("hi".into()) },
+                AgentEvent::ToolFinished { turn: None, call: Some("c1".into()), tool: "shell".into(), target: Some("type hello.txt".into()), failed: false },
+                AgentEvent::QuestionAsked { turn: None, ask: Some("frm_1".into()), question: "Which colour?".into() },
+                AgentEvent::QuestionAnswered { ask: Some("frm_1".into()), answer: Some("Red".into()) },
                 AgentEvent::TurnEnded { turn: Some("msg_u".into()), message: Some("Created hello.txt.".into()) },
             ]
         );
-        // An aborted reply interrupts the turn; a provider error fails it.
-        let aborted = ev("message.updated", json!({"sessionID":s,"info":{"id":"msg_c","role":"assistant","parentID":"msg_u","error":{"name":"MessageAbortedError"}}}));
-        assert_eq!(p.push(&aborted), [AgentEvent::TurnInterrupted { turn: Some("msg_u".into()) }]);
-        let observed = observed_from_user_info(&json!({"role":"user","agent":"plan","model":{"providerID":"opencode","modelID":"glm","variant":"high"}}));
-        assert_eq!(observed.unwrap(), Observed { model: "opencode/glm".into(), variant: Some("high".into()), agent: Some("plan".into()) });
+        // An interrupted execution interrupts the turn; a failed one fails it; a rejection denies.
+        p.push(&ev("session.inbox.delivered", json!({"sessionID":s,"inboxID":"msg_v"})));
+        assert_eq!(p.push(&ev("session.execution.interrupted", json!({"sessionID":s}))), [AgentEvent::TurnInterrupted { turn: Some("msg_v".into()) }]);
+        p.push(&ev("session.inbox.delivered", json!({"sessionID":s,"inboxID":"msg_w"})));
+        assert_eq!(
+            p.push(&ev("session.execution.failed", json!({"sessionID":s,"error":{"message":"rate limited"}}))),
+            [AgentEvent::TurnFailed { turn: Some("msg_w".into()), error: "rate limited".into() }]
+        );
+        assert_eq!(
+            p.push(&ev("permission.replied", json!({"sessionID":s,"requestID":"per_2","reply":"reject"}))),
+            [AgentEvent::ApprovalAnswered { ask: Some("per_2".into()), allowed: false }]
+        );
+    }
+
+    #[test]
+    fn a_step_says_what_the_turn_ran_with() {
+        let step = ev(
+            "session.step.started",
+            json!({"sessionID":"ses_1","agent":"plan","model":{"id":"deepseek-v4.1-flash-free","providerID":"opencode","variant":"high"}}),
+        );
+        assert_eq!(
+            observed_from_event(&step, "ses_1"),
+            Some(Observed { model: "opencode/deepseek-v4.1-flash-free".into(), variant: Some("high".into()), agent: Some("plan".into()) })
+        );
+        assert_eq!(observed_from_event(&step, "ses_2"), None);
+        assert_eq!(observed_from_event(&ev("session.step.ended", json!({"sessionID":"ses_1"})), "ses_1"), None);
     }
 
     #[test]
     fn the_event_stream_is_split_into_payloads() {
-        let mut buf = String::from("data: {\"type\":\"a\"}\n\ndata: {\"type\":\"b\"}\n\ndata: {\"ty");
+        let mut buf = String::from("data: {\"type\":\"a\"}\n\n: heartbeat\n\ndata: {\"type\":\"b\"}\n\ndata: {\"ty");
         let got = take_sse_events(&mut buf);
-        assert_eq!(got.len(), 2);
+        assert_eq!(got.len(), 2, "the heartbeat carries nothing");
         assert_eq!(got[1]["type"], "b");
         assert_eq!(buf, "data: {\"ty");
         buf.push_str("pe\":\"c\"}\n\n");
@@ -539,6 +571,6 @@ mod tests {
     #[test]
     fn the_argument_lists() {
         assert_eq!(serve_args(), ["serve", "--port", "0", "--hostname", "127.0.0.1"]);
-        assert_eq!(attach_args("http://127.0.0.1:4096", "ses_x1"), ["attach", "http://127.0.0.1:4096", "--session", "ses_x1"]);
+        assert_eq!(tui_args("http://127.0.0.1:4096", "ses_x1"), ["--server", "http://127.0.0.1:4096", "--session", "ses_x1"]);
     }
 }

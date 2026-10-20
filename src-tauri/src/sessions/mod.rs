@@ -1022,7 +1022,7 @@ impl SessionManager {
         let (server, resumed) = if let Some(password) = &server_password {
             let (server, conversation, existed) =
                 self.start_opencode(&row, &options, &launch, &env, password, &state_dir, &job, &mut notes)?;
-            args.extend(oc::attach_args(server.url(), &conversation));
+            args.extend(oc::tui_args(server.url(), &conversation));
             (Some((server, conversation)), existed)
         } else {
             // The CLI's own arguments, a provider's, then the options, then the conversation, which
@@ -1156,7 +1156,8 @@ impl SessionManager {
         let (conversation, existed) = match existing {
             Some(id) => (id, true),
             None => {
-                let id = server.api.create_session(&row.name)?;
+                let variant = oc::wanted_variant(row.agent.spec(), options);
+                let id = server.api.create_session(&row.name, &row.cwd, options.model.as_deref(), variant.as_deref())?;
                 rows::set_agent_session_id(&self.store, row.id, &id)?;
                 (id, false)
             }
@@ -1185,7 +1186,7 @@ impl SessionManager {
                     tries = 0;
                     while let Some(events) = stream.next() {
                         for event in events {
-                            m.record_opencode(session_id, &run, &event, &mut parser);
+                            m.record_opencode(session_id, &run, &event, &mut parser, &conversation);
                         }
                     }
                 }
@@ -1238,12 +1239,10 @@ impl SessionManager {
         });
     }
 
-    /// One event from opencode's server: what a new prompt ran with, and the turn events it means.
-    fn record_opencode(&self, session_id: u32, run: &Run, event: &serde_json::Value, parser: &mut oc::EventParser) {
+    /// One event from opencode's server: what a turn ran with, and the turn events it means.
+    fn record_opencode(&self, session_id: u32, run: &Run, event: &serde_json::Value, parser: &mut oc::EventParser, conversation: &str) {
         let mut changed = false;
-        if event.get("type").and_then(serde_json::Value::as_str) == Some("message.updated")
-            && let Some(seen) = event.pointer("/properties/info").and_then(oc::observed_from_user_info)
-        {
+        if let Some(seen) = oc::observed_from_event(event, conversation) {
             let mut slot = run.observed.lock().expect("observed lock");
             changed |= slot.as_ref() != Some(&seen);
             *slot = Some(seen);
