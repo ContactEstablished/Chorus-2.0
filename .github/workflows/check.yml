@@ -1,0 +1,64 @@
+# The same gate as `npm run check`, on every push and pull request (PLAN P14).
+#
+# `npm run check` runs the typecheck, vitest, `cargo test --workspace`,
+# clippy with `-D warnings`, and the secret scan; this file runs its steps
+# one at a time so a failure names the one that broke. It does not build the
+# app: `npm run build` needs `tauri.bundle.conf.json`'s `externalBin`, which
+# only the bundle builds (L38), and nothing here runs the Tauri bundler.
+name: check
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: windows-latest
+    env:
+      RUST_BACKTRACE: '1'
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+
+      # rustup and a stable toolchain are on the image; this fixes the
+      # default so clippy and cargo test run on the same one as a dev build.
+      - name: Rust toolchain
+        run: |
+          rustup update --no-self-update stable
+          rustup default stable
+          rustup component add clippy
+          cargo --version
+          cargo clippy --version
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install node packages
+        run: npm ci
+
+      - name: Typecheck (vue-tsc)
+        run: npm run typecheck
+
+      - name: Unit tests (vitest)
+        run: npm test
+
+      # This includes `bindings_are_current`, which regenerates src/ipc/bindings.ts in a temp file
+      # and fails if the committed one differs.
+      - name: Rust tests
+        run: cargo test --workspace
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Secret scan
+        run: npm run grep:secrets
