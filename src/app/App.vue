@@ -17,8 +17,12 @@ import { useViewStore } from '../stores/view'
 import { useNoticesStore } from '../stores/notices'
 import { installDevApi } from './devApi'
 
+import OverviewView from '../views/OverviewView.vue'
+import SessionsView from '../views/SessionsView.vue'
+import SessionView from '../views/session/SessionView.vue'
+
 const SettingsView = defineAsyncComponent(() => import('../views/SettingsView.vue'))
-const RawView = defineAsyncComponent(() => import('../raw/RawView.vue'))
+const NewSessionDialog = defineAsyncComponent(() => import('../views/NewSessionDialog.vue'))
 
 const app = useAppStore()
 const sessions = useSessionsStore()
@@ -66,7 +70,8 @@ watch(
       <TitleBar @palette="notices.info('The command palette arrives later in P4.')" />
       <main class="view">
         <SettingsView v-if="view.name === 'settings'" />
-        <RawView v-else-if="view.name === 'sessions' || view.name === 'session'" />
+        <SessionView v-else-if="view.name === 'session' && view.sessionId !== null" :session-id="view.sessionId" />
+        <SessionsView v-else-if="view.name === 'sessions'" />
         <PhasePlaceholder
           v-else-if="view.name === 'bots'"
           title="Bots"
@@ -95,10 +100,11 @@ watch(
           phase="Phase 8"
           what="Project or global notes that are added to agents' instructions, with pinned notes first."
         />
-        <PhasePlaceholder v-else title="Overview" icon="overview" phase="the next P4 step" what="Session cards grouped by status, with filters and project tags." />
+        <OverviewView v-else />
       </main>
       <StatusBar />
     </div>
+    <NewSessionDialog v-if="view.newSessionOpen" />
     <Notices />
   </div>
 </template>

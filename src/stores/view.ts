@@ -25,6 +25,7 @@ export const useViewStore = defineStore('view', () => {
   const settingsSection = ref<SettingsSection>('appearance')
   /** Whether the New session dialog is open. */
   const newSessionOpen = ref(false)
+  const sessionsLayout = ref<'list' | 'wall'>('list')
 
   const name = computed(() => place.value.name)
   const sessionId = computed(() => place.value.sessionId)
@@ -69,6 +70,7 @@ export const useViewStore = defineStore('view', () => {
     projectFilter,
     settingsSection,
     newSessionOpen,
+    sessionsLayout,
     canGoBack: computed(() => back.value.length > 0),
     go,
     openSession,

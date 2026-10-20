@@ -45,13 +45,32 @@ onMounted(() => {
     renderer.value = 'dom'
   }
   fit.fit()
+  // Before xterm's own paste handling (an ancestor's capture listener runs first).
+  host.value!.addEventListener('paste', onPaste, { capture: true })
   term.onData((data) => emit('input', data))
   term.onResize(({ cols, rows }) => emit('resize', cols, rows))
   observer = new ResizeObserver(() => fit?.fit())
   observer.observe(host.value!)
 })
 
+/**
+ * Dictation compatibility (D23): pasted text is never submitted on its own. Dictation apps often
+ * paste a sentence with a line break at the end; without bracketed paste (a shell, or a TUI that
+ * didn't ask for it) that break would press Enter, so it is dropped. With bracketed paste the
+ * agent gets the text as one paste and doesn't submit it, so it passes unchanged.
+ */
+function onPaste(e: ClipboardEvent): void {
+  const text = e.clipboardData?.getData('text/plain')
+  if (!term || !text || term.modes.bracketedPasteMode) return
+  const kept = text.replace(/[\r\n]+$/, '')
+  if (kept === text) return
+  e.preventDefault()
+  e.stopPropagation()
+  if (kept) term.paste(kept)
+}
+
 onBeforeUnmount(() => {
+  host.value?.removeEventListener('paste', onPaste, { capture: true })
   observer?.disconnect()
   themeWatch.disconnect()
   term?.dispose()

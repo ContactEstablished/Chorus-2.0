@@ -10,8 +10,9 @@ import TerminalView from '../components/TerminalView.vue'
 import { registerTerminal } from '../components/terminals'
 import { commands } from '../ipc'
 
-const props = defineProps<{ sessionId: number; live: boolean }>()
-const emit = defineEmits<{ error: [message: string] }>()
+// `autofocus` is off where several terminals mount at once (the Wall), so none takes focus.
+const props = withDefaults(defineProps<{ sessionId: number; live: boolean; autofocus?: boolean }>(), { autofocus: true })
+const emit = defineEmits<{ error: [message: string]; attached: [attached: boolean]; size: [cols: number, rows: number] }>()
 
 const term = ref<InstanceType<typeof TerminalView> | null>(null)
 let viewId: number | null = null
@@ -35,10 +36,12 @@ onMounted(async () => {
     return
   }
   viewId = res.data
+  emit('attached', true)
   // The PTY follows this view's size from now on.
   const { cols, rows } = term.value?.size() ?? { cols: 80, rows: 24 }
   void commands.sessionResize(props.sessionId, cols, rows)
-  term.value?.focus()
+  emit('size', cols, rows)
+  if (props.autofocus) term.value?.focus()
 })
 
 onBeforeUnmount(() => {
@@ -55,6 +58,7 @@ async function input(data: string): Promise<void> {
 
 function resize(cols: number, rows: number): void {
   void commands.sessionResize(props.sessionId, cols, rows)
+  emit('size', cols, rows)
 }
 
 function screenText(): string {

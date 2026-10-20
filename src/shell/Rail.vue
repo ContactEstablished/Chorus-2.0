@@ -99,7 +99,7 @@ function go(name: ViewName): void {
       </li>
     </ul>
 
-    <button class="new primary-outline" title="New session (Ctrl N)" @click="view.newSessionOpen = true">
+    <button class="new primary-outline" title="New session" @click="view.newSessionOpen = true">
       <Icon name="plus" :size="16" />
       <span class="label">New session</span>
     </button>
