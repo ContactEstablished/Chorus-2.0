@@ -306,9 +306,14 @@ impl EventParser {
     }
 
     /// The execution ended: one event per turn it held, oldest first (or one for no known turn),
-    /// each with its own reply.
+    /// each with its own reply. A turn with no id ends after the named ones, because an end with no
+    /// id closes the oldest open turn, which would be a named one.
     fn end_turns(&mut self, end: impl Fn(Option<String>, Option<String>) -> AgentEvent) -> Vec<AgentEvent> {
-        let turns = std::mem::take(&mut self.turns);
+        let mut turns = std::mem::take(&mut self.turns);
+        // Only the first can have no id: it holds the steps seen before any delivery.
+        if turns.len() > 1 && turns[0].0.is_none() {
+            turns.rotate_left(1);
+        }
         let out = if turns.is_empty() {
             vec![end(None, None)]
         } else {
@@ -617,6 +622,12 @@ mod tests {
         // No integration list to go on: no claim about keys.
         assert!(matches!(check_model(PROVIDERS, MODELS, "<html>", routed), Some(ModelCheck::Known { .. })));
         assert_eq!(check_model(PROVIDERS, MODELS, "<html>", "anthropic/x"), Some(ModelCheck::NoSuchProvider));
+        // Nor is an integration without a connections list.
+        let unknown = r#"{"data":[{"id":"openrouter","name":"OpenRouter","methods":[{"type":"key"}]}]}"#;
+        assert!(matches!(check_model(PROVIDERS, MODELS, unknown, routed), Some(ModelCheck::Known { .. })));
+        // Not listed though its integration has a key: opencode doesn't know it.
+        let signed_in = r#"{"data":[{"id":"anthropic","name":"Anthropic","methods":[{"type":"key"}],"connections":[{"type":"env","name":"ANTHROPIC_API_KEY"}]}]}"#;
+        assert_eq!(check_model(PROVIDERS, MODELS, signed_in, "anthropic/x"), Some(ModelCheck::NoSuchProvider));
     }
 
     #[test]
@@ -737,6 +748,38 @@ mod tests {
         );
         // An execution the stream saw no delivery for still ends, as a turn of its own.
         assert_eq!(p.push(&ev("session.execution.succeeded", json!({"sessionID":s}))), [AgentEvent::TurnEnded { turn: None, message: None }]);
+    }
+
+    #[test]
+    fn a_turn_the_stream_joined_mid_way_ends_after_the_named_ones() {
+        // The stream missed the first prompt's delivery (it dropped and came back), then a second
+        // prompt was steered in. Each prompt's turn keeps its own reply.
+        use crate::activity::{Tracker, TurnChange, TurnEnd};
+        let s = "ses_1";
+        let (mut p, mut t) = (EventParser::new(s), Tracker::default());
+        let mut changes = Vec::new();
+        for e in [
+            ev("session.step.started", json!({"sessionID":s,"assistantMessageID":"msg_a"})),
+            ev("session.text.ended", json!({"sessionID":s,"assistantMessageID":"msg_a","ordinal":0,"text":"A"})),
+            ev("session.inbox.enqueued", json!({"inboxID":"msg_2","sessionID":s,"item":{"type":"user","payload":{"text":"And B."}}})),
+            ev("session.inbox.delivered", json!({"sessionID":s,"inboxID":"msg_2"})),
+            ev("session.step.started", json!({"sessionID":s,"assistantMessageID":"msg_b"})),
+            ev("session.text.ended", json!({"sessionID":s,"assistantMessageID":"msg_b","ordinal":0,"text":"B"})),
+            ev("session.execution.succeeded", json!({"sessionID":s})),
+        ] {
+            for event in p.push(&e) {
+                changes.extend(t.apply(&event, 0));
+            }
+        }
+        assert_eq!(
+            changes,
+            [
+                TurnChange::Opened { key: 1, turn: Some("msg_2".into()), prompt: Some("And B.".into()) },
+                TurnChange::Closed { key: 1, end: TurnEnd::Done, message: Some("B".into()) },
+                TurnChange::Opened { key: 2, turn: None, prompt: None },
+                TurnChange::Closed { key: 2, end: TurnEnd::Done, message: Some("A".into()) },
+            ]
+        );
     }
 
     #[test]

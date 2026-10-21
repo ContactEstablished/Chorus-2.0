@@ -1145,10 +1145,16 @@ impl SessionManager {
         (parent, state_dir): (&[(String, String)], &Path),
         notes: &mut Vec<String>,
     ) -> Result<(Server, String, bool), String> {
-        // A 1.x can't be driven at all. A session relaunched at start-up can come before the first
-        // detection, so the version is read here then.
-        let detected = self.agents.get(AgentKind::Opencode).unwrap_or_else(|| agents::detect::detect(AgentKind::Opencode, parent, state_dir));
-        if let Some(refusal) = oc::too_old(detected.version.as_deref(), row.agent.spec().verified) {
+        // A 1.x can't be driven at all. The version is read here when there is no detection yet (a
+        // session relaunched at start-up can come first), or when the last one was too old, since
+        // the refusal asks the user to update.
+        let verified = row.agent.spec().verified;
+        let detected = self
+            .agents
+            .get(AgentKind::Opencode)
+            .filter(|d| oc::too_old(d.version.as_deref(), verified).is_none())
+            .unwrap_or_else(|| agents::detect::detect(AgentKind::Opencode, parent, state_dir));
+        if let Some(refusal) = oc::too_old(detected.version.as_deref(), verified) {
             return Err(refusal);
         }
         let server = Server::start(&launch.program, &launch.args, &row.cwd, env, password, job)?;

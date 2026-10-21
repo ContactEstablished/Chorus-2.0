@@ -195,9 +195,10 @@ impl Api {
         if status != 200 {
             return Err(format!("opencode answered {status} when asked for its models"));
         }
-        // Which providers have a key or login. Without this answer the check makes no claim.
-        let integrations = match self.get("/api/integration")? {
-            (200, body) => body,
+        // Which providers have a key or login. Without this answer the check makes no claim about
+        // keys, and still checks the provider, model and effort.
+        let integrations = match self.get("/api/integration") {
+            Ok((200, body)) => body,
             _ => String::new(),
         };
         Ok(opencode::check_model(&providers, &models, &integrations, model))
