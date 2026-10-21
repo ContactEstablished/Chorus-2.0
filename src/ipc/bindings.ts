@@ -30,9 +30,10 @@ export const commands = {
 	/**
 	 *  The arguments a launch of `agent` with `options` adds, from the same functions the launch uses:
 	 *  New session's summary shows them. For an agent with `optionsInConfig`, the server configuration
-	 *  entries instead, as `key=value`. A provider adds its own on top.
+	 *  entries instead, as `key=value`. A provider adds its own on top; `on_provider` says the model is
+	 *  that provider's own id.
 	 */
-	launchArgs: (agent: AgentKind, options: LaunchOptions) => typedError<string[], string>(__TAURI_INVOKE("launch_args", { agent, options })),
+	launchArgs: (agent: AgentKind, options: LaunchOptions, onProvider: boolean) => typedError<string[], string>(__TAURI_INVOKE("launch_args", { agent, options, onProvider })),
 	providersList: () => typedError<ProviderSummary[], string>(__TAURI_INVOKE("providers_list")),
 	providerSave: (input: ProviderSave) => typedError<ProviderSummary, string>(__TAURI_INVOKE("provider_save", { input })),
 	/**  Sessions on it keep their runs; their next launch says the provider is gone. */

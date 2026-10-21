@@ -119,6 +119,14 @@ pub fn listed(body: &str) -> usize {
     data(body).and_then(|d| d.as_array().map(Vec::len)).unwrap_or(0)
 }
 
+/// Whether a provider list answer holds `provider`. A provider from the configuration (Chorus's
+/// Ollama block) can still be missing while the built-in ones are listed.
+pub fn lists_provider(body: &str, provider: &str) -> bool {
+    data(body)
+        .and_then(|d| d.as_array().map(|a| a.iter().any(|p| p.get("id").and_then(Value::as_str) == Some(provider))))
+        .unwrap_or(false)
+}
+
 /// A session's model as the API names it, `{providerID, id, variant}`, from `provider/model`.
 fn model_ref(model: &str, variant: Option<&str>) -> Option<Value> {
     let (provider, id) = model.split_once('/')?;
@@ -191,7 +199,7 @@ pub fn check_model(providers_body: &str, models_body: &str, integrations_body: &
     let integrations = data(integrations_body).unwrap_or(Value::Null);
     let Some(p) = providers.as_array()?.iter().find(|p| p.get("id").and_then(Value::as_str) == Some(provider)) else {
         return Some(match integration(&integrations, provider).and_then(connected) {
-            Some(false) => ModelCheck::NoKey,
+            Some(false) if !keyless => ModelCheck::NoKey,
             _ => ModelCheck::NoSuchProvider,
         });
     };
@@ -588,6 +596,9 @@ mod tests {
         assert_eq!(listed(PROVIDERS), 4);
         assert_eq!(listed(r#"{"location":{},"data":[]}"#), 0);
         assert_eq!(listed("[]"), 0);
+        assert!(lists_provider(PROVIDERS, "ollama"));
+        assert!(!lists_provider(PROVIDERS, "anthropic"));
+        assert!(!lists_provider("[]", "ollama"));
     }
 
     #[test]
@@ -624,8 +635,13 @@ mod tests {
             model_note(routed, None, &ModelCheck::NoKey).unwrap(),
             "opencode has no key or login for openrouter in this session, so openrouter/deepseek/deepseek-v4.1-flash won't run. Run it on a provider from Settings."
         );
-        // A keyless route is never "no key", whatever its integration says.
+        // A keyless route is never "no key", whatever its integration says, listed or not. Seen at
+        // start-up: a relaunch's check ran before opencode had loaded Chorus's Ollama block.
         assert!(matches!(check_model(PROVIDERS, MODELS, NO_KEYS, routed, true), Some(ModelCheck::Known { .. })));
+        let loading = r#"{"location":{},"data":[{"id":"opencode","activation":"enabled","settings":{"apiKey":"public"}}]}"#;
+        let ollama = r#"{"data":[{"id":"ollama","name":"Ollama","methods":[],"connections":[]}]}"#;
+        assert_eq!(check_model(loading, MODELS, ollama, "ollama/qwen3", false), Some(ModelCheck::NoKey));
+        assert_eq!(check_model(loading, MODELS, ollama, "ollama/qwen3", true), Some(ModelCheck::NoSuchProvider));
         // A key in the environment is a connection.
         assert!(matches!(check_model(PROVIDERS, MODELS, ENV_KEY, routed, false), Some(ModelCheck::Known { .. })));
         // Not listed at all, but opencode has it as an integration: it's the key that's missing.

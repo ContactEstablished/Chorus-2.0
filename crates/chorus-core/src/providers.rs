@@ -626,6 +626,24 @@ mod tests {
     }
 
     #[test]
+    fn a_bare_ollama_id_reaches_opencode_as_ollama_slash_it() {
+        // New session offers Ollama's own names; the session keeps that id, and the route names it
+        // opencode's way. Prefixed twice, opencode asks Ollama for a model that doesn't exist.
+        let spec = AgentKind::Opencode.spec();
+        let asked = crate::agent::LaunchOptions { model: Some("llama3.2:1b".into()), ..Default::default() };
+        assert!(spec.resolve(&asked).is_err(), "without a provider opencode needs provider/model");
+        let mut options = spec.resolve_on(&asked, true).unwrap();
+        let r = route(AgentKind::Opencode, ProviderKind::Ollama, "Ollama (local)", "", options.model.as_deref().unwrap(), None).unwrap();
+        assert_eq!(r.model, "ollama/llama3.2:1b");
+        let block = r.opencode_provider.unwrap();
+        assert_eq!(block["ollama"]["models"].as_object().unwrap().keys().collect::<Vec<_>>(), ["llama3.2:1b"]);
+        options.model = Some(r.model);
+        let config: Value = serde_json::from_str(&crate::opencode::config_content(spec, &options, Some(&block)).unwrap()).unwrap();
+        assert_eq!(config["model"], "ollama/llama3.2:1b");
+        assert_eq!(config["providers"]["ollama"]["models"]["llama3.2:1b"]["name"], "llama3.2:1b");
+    }
+
+    #[test]
     fn codex_gets_its_provider_from_config_overrides() {
         let r = route(AgentKind::Codex, ProviderKind::Openrouter, "OpenRouter", "", "minimax/minimax-m3.1-flash:free", None).unwrap();
         assert_eq!(r.key_var, Some("OPENROUTER_API_KEY"));

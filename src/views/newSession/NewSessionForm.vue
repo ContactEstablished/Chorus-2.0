@@ -302,11 +302,11 @@ const args = ref<string[]>([])
 const argsProblem = ref<string | null>(null)
 let argsSeq = 0
 watch(
-  [agent, effort, permission, model],
+  [agent, effort, permission, model, providerId],
   async () => {
     const seq = ++argsSeq
     const r = await commands
-      .launchArgs(agent.value, { effort: effort.value, permission: permission.value, model: model.value.trim() || null })
+      .launchArgs(agent.value, { effort: effort.value, permission: permission.value, model: model.value.trim() || null }, providerId.value !== null)
       .catch(() => null)
     if (seq !== argsSeq || !r) return
     args.value = r.status === 'ok' ? r.data : []

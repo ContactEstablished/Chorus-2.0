@@ -3,7 +3,8 @@
 ## 1. Verdict
 
 **Partly done.** Gemini CLI, Aider and Ollama go through Chorus's launch path and are observed
-starting with the arguments they declare; a turn ran on Ollama through opencode; CI is in; the
+starting with the arguments they declare; a turn ran on Ollama through opencode (in a standalone
+probe; in Chorus only after the fix in §12); CI is in; the
 installer's uninstall wording and registry leftover are fixed and tested. Task 1 (re-verify opencode
 2.1.1) was stopped and reported, as the plan says; **`main` has since done that port itself**, so the
 report `_docs/HANDOFF-OC2-opencode.md` is marked superseded. Two limits of this hand-off, both
@@ -105,7 +106,7 @@ table is the point of the task.
 | 3. Cheaper agents | Done. `Spec.has_event_channel` and `Spec.partner_rank`; `partner_order()` replaces the fixed array; the two views read the flag. |
 | 4. Gemini CLI adapter | Done as far as verification goes (0.64.0). Options, resume, trust, shim, version, Google key pattern. **No turn run** (no login or key). Auto-update has no per-launch switch; see §9. |
 | 5. Aider adapter | Done as far as verification goes (0.86.2, under uv's Python 3.12). Options, effort, resume by history, `--no-check-update`, OpenRouter route. **No turn run** (no key). |
-| 6. Ollama via opencode | Done: provider, model list from `/api/tags`, the keyless block, the "not running" note, and a **turn that ran on `llama3.2:1b` through opencode with the exact block** (§6). It only became runnable once `main`'s 2.x port arrived in the rebase. |
+| 6. Ollama via opencode | Done: provider, model list from `/api/tags`, the keyless block, the "not running" note, and a **turn that ran on `llama3.2:1b` through opencode with the exact block** (§6). It only became runnable once `main`'s 2.x port arrived in the rebase. **Corrected:** that turn ran in a standalone probe server, not in Chorus. In Chorus the first turn failed (the model was named `ollama/` twice); see §12 for the fix and the in-app turns. |
 | 7. CI | Done. Run on a clean clone; timings in §6. |
 | 8. "Drop the 2" design | Done, below. |
 | 9. Signing decision | Done, below, with dated prices. |
@@ -406,3 +407,38 @@ Manual test script (in the real app, your instance):
 5. Install the bundle `/S /NS` on a throwaway profile, uninstall `/S`, and check the HKCU key is gone
    and the data folder is kept; the uninstall checkbox reads "Delete app data too (sessions,
    history, keys)".
+
+## 12. After the merge: Ollama's model name (2026-10-20)
+
+**How this reached `main`.** The commits above (`a7612a2`, on `45eb41f`) were pushed to GitHub's
+`main` by mistake at 22:05, while the main line had merged `handoff/oc2` locally. The main line merged
+the two as `fec5ccd`, resolved as in `HANDOFF-P14-OC2-MERGE.md` §4, and the fix below went on top.
+
+**The bug.** New session offers Ollama's own model names (`llama3.2:1b`), but opencode's rule that a
+model is `provider/model` ran even on a provider, so a bare name was refused. Typed as
+`ollama/llama3.2:1b`, it passed that rule but was prefixed again by the route, and Ollama answered
+"model not found". The turn of §6 that ran had used a standalone probe server, not Chorus.
+
+**The fix.**
+- `Spec::resolve_on(asked, on_provider)`: on a provider the model is that provider's own id, and the
+  route names it the agent's way. Session creation and `launch_args` (New session's summary) pass
+  whether a provider is chosen; `resolve` is `resolve_on(…, false)`.
+- A start-up relaunch's model check could run before opencode had loaded Chorus's Ollama block, and
+  named a missing key. For a keyless route, `Api::check_model` now waits for that provider to be
+  listed (`opencode::lists_provider`), and an unlisted keyless provider is `NoSuchProvider`, never
+  `NoKey`.
+- Tests: `a_bare_ollama_id_reaches_opencode_as_ollama_slash_it` (resolve, route, configuration), the
+  bare id in `agent.rs`, `lists_provider`, and the keyless cases of `check_model`.
+
+**Seen in the `p14` instance** (Ollama with `llama3.2:1b`, opencode 2.1.1, driven over CDP and IPC):
+- `launchArgs` for `llama3.2:1b`: without a provider, "opencode takes a model as provider/model…";
+  on Ollama, `model=llama3.2:1b`.
+- A new session on Ollama with the bare id: "Reply with the single word PONG." ended `done`, "PONG".
+- Restart: resumed, no note, observed `ollama/llama3.2:1b` (variant `default`, agent `build`) with no
+  differences; a second turn ended `done`, "PING".
+- Before the wait, a session relaunched at start-up had the note "opencode has no key or login for
+  ollama…". After it, the start-up relaunch left both Ollama sessions without a note (a keyless
+  OpenRouter session kept its own), and a typed turn ended `done`, "READY".
+- Closing the app ended all six opencode processes it had started.
+
+`npm run check` passed after the last code change (core 369 tests).

@@ -182,12 +182,20 @@ impl Api {
     /// `keyless` is the route's provider needing no key (Ollama), which opencode lists as disabled.
     pub fn check_model(&self, model: &str, keyless: bool) -> Result<Option<ModelCheck>, String> {
         let deadline = std::time::Instant::now() + PROVIDERS_WAIT;
+        // A keyless route's provider is Chorus's own block, so it will be listed: wait for it, since
+        // the built-in providers can be listed first. Any other may never be (no key), so the first
+        // non-empty list will do.
+        let wanted = model.split_once('/').map(|(p, _)| p).filter(|_| keyless);
         let providers = loop {
             let (status, body) = self.get("/api/provider")?;
             if status != 200 {
                 return Err(format!("opencode answered {status} when asked for its providers"));
             }
-            if opencode::listed(&body) > 0 || std::time::Instant::now() >= deadline {
+            let ready = match wanted {
+                Some(p) => opencode::lists_provider(&body, p),
+                None => opencode::listed(&body) > 0,
+            };
+            if ready || std::time::Instant::now() >= deadline {
                 break body;
             }
             std::thread::sleep(Duration::from_millis(250));

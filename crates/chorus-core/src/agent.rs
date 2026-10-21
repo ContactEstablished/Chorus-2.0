@@ -416,6 +416,13 @@ impl Spec {
 
     /// Fills in the declared defaults and refuses anything this agent doesn't declare.
     pub fn resolve(&self, asked: &LaunchOptions) -> Result<LaunchOptions, String> {
+        self.resolve_on(asked, false)
+    }
+
+    /// [`Spec::resolve`] for a session that runs on a provider (`on_provider`) or not. On a provider
+    /// the model is that provider's own id (`llama3.2:1b` on Ollama), which its route names the
+    /// agent's way (`ollama/llama3.2:1b`), so opencode's `provider/model` rule doesn't apply to it.
+    pub fn resolve_on(&self, asked: &LaunchOptions, on_provider: bool) -> Result<LaunchOptions, String> {
         let name = self.kind.display_name();
         let effort = asked.effort.or(self.default_effort);
         if let Some(e) = effort
@@ -433,7 +440,7 @@ impl Spec {
             None => None,
             Some(_) if self.model.is_none() => return Err(format!("{name} doesn't take a model at launch")),
             Some(m) if !valid_model(m) => return Err(format!("{m:?} is not a model name Chorus can pass on")),
-            Some(m) if self.carrier == Carrier::ServerConfig && !is_provider_model(m) => {
+            Some(m) if self.carrier == Carrier::ServerConfig && !on_provider && !is_provider_model(m) => {
                 return Err(format!("{name} takes a model as provider/model, for example opencode/big-pickle"));
             }
             Some(m) => Some(m.to_owned()),
@@ -596,6 +603,9 @@ mod tests {
         let opencode = AgentKind::Opencode.spec();
         let asked = LaunchOptions { model: Some("big-pickle".into()), ..Default::default() };
         assert!(opencode.resolve(&asked).unwrap_err().contains("provider/model"));
+        // On a provider the model is the provider's own id, which its route prefixes.
+        let asked = LaunchOptions { model: Some("llama3.2:1b".into()), ..Default::default() };
+        assert_eq!(opencode.resolve_on(&asked, true).unwrap().model.as_deref(), Some("llama3.2:1b"));
         let asked = LaunchOptions { effort: Some(Effort::Deep), ..Default::default() };
         assert!(opencode.resolve(&asked).unwrap_err().contains("model named beside it"));
         let asked = LaunchOptions { effort: Some(Effort::Deep), model: Some("opencode/glm-5.3-flash-free".into()), ..Default::default() };

@@ -808,7 +808,7 @@ impl SessionManager {
             }
             credentials::get(&self.store, c.id)?.ok_or("That key no longer exists.")?;
         }
-        let options = agent.spec().resolve(options)?;
+        let options = agent.spec().resolve_on(options, provider_id.is_some())?;
         if let Some(pid) = provider_id {
             let provider = provider_rows::get(&self.store, pid)?.ok_or("That provider no longer exists.")?;
             prov::route_support(agent, provider.kind)?;
