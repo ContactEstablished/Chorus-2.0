@@ -312,6 +312,16 @@ folder typed or pasted in short names does the same on any machine. Chorus now w
 folder in full (`GetLongPathNameW`) before keeping it. To reproduce locally, point `TMP` and `TEMP` at
 a folder's short form (PowerShell: `(New-Object -ComObject Scripting.FileSystemObject).GetFolder($p).ShortPath`).
 
+**L44 — Ending a process only starts its exit (2026-10-21).** `TerminateProcess` and `TerminateJobObject`
+return before the process has closed its handles, and until it has, its working folder can't be
+deleted. Deleting a `cmd.exe`'s working folder straight after killing it failed 148 times in 150, and
+0 in 150 after waiting for it to exit. Close waited only for a session's first process, so
+`git worktree remove` could run while another was still exiting, which failed once in a local check
+with "failed to delete '<worktree>': Permission denied". Close now waits up to 3 s for every process it
+ended. When `git worktree remove` fails that way (git 2.50), it has already deleted the worktree's files
+and git's record of it. What's left is the folder in use, and running it again says "is not a working
+tree".
+
 ## Money and models
 
 **L16 — Read-then-revoke under-reports OpenRouter spend.** Reading a capped key's usage right after the

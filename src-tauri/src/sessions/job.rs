@@ -16,20 +16,21 @@
 use std::collections::HashSet;
 use std::ffi::c_void;
 use std::mem::size_of;
+use std::time::{Duration, Instant};
 
 use chorus_core::tree::{Proc, spared_on_close, strays};
-use windows::Win32::Foundation::{CloseHandle, FILETIME, HANDLE, HWND, LPARAM};
+use windows::Win32::Foundation::{CloseHandle, FILETIME, HANDLE, HWND, LPARAM, WAIT_OBJECT_0};
 use windows::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS,
 };
 use windows::Win32::System::JobObjects::{
-    AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOBOBJECT_BASIC_PROCESS_ID_LIST,
-    JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectBasicProcessIdList, JobObjectExtendedLimitInformation,
-    QueryInformationJobObject, SetInformationJobObject, TerminateJobObject,
+    AssignProcessToJobObject, CreateJobObjectW, IsProcessInJob, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    JOBOBJECT_BASIC_PROCESS_ID_LIST, JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectBasicProcessIdList,
+    JobObjectExtendedLimitInformation, QueryInformationJobObject, SetInformationJobObject, TerminateJobObject,
 };
 use windows::Win32::System::Threading::{
-    GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SET_QUOTA, PROCESS_TERMINATE,
-    TerminateProcess,
+    GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SET_QUOTA, PROCESS_SYNCHRONIZE,
+    PROCESS_TERMINATE, TerminateProcess, WaitForSingleObject,
 };
 use windows::Win32::UI::WindowsAndMessaging::{EnumWindows, GW_OWNER, GetWindow, GetWindowThreadProcessId, IsWindowVisible};
 use windows::core::{BOOL, PCWSTR};
@@ -151,6 +152,28 @@ impl Job {
         }
         Ok(CloseOutcome { killed, spared: spared.into_iter().collect() })
     }
+
+    /// Waits up to `timeout` for these processes of the job to be gone. Ending a process only
+    /// starts its exit, and until it's gone the folder it worked in can't be deleted. True if they
+    /// all are.
+    pub fn wait_gone(&self, pids: &[u32], timeout: Duration) -> bool {
+        let deadline = Instant::now() + timeout;
+        pids.iter().all(|&pid| {
+            // An id that can't be opened is gone; one outside the job is another process's now.
+            let Ok(process) = OwnedProcess::open(pid, PROCESS_SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION) else {
+                return true;
+            };
+            let mut in_job = BOOL(0);
+            // SAFETY: live process and job handles, and a valid out-pointer.
+            if unsafe { IsProcessInJob(process.0, Some(self.0), &mut in_job) }.is_err() || !in_job.as_bool() {
+                return true;
+            }
+            let ms = deadline.saturating_duration_since(Instant::now()).as_millis() as u32;
+            // SAFETY: a live handle opened with SYNCHRONIZE.
+            let waited = unsafe { WaitForSingleObject(process.0, ms) };
+            waited == WAIT_OBJECT_0
+        })
+    }
 }
 
 impl Drop for Job {
@@ -231,4 +254,33 @@ fn pids_with_windows() -> HashSet<u32> {
         let _ = EnumWindows(Some(each), LPARAM((&raw mut set) as isize));
     }
     set
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::windows::io::AsRawHandle;
+    use std::os::windows::process::CommandExt;
+
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+    #[test]
+    fn an_ended_process_is_waited_for_until_gone() {
+        let job = Job::new().unwrap();
+        let mut child = std::process::Command::new("cmd.exe")
+            .args(["/c", "ping -n 30 127.0.0.1 >nul"])
+            .creation_flags(CREATE_NO_WINDOW)
+            .spawn()
+            .unwrap();
+        job.assign(HANDLE(child.as_raw_handle())).unwrap();
+        let pid = child.id();
+        assert!(!job.wait_gone(&[pid], Duration::from_millis(200)), "it's still running");
+        job.terminate(1).unwrap();
+        assert!(job.wait_gone(&[pid], Duration::from_secs(5)));
+        // A process outside the job isn't waited for, whatever its id was.
+        let t0 = Instant::now();
+        assert!(job.wait_gone(&[std::process::id()], Duration::from_secs(5)));
+        assert!(t0.elapsed() < Duration::from_secs(1));
+        let _ = child.wait();
+    }
 }

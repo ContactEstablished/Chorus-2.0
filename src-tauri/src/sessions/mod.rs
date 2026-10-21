@@ -272,6 +272,9 @@ const MAX_WRITE_BYTES: usize = 1 << 20;
 const MAX_CWD_BYTES: usize = 1024;
 /// How long Close and Restart wait for a run's output to drain before moving on.
 const FINISH_TIMEOUT: Duration = Duration::from_secs(5);
+/// How long they then wait for the run's ended processes to be gone, so a worktree they worked in
+/// can be removed.
+const GONE_TIMEOUT: Duration = Duration::from_secs(3);
 const BOUNDARY_RESTARTED: &str = "── Restarted ──";
 /// How often an open Claude Code turn's transcript is checked for an interrupt.
 const TRANSCRIPT_POLL: Duration = Duration::from_secs(2);
@@ -1514,12 +1517,14 @@ impl SessionManager {
         Ok(())
     }
 
-    /// Ends a live run on Chorus's request and waits for its output to drain.
+    /// Ends a live run on Chorus's request and waits for its output to drain and its processes to
+    /// be gone.
     fn end_run_for(&self, live: &Live, cause: ExitCause) -> job::CloseOutcome {
         let Some(run) = live.current_run() else { return job::CloseOutcome::default() };
         *run.requested.lock().expect("requested lock") = Some(cause);
         let outcome = run.end_processes();
         run.wait_finished(FINISH_TIMEOUT);
+        run.job.wait_gone(&outcome.killed, GONE_TIMEOUT);
         outcome
     }
 
