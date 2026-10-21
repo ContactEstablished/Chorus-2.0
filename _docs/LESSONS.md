@@ -30,7 +30,7 @@ part of a bracketed paste and lands as a newline in the input box; the agent nev
 binding, or a model mismatch: no error, no log, clean exit. The only proof an effort applied is the stored
 user message read back through `opencode serve` (`GET /session/{id}/message` → `model.variant`). Its TUI
 also remembers the last variant per model in `model.json` under its state home, and that **overrides**
-configuration. Isolate `XDG_STATE_HOME` and `XDG_DATA_HOME` in any test that launches it. Its TUI drops
+configuration (1.x; 2.x keeps the model on the session, L42). Isolate `XDG_STATE_HOME` and `XDG_DATA_HOME` in any test that launches it. Its TUI drops
 keystrokes typed before the `Ask anything` prompt appears.
 
 **L6 — Claude Code token accounting.** Subagent work lives in `<sessionId>/subagents/*.jsonl` beside the
@@ -277,6 +277,32 @@ while `POST /session` is now the web app's route and answers 405, so every openc
   `{id, action, resources}` and `permission.replied` `{requestID, reply}` (replying takes
   `{decision: once|always|reject}`); questions are forms, `form.created` `{form: {id, fields}}` and
   `form.replied` `{id, answer}`. A shell command runs through Git Bash on this machine.
+
+**L42 — opencode 2.1.1, measured in the real app (2026-10-20, hand-off oc2).**
+- The TUI keeps no `model.json` (its state folder has only `latest/tui/tabs.json`, `prompt-history.jsonl`
+  and locks). A model or effort picked in the TUI (ctrl+t cycles the variant) is sent with the next
+  prompt and stays on the session (a pick with no prompt after it is lost on restart). `POST
+  /api/session/{id}/model` `{model: {providerID, id, variant}}` sets it on an existing session (204), and
+  the stream reports `session.model.selected` `{model, previous}`.
+- A prompt typed while a turn runs is "steered": `session.inbox.enqueued` at once, delivered after the
+  current step ends, and one `session.execution.succeeded` answers both.
+- Rejecting an approval fails the tool ("The user declined this tool call"), fails the step and ends the
+  execution with `session.execution.interrupted` `{reason: "shutdown"}`; an Esc is `{reason: "user"}`.
+- Providers: without keys `/api/provider` lists `openrouter`, `opencode` and `ollama`, all `enabled`,
+  and `/api/model` has only their models; Anthropic's 20 appear there with `ANTHROPIC_API_KEY` set.
+  `/api/integration` lists every provider with its sign-in methods and `connections`; a key in the
+  environment shows as `{type: "env", name}`. opencode's free tier has `settings.apiKey: "public"`;
+  Ollama is built in, at `127.0.0.1:11434/v1`, with no integration.
+- `GET /api/event` takes no cursor and opencode can't replay: `GET /api/experimental/session/{id}/log`
+  answers only `log.synced` with the newest `seq`, whatever `after` and `follow` say. An idle stream
+  sends `: heartbeat` every 15 s and stayed open 10 minutes. Pending asks can be listed with `GET
+  /api/session/{id}/permission` and `/form`; whether a session is running, with `GET /api/session/active`.
+- The inbox carries `user`, `synthetic`, `compaction` and `move` items (`Session.Inbox.Info`); only
+  `user` items were seen.
+- `opencode --server <url>` exits 1 at once with "Could not reach server" when nothing answers there.
+- Relative `XDG_*` paths break opencode (`EEXIST` on mkdir); give them absolute.
+- The TUI still drops what is written to it while it starts (L5 says so for 1.x). Text written about
+  the first 6 s after launch lands in the composer, but its Enter is lost.
 
 ## Money and models
 

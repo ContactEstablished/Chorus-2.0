@@ -29,6 +29,25 @@ headless runs only, for Automations and Bots (P8); (d) its web UI in a Chorus wi
 after spike S9; likely (b) for supervised sessions plus (c) for Automations, since Chorus reads agent
 state only from structured channels.* Blocks: the P14 `dsh` adapter.
 
+**Q22 — Should opencode catch up after a dropped event stream?** (Hand-off oc2, L42.) A dropped stream
+reconnects, and what it missed is lost: if a turn ended in the gap, the session shows Working until the
+next turn ends. opencode 2.1.1 can't replay. Options: (a) leave it, because the stream is loopback to a
+server that lives exactly as long as the run, and an idle one held for 10 minutes; (b) on reconnect, ask
+`GET /api/session/active` and the session's outcome, close a turn that ended, and list pending
+approvals and forms (about 50 lines in core plus one call), tested by unit tests only, since a drop
+can't be provoked. *Default: (a), and (b) if a real drop is ever seen.* Blocks: nothing.
+
+**Q23 — Should a resumed opencode run override an effort picked in its TUI?** (D60.) As built, a model or
+effort picked in the TUI lasts until the next Restart or relaunch, which goes back to the session's
+options, and the session's facts show the difference while it lasts. The alternative is to keep the
+TUI's choice and only show the difference, which makes the session's options a starting point rather
+than a setting. *Default: as built, which is what 1.x did.* Blocks: D60 becoming Decided.
+
+**Q24 — Settings → Agents says versions "are tried and reported, never refused"**, and now shows an
+opencode 1.x refused (D61). 1.x was checked and is known not to work, so the sentence still holds, but it
+reads as a contradiction. Options: (a) leave it; (b) "Versions Chorus hasn't checked are tried and
+reported; one it can't drive says why." *Default: (b), a one-line front-end change.* Blocks: nothing.
+
 ## Resolved 2026-10-18
 
 Matthew kept the name Chorus, accepted every recommended default, and moved voice to a separate

@@ -6,7 +6,7 @@ Done, with one item measured and not built (reconnect replay, question 1). The p
 `HANDOFF-OC2-opencode.md` was written on the P14 branch, which forked from `main` at `cb415a5`, before
 the main line's own 2.1.1 port (`340fe5f`, `64836cb`, D58). Matthew chose to verify that port end to end
 and fix what failed rather than redo it. This branch runs every exit check of the plan in a real `oc2`
-app instance and fixes the five gaps that turned up.
+app instance and fixes the six gaps that turned up (four in §5's table, two under it).
 
 ## 2. Branch
 
@@ -210,7 +210,8 @@ Free models only (`opencode/deepseek-v4.1-flash-free`); nothing was spent. Scree
 - Session panel wording, not changed: an opencode session with no provider says "Runs on: its own
   sign-in", but a session's opencode has its own data folder, so the user's own login isn't there.
   Only opencode's free tier (or a Chorus provider) works. The new no-key note says so when it matters.
-- The no-key check makes no claim when `/api/integration` doesn't answer in the expected shape.
+- The no-key check makes no claim when `/api/integration` doesn't answer in the expected shape (or,
+  since the main-line review, at all; §12).
 
 ## 11. How to review
 
@@ -231,3 +232,33 @@ Manual test (opencode 2.1.1, a scratch folder, free models only):
    note names the missing key before any prompt.
 6. Optional: put a shim printing `1.19.3` first on PATH (an npm-style `opencode.cmd` pointing at a
    Node script) and start the app. Settings → Agents shows the refusal, and the opencode tile is disabled.
+
+## 12. Main-line review (2026-10-20)
+
+Merged into `main` by fast-forward at `73b1989`. A reviewer that took no part in the branch read every
+hunk and ran the core tests. Its findings, and what the main line did with them:
+
+1. **Fixed: a turn with no id could close the wrong turn.** If the stream missed a delivery (a drop)
+   and a prompt was then steered in, the execution's end closed the named turn with the earlier reply,
+   and recorded the named turn's own reply as a turn with no prompt. A turn with no id now ends after
+   the named ones. Test: `a_turn_the_stream_joined_mid_way_ends_after_the_named_ones`, through the
+   tracker.
+2. **Fixed: a transport error on `GET /api/integration` failed the whole model check.** It now skips
+   only the key check, as a bad answer already did. Still silent: nothing says the key check was
+   skipped. A note would change `Api::check_model`'s signature, which P14's merge resolution (§10)
+   depends on, and a missing key still fails the first turn visibly.
+3. **Fixed: Restart refused a 1.x again after the user updated opencode**, until Settings' Look again,
+   because the launch trusted the cached detection. A cached "too old" is now read again at launch.
+   Not seen in the app. Settings shows the old detection until Look again.
+4. **Not changed: when a steered execution fails or is interrupted, every prompt in it gets that end**,
+   so an earlier prompt whose step had finished loses its reply. Before this branch it was closed as
+   interrupted with no reply, so this isn't a regression.
+5. **Follow-up, from before this branch: every inbox delivery opens a turn.** 2.1.1's inbox also
+   carries `synthetic`, `compaction` and `move` items (`Session.Inbox.Info` in `/openapi.json`), so a
+   compaction delivered during an execution would become a turn with no prompt. None was seen, and
+   whether a `synthetic` item should have a turn isn't known, so nothing was guessed.
+6. Tests added: an integration without a `connections` list, and an unlisted provider whose integration
+   has a key.
+
+§8's proposals became D60 (OC2-D1), D61 (OC2-D2) and D62 (OC2-D3), all Proposed, and L42 (OC2-L1);
+L5 and ARCHITECTURE were edited as §8 says.

@@ -134,7 +134,9 @@ the caveats). *(docs)* marks what could only be read, not run.
 *opencode is now 2.1.1 (D58, LESSONS L41): its column describes 1.18.34. In 2.x the TUI connects with
 `opencode --server <url> --session <id>`, the API is under `/api/`, turns run from `session.inbox.delivered`
 to `session.execution.succeeded`, questions are forms (`form.created`), and approvals are
-`permission.asked`, answered with `{decision}`.*
+`permission.asked`, answered with `{decision}`. A model or effort picked in the TUI stays on the session,
+so a resumed run sets the session's own again (D60). A prompt typed during a turn joins the running
+execution, and opencode can't replay events a dropped stream missed (L42).*
 
 **Fallbacks are explicit.** If a CLI update breaks a parser, the adapter reports "Friendly view
 unavailable for codex 0.170: unrecognised rollout format" in the session header, and Raw keeps working.
