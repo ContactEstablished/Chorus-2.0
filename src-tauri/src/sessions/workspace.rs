@@ -309,10 +309,29 @@ impl SessionManager {
                     let _ = worktree_rows::set_removed(&self.store, w.id);
                     format!("Removed the worktree. Its branch {} is kept.", w.branch)
                 }
+                // git stops trying partway through deleting the files, but drops its record of
+                // the worktree anyway (LESSONS L44).
+                Err(e) if !still_a_worktree(&w.path) => {
+                    let _ = worktree_rows::set_removed(&self.store, w.id);
+                    format!(
+                        "Removed the worktree from git, but couldn't delete all of its folder ({e}). What's left can be deleted. Its branch {} is kept.",
+                        w.branch
+                    )
+                }
                 Err(e) => format!("Couldn't remove the worktree ({e}), so it's kept."),
             },
             Ok(false) => "Kept the worktree: it has uncommitted changes.".into(),
             Err(e) => format!("Kept the worktree: {e}"),
         })
+    }
+}
+
+/// Whether git still takes `path` for a worktree. When it can't say, the answer is yes, so nothing
+/// is claimed gone.
+fn still_a_worktree(path: &str) -> bool {
+    match git::facts(Path::new(path)) {
+        Ok(Some(f)) => folders::same(&f.top_level, path),
+        Ok(None) => false,
+        Err(_) => true,
     }
 }

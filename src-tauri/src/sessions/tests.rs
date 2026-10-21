@@ -408,3 +408,48 @@ fn a_session_can_work_in_a_worktree_of_its_own() {
     assert!(note.contains("already gone"), "{note}");
     assert!(!git_in(&repo, &["worktree", "list"]).contains(&gone.branch));
 }
+
+#[test]
+fn a_worktree_git_removed_only_in_part_is_reported_so() {
+    let f = Fixture::new("worktree-in-use");
+    let repo = f.dir.join("ledger");
+    std::fs::create_dir_all(repo.join("web")).unwrap();
+    std::fs::write(repo.join("web").join("index.txt"), "hello").unwrap();
+    git_in(&repo, &["init", "-q", "-b", "main"]);
+    git_in(&repo, &["add", "."]);
+    git_in(&repo, &["commit", "-q", "-m", "first"]);
+    let s = f
+        .manager
+        .create(CreateSession {
+            agent: AgentKind::Shell,
+            cwd: repo.display().to_string(),
+            name: None,
+            credential: None,
+            cols: 100,
+            rows: 30,
+            options: Default::default(),
+            provider_id: None,
+            description: None,
+            project_id: None,
+            tags: Vec::new(),
+            workspace: Workspace::NewWorktree,
+            routing: None,
+        })
+        .unwrap();
+    let wt = s.worktree.clone().unwrap();
+
+    // A process outside the session works in the worktree, so git can't delete that folder (L44).
+    let mut holder = std::process::Command::new("cmd.exe")
+        .arg("/k")
+        .current_dir(Path::new(&wt.path).join("web"))
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    let note = f.manager.close(s.id, true).unwrap().worktree_note.unwrap();
+    let _ = holder.kill();
+    let _ = holder.wait();
+    assert!(note.starts_with("Removed the worktree from git, but couldn't delete all of its folder"), "{note}");
+    assert!(f.manager.summary(s.id).unwrap().worktree.unwrap().removed);
+    assert!(!git_in(&repo, &["worktree", "list"]).contains(&wt.branch));
+}

@@ -320,7 +320,7 @@ deleted. Deleting a `cmd.exe`'s working folder straight after killing it failed 
 with "failed to delete '<worktree>': Permission denied". Close now waits up to 3 s for every process it
 ended. When `git worktree remove` fails that way (git 2.50), it has already deleted the worktree's files
 and git's record of it. What's left is the folder in use, and running it again says "is not a working
-tree".
+tree". Close's note now says so, rather than that the worktree was kept.
 
 ## Money and models
 
