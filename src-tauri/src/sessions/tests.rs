@@ -324,6 +324,19 @@ fn git_in(dir: &Path, args: &[&str]) -> String {
 }
 
 #[test]
+fn a_folder_given_in_short_names_is_kept_in_full() {
+    // GitHub's Windows runner has its temp folder at C:\Users\RUNNER~1\…, which git writes in full.
+    let f = Fixture::new("short-names");
+    let long = f.dir.join("a folder with a long name");
+    std::fs::create_dir_all(&long).unwrap();
+    let full = check_cwd(&long.display().to_string()).unwrap();
+    assert!(!full.contains('~'), "{full}");
+    // On a volume without short names this is the same spelling.
+    let short = crate::agents::short_path(&long).unwrap().display().to_string();
+    assert_eq!(check_cwd(&short).unwrap(), full);
+}
+
+#[test]
 fn a_session_can_work_in_a_worktree_of_its_own() {
     let f = Fixture::new("worktree");
     let repo = f.dir.join("ledger");
@@ -362,7 +375,7 @@ fn a_session_can_work_in_a_worktree_of_its_own() {
     let second = f.manager.create(CreateSession { workspace: Workspace::NewWorktree, tags: Vec::new(), ..request.clone() }).unwrap();
     let wt = second.worktree.clone().unwrap();
     assert!(wt.branch.starts_with("chorus2/ledger/") && wt.base_branch.as_deref() == Some("main"), "{wt:?}");
-    let beside = f.dir.join(".chorus2").join("ledger").display().to_string();
+    let beside = long_path(&f.dir.join(".chorus2").join("ledger").display().to_string());
     assert!(second.cwd.starts_with(&beside) && second.cwd.ends_with(r"\web"), "{}", second.cwd);
     assert!(second.live, "{:?}", second.note);
     let inside = f.manager.check_folder(&second.cwd);
@@ -381,7 +394,7 @@ fn a_session_can_work_in_a_worktree_of_its_own() {
     assert!(!Path::new(&wt.path).exists());
     assert!(f.manager.summary(second.id).unwrap().worktree.unwrap().removed);
     assert!(git_in(&repo, &["branch", "--list", &wt.branch]).contains(&wt.branch), "the branch is kept");
-    assert_eq!(f.manager.recent_folders(), std::slice::from_ref(&folder));
+    assert_eq!(f.manager.recent_folders(), [long_path(&folder)]);
 
     // A worktree folder deleted outside Chorus: Close clears git's record of it.
     let third = f.manager.create(CreateSession { workspace: Workspace::NewWorktree, ..request }).unwrap();

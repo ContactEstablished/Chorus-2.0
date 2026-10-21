@@ -137,7 +137,7 @@ pub fn hook_relay() -> Option<PathBuf> {
     Some(relay)
 }
 
-fn short_path(path: &Path) -> Option<PathBuf> {
+pub(crate) fn short_path(path: &Path) -> Option<PathBuf> {
     use windows::Win32::Storage::FileSystem::GetShortPathNameW;
     let long = windows::core::HSTRING::from(path.as_os_str());
     let mut buf = vec![0u16; 1024];

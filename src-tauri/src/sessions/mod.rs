@@ -319,7 +319,8 @@ fn version_note(kind: AgentKind, d: &agents::detect::Detection) -> Option<String
     chorus_core::cli::version_note(kind.display_name(), d.version.as_deref(), kind.spec().verified, d.fit?)
 }
 
-/// A folder for a new session: a full path to a folder that exists.
+/// A folder for a new session: a full path to a folder that exists, with any short (8.3) names
+/// written in full.
 fn check_cwd(input: &str) -> Result<String, String> {
     let s = input.trim().trim_matches('"').trim();
     if s.is_empty() || s.len() > MAX_CWD_BYTES {
@@ -332,7 +333,20 @@ fn check_cwd(input: &str) -> Result<String, String> {
     if !path.is_dir() {
         return Err(format!("{s} is not a folder that exists."));
     }
-    Ok(s.to_owned())
+    Ok(long_path(s))
+}
+
+/// `path` with its short (8.3) names written in full (`C:\Users\RUNNER~1` → `C:\Users\runneradmin`),
+/// as git writes it, so one folder compares equal to git's view of it (LESSONS L43); `path` itself
+/// when Windows can't expand it.
+fn long_path(path: &str) -> String {
+    use windows::Win32::Storage::FileSystem::GetLongPathNameW;
+    let short = windows::core::HSTRING::from(path);
+    let mut buf = vec![0u16; MAX_CWD_BYTES];
+    // SAFETY: `short` is a valid wide string and `buf` a writable buffer whose length is passed.
+    let n = unsafe { GetLongPathNameW(&short, Some(&mut buf)) } as usize;
+    let long = (n > 0 && n < buf.len()).then(|| String::from_utf16_lossy(&buf[..n]));
+    long.filter(|l| l.len() <= MAX_CWD_BYTES).unwrap_or_else(|| path.to_owned())
 }
 
 fn system_shutting_down() -> bool {

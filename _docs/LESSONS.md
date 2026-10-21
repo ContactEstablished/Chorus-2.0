@@ -304,6 +304,14 @@ while `POST /session` is now the web app's route and answers 405, so every openc
 - The TUI still drops what is written to it while it starts (L5 says so for 1.x). Text written about
   the first 6 s after launch lands in the composer, but its Enter is lost.
 
+**L43 — GitHub's Windows runner spells its temp folder in short (8.3) names (2026-10-20).** `TEMP` is
+`C:\Users\RUNNER~1\AppData\Local\Temp`, while git writes the same folder in full
+(`C:/Users/runneradmin/…`), so comparing a session's folder as text with git's `--show-toplevel`
+failed only in CI (`a_session_can_work_in_a_worktree_of_its_own`: no session found in the tree). A
+folder typed or pasted in short names does the same on any machine. Chorus now writes a new session's
+folder in full (`GetLongPathNameW`) before keeping it. To reproduce locally, point `TMP` and `TEMP` at
+a folder's short form (PowerShell: `(New-Object -ComObject Scripting.FileSystemObject).GetFolder($p).ShortPath`).
+
 ## Money and models
 
 **L16 — Read-then-revoke under-reports OpenRouter spend.** Reading a capped key's usage right after the
