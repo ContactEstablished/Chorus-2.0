@@ -10,6 +10,8 @@ use specta::Type;
 use crate::agent::AgentKind;
 
 pub const OPENROUTER_API: &str = "https://openrouter.ai/api/v1";
+/// Ollama on this machine, its own default. Chorus never starts or stops it.
+pub const OLLAMA_URL: &str = "http://127.0.0.1:11434";
 pub const JEV_URL: &str = "https://api.typesafe.ai/v1/systemone";
 pub const JEV_MODEL: &str = "jev-latest";
 /// The per-run cap for a minted key when the provider sets none. Chorus 1 measured that OpenRouter
@@ -27,6 +29,8 @@ pub enum ProviderKind {
     Gateway,
     /// TypeSafe's Jev: typed decisions, not an agent model (D40).
     Jev,
+    /// Ollama on this machine: no key, and its models are whatever it has pulled.
+    Ollama,
 }
 
 impl ProviderKind {
@@ -35,18 +39,21 @@ impl ProviderKind {
             Self::Openrouter => "openrouter",
             Self::Gateway => "gateway",
             Self::Jev => "jev",
+            Self::Ollama => "ollama",
         }
     }
 
     pub fn parse(s: &str) -> Option<Self> {
-        [Self::Openrouter, Self::Gateway, Self::Jev].into_iter().find(|k| k.as_str() == s)
+        [Self::Openrouter, Self::Gateway, Self::Jev, Self::Ollama].into_iter().find(|k| k.as_str() == s)
     }
 
-    /// The address a provider of this kind uses; a gateway's is the user's.
+    /// The address a provider of this kind uses; a gateway's is the user's. Ollama's is its
+    /// default, which a user may still change (another machine, another port).
     pub fn fixed_url(self) -> Option<&'static str> {
         match self {
             Self::Openrouter => Some(OPENROUTER_API),
             Self::Jev => Some(JEV_URL),
+            Self::Ollama => Some(OLLAMA_URL),
             Self::Gateway => None,
         }
     }
@@ -72,12 +79,14 @@ pub fn clean_base_url(url: &str) -> Result<String, String> {
     Ok(u.to_owned())
 }
 
-/// The environment variable a route's key goes into. opencode finds OpenRouter by this one.
-pub fn key_var(kind: ProviderKind) -> &'static str {
+/// The environment variable a route's key goes into. opencode finds OpenRouter by this one. `None`
+/// for Ollama, which takes no key at all.
+pub fn key_var(kind: ProviderKind) -> Option<&'static str> {
     match kind {
-        ProviderKind::Openrouter => "OPENROUTER_API_KEY",
-        ProviderKind::Gateway => "CHORUS_GATEWAY_KEY",
-        ProviderKind::Jev => "TYPESAFE_API_KEY",
+        ProviderKind::Openrouter => Some("OPENROUTER_API_KEY"),
+        ProviderKind::Gateway => Some("CHORUS_GATEWAY_KEY"),
+        ProviderKind::Jev => Some("TYPESAFE_API_KEY"),
+        ProviderKind::Ollama => None,
     }
 }
 
@@ -86,15 +95,26 @@ pub fn route_support(agent: AgentKind, kind: ProviderKind) -> Result<(), String>
     match (agent, kind) {
         (_, ProviderKind::Jev) => Err("Jev answers typed questions; it can't run an agent (D40).".into()),
         (AgentKind::Codex, ProviderKind::Openrouter | ProviderKind::Gateway) => Ok(()),
-        (AgentKind::Opencode, ProviderKind::Openrouter) => Ok(()),
+        (AgentKind::Opencode, ProviderKind::Openrouter | ProviderKind::Ollama) => Ok(()),
         (AgentKind::Opencode, ProviderKind::Gateway) => {
             Err("Chorus routes opencode through OpenRouter only for now, not a gateway.".into())
+        }
+        (_, ProviderKind::Ollama) => Err(
+            "Ollama runs through opencode for now: choose opencode and pick Ollama as its provider.".into(),
+        ),
+        (AgentKind::Aider, ProviderKind::Openrouter) => Ok(()),
+        (AgentKind::Aider, ProviderKind::Gateway) => {
+            Err("Chorus routes aider through OpenRouter only for now, not a gateway.".into())
         }
         (AgentKind::Claude, _) => Err(
             "Claude Code runs on your Claude login or an Anthropic key (Key below); Chorus doesn't route it through other providers yet."
                 .into(),
         ),
         (AgentKind::Grok, _) => Err("Grok has no setting for another provider's address, so it runs on xAI only.".into()),
+        (AgentKind::Gemini, _) => Err(
+            "Gemini CLI runs on your Google login or a Gemini key (Key below); Chorus doesn't route it through other providers."
+                .into(),
+        ),
         (AgentKind::Shell, _) => Err("A shell runs no model. To give it a key, use Key below.".into()),
     }
 }
@@ -102,8 +122,9 @@ pub fn route_support(agent: AgentKind, kind: ProviderKind) -> Result<(), String>
 /// What a supported route adds to a launch.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Route {
-    /// Where the key goes: the provider's own key, or a capped key minted for the run.
-    pub key_var: &'static str,
+    /// Where the key goes: the provider's own key, or a capped key minted for the run. `None` for a
+    /// provider that takes no key (Ollama).
+    pub key_var: Option<&'static str>,
     /// Arguments before the agent's options (Codex's provider definition).
     pub args: Vec<String>,
     /// The model as this agent names it (`openrouter/<id>` for opencode).
@@ -135,6 +156,8 @@ pub fn route(
     let key_var = key_var(kind);
     match agent {
         AgentKind::Codex => {
+            // Codex's provider definition names the variable its key arrives in.
+            let key_var = key_var.ok_or("Codex needs a provider with a key.")?;
             let url = match kind.fixed_url() {
                 Some(u) => u.to_owned(),
                 None => clean_base_url(base_url)?,
@@ -158,7 +181,39 @@ pub fn route(
                 overrides.push(format!("model_context_window={context}"));
             }
             let args = overrides.into_iter().flat_map(|a| ["-c".to_owned(), a]).collect();
-            Ok(Route { key_var, args, model: model.to_owned(), opencode_provider: None })
+            Ok(Route { key_var: Some(key_var), args, model: model.to_owned(), opencode_provider: None })
+        }
+        AgentKind::Aider => {
+            // Aider (litellm) knows OpenRouter by name: `openrouter/<id>` plus OPENROUTER_API_KEY,
+            // which the route already puts in the environment. No base URL and no arguments.
+            Ok(Route { key_var, args: Vec::new(), model: format!("openrouter/{model}"), opencode_provider: None })
+        }
+        AgentKind::Opencode if kind == ProviderKind::Ollama => {
+            // opencode's documented custom-provider shape, with no key: `options.baseURL` points at
+            // Ollama's OpenAI-compatible `/v1`. The provider is always named `ollama`, so a session's
+            // model is `ollama/<id>`; two Ollama providers would share that name.
+            let url = match base_url.trim().trim_end_matches('/') {
+                "" => OLLAMA_URL.to_owned(),
+                u => clean_base_url(u)?,
+            };
+            let mut entry = serde_json::Map::new();
+            entry.insert("name".into(), json!(model));
+            if let Some(context) = catalog.and_then(|c| c.context_length) {
+                entry.insert("limit".into(), json!({ "context": context }));
+            }
+            Ok(Route {
+                key_var,
+                args: Vec::new(),
+                model: format!("ollama/{model}"),
+                opencode_provider: Some(json!({
+                    "ollama": {
+                        "npm": "@ai-sdk/openai-compatible",
+                        "name": name.trim(),
+                        "options": { "baseURL": format!("{url}/v1") },
+                        "models": { model: Value::Object(entry) },
+                    }
+                })),
+            })
         }
         AgentKind::Opencode => {
             let mut entry = serde_json::Map::new();
@@ -300,6 +355,42 @@ pub fn parse_catalog(body: &str) -> Option<Vec<CatalogModel>> {
                     max_output: num(m.pointer("/top_provider/max_completion_tokens")),
                     efforts,
                     tools,
+                })
+            })
+            .collect(),
+    )
+}
+
+/// A `GET /api/tags` answer from Ollama 0.40.6 as catalog entries. Native models have no `:free`
+/// suffix; they are marked free because they run here. The list says which take tools; prices,
+/// output limits and efforts stay unknown. A model that only embeds (no `completion` capability)
+/// isn't one an agent can run, so it is left out. Kept apart from [`parse_catalog`], whose `data`
+/// key is OpenAI's shape.
+pub fn parse_ollama_tags(body: &str) -> Option<Vec<CatalogModel>> {
+    let v: Value = serde_json::from_str(body).ok()?;
+    let models = v.get("models")?.as_array()?;
+    Some(
+        models
+            .iter()
+            .filter_map(|m| {
+                let id = m.get("name").and_then(Value::as_str)?.to_owned();
+                let caps = m.get("capabilities").and_then(Value::as_array);
+                if caps.is_some_and(|c| !c.iter().any(|x| x.as_str() == Some("completion"))) {
+                    return None;
+                }
+                Some(CatalogModel {
+                    name: id.clone(),
+                    free: true,
+                    id,
+                    prompt_per_mtok: None,
+                    completion_per_mtok: None,
+                    context_length: m
+                        .pointer("/details/context_length")
+                        .and_then(Value::as_u64)
+                        .and_then(|n| u32::try_from(n).ok()),
+                    max_output: None,
+                    efforts: Vec::new(),
+                    tools: caps.map(|c| c.iter().any(|x| x.as_str() == Some("tools"))),
                 })
             })
             .collect(),
@@ -476,10 +567,16 @@ mod tests {
         use ProviderKind::*;
         assert!(route_support(AgentKind::Codex, Openrouter).is_ok() && route_support(AgentKind::Codex, Gateway).is_ok());
         assert!(route_support(AgentKind::Opencode, Openrouter).is_ok());
+        assert!(route_support(AgentKind::Aider, Openrouter).is_ok());
+        assert!(route_support(AgentKind::Opencode, Ollama).is_ok());
         for (agent, kind) in [
             (AgentKind::Opencode, Gateway),
+            (AgentKind::Aider, Gateway),
+            (AgentKind::Aider, Ollama),
+            (AgentKind::Codex, Ollama),
             (AgentKind::Claude, Openrouter),
             (AgentKind::Grok, Openrouter),
+            (AgentKind::Gemini, Openrouter),
             (AgentKind::Shell, Gateway),
             (AgentKind::Codex, Jev),
         ] {
@@ -488,9 +585,50 @@ mod tests {
     }
 
     #[test]
+    fn aider_names_its_route_model_for_openrouter() {
+        let r = route(AgentKind::Aider, ProviderKind::Openrouter, "OpenRouter", "", "deepseek/deepseek-v4.1-flash:free", None).unwrap();
+        assert_eq!(r.key_var, Some("OPENROUTER_API_KEY"));
+        // litellm splits on the first slash: provider `openrouter`, model `deepseek/…`.
+        assert_eq!(r.model, "openrouter/deepseek/deepseek-v4.1-flash:free");
+        assert!(r.args.is_empty() && r.opencode_provider.is_none());
+    }
+
+    #[test]
+    fn ollama_tags_become_catalog_entries() {
+        // `GET /api/tags` from Ollama 0.40.6, trimmed to two models.
+        let body = r#"{"models":[
+            {"name":"llama3.2:1b","model":"llama3.2:1b","details":{"format":"gguf","family":"llama","parameter_size":"1.2B","quantization_level":"Q8_0","context_length":131072},"capabilities":["completion","tools"]},
+            {"name":"nomic-embed-text:latest","model":"nomic-embed-text:latest","details":{"format":"gguf"},"capabilities":["embedding"]}]}"#;
+        let models = parse_ollama_tags(body).unwrap();
+        assert_eq!(models.len(), 1, "an embedding-only model isn't one an agent can run");
+        let m = &models[0];
+        assert_eq!((m.id.as_str(), m.context_length, m.tools, m.free), ("llama3.2:1b", Some(131072), Some(true), true));
+        assert_eq!(parse_ollama_tags("{}"), None);
+        assert_eq!(parse_ollama_tags("not json"), None);
+    }
+
+    #[test]
+    fn opencode_on_ollama_gets_a_keyless_provider_block() {
+        let r = route(AgentKind::Opencode, ProviderKind::Ollama, "Ollama (local)", "", "llama3.2:1b", None).unwrap();
+        assert_eq!(r.key_var, None, "a local model needs no key");
+        assert_eq!(r.model, "ollama/llama3.2:1b");
+        let block = r.opencode_provider.unwrap();
+        assert_eq!(block["ollama"]["npm"], "@ai-sdk/openai-compatible");
+        assert_eq!(block["ollama"]["options"]["baseURL"], "http://127.0.0.1:11434/v1");
+        assert_eq!(block["ollama"]["models"]["llama3.2:1b"]["name"], "llama3.2:1b");
+        // An address set on the provider is used as is.
+        let custom =
+            route(AgentKind::Opencode, ProviderKind::Ollama, "Ollama (local)", "http://127.0.0.1:11500/", "qwen3:0.6b", None).unwrap();
+        assert_eq!(custom.opencode_provider.unwrap()["ollama"]["options"]["baseURL"], "http://127.0.0.1:11500/v1");
+        // Only opencode runs on it for now, and the reason says so.
+        assert!(route_support(AgentKind::Codex, ProviderKind::Ollama).unwrap_err().contains("opencode"));
+        assert!(route_support(AgentKind::Aider, ProviderKind::Ollama).unwrap_err().contains("opencode"));
+    }
+
+    #[test]
     fn codex_gets_its_provider_from_config_overrides() {
         let r = route(AgentKind::Codex, ProviderKind::Openrouter, "OpenRouter", "", "minimax/minimax-m3.1-flash:free", None).unwrap();
-        assert_eq!(r.key_var, "OPENROUTER_API_KEY");
+        assert_eq!(r.key_var, Some("OPENROUTER_API_KEY"));
         assert_eq!(r.model, "minimax/minimax-m3.1-flash:free");
         assert_eq!(
             r.args,
@@ -513,7 +651,7 @@ mod tests {
         assert_eq!(known.args[known.args.len() - 2..], ["-c", "model_context_window=1000000"]);
         let g = route(AgentKind::Codex, ProviderKind::Gateway, "Work gateway", "https://llm.example.com/v1/", "gpt-5.5", None).unwrap();
         assert!(g.args.contains(&"model_providers.chorus.base_url=\"https://llm.example.com/v1\"".to_owned()));
-        assert_eq!(g.key_var, "CHORUS_GATEWAY_KEY");
+        assert_eq!(g.key_var, Some("CHORUS_GATEWAY_KEY"));
         assert!(route(AgentKind::Codex, ProviderKind::Gateway, "x", "http://example.com", "m", None).is_err());
         assert!(route(AgentKind::Codex, ProviderKind::Gateway, "a\"b", "https://x.example", "m", None).is_err());
     }

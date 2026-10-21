@@ -115,6 +115,15 @@ mod tests {
     }
 
     #[test]
+    fn resolves_gemini_to_its_bundle() {
+        // Gemini CLI 0.64.0's shim, as installed by npm 11 (2026-10-20).
+        const GEMINI_SHIM: &str = "@ECHO off\r\nGOTO start\r\n:find_dp0\r\nSET dp0=%~dp0\r\nEXIT /b\r\n:start\r\nSETLOCAL\r\nCALL :find_dp0\r\n\r\nIF EXIST \"%dp0%\\node.exe\" (\r\n  SET \"_prog=%dp0%\\node.exe\"\r\n) ELSE (\r\n  SET \"_prog=node\"\r\n  SET PATHEXT=%PATHEXT:;.JS;=;%\r\n)\r\n\r\nendLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & \"%_prog%\"  \"%dp0%\\node_modules\\@google\\gemini-cli\\bundle\\gemini.js\" %*\r\n";
+        let t = parse_npm_shim(GEMINI_SHIM, "C:\\npm\\gemini.cmd").expect("recognised");
+        assert_eq!(t.file, "C:\\npm\\node_modules\\@google\\gemini-cli\\bundle\\gemini.js");
+        assert_eq!(t.kind, ShimKind::NodeScript);
+    }
+
+    #[test]
     fn refuses_shapes_it_has_not_seen() {
         assert_eq!(parse_npm_shim("", "C:\\npm\\x.cmd"), None);
         assert_eq!(parse_npm_shim("\"%dp0%\\a.js\" %*\n\"%dp0%\\b.js\" %*\n", "C:\\npm\\x.cmd"), None);

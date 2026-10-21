@@ -57,6 +57,27 @@ pub fn resolve(kind: AgentKind, parent_env: &[(String, String)], scratch: &Path)
             args.extend(["-c".into(), "check_for_update_on_startup=false".into()]);
             Ok(Launch { program, args, additions: vec![] })
         }
+        AgentKind::Gemini => {
+            let (program, mut args) = through_shim(&path, "gemini.cmd")?;
+            // The folder is trusted for this session only, so the first run in a project never
+            // stops at "Do you trust this folder?". Nothing is written to the user's settings.
+            // 0.64.0 has no auto-update switch on the command line or in the environment; its
+            // `general.enableAutoUpdate` is a setting in the user's own settings file.
+            args.push("--skip-trust".into());
+            Ok(Launch { program, args, additions: vec![] })
+        }
+        AgentKind::Aider => Ok(Launch {
+            // `uv` installs a launcher executable, not an npm shim (LESSONS: aider on Windows).
+            program: find_on_path(&path, "aider.exe").ok_or("aider.exe not found on PATH")?,
+            args: vec![
+                // 0.86.2 checks for a new version on every launch unless told not to (L7).
+                "--no-check-update".into(),
+                // Aider has no conversation id; this reloads the folder's chat history, so a
+                // restarted session continues where it left off.
+                "--restore-chat-history".into(),
+            ],
+            additions: vec![],
+        }),
         AgentKind::Opencode => {
             // The session runs `serve` and `--server` with these (ARCHITECTURE §5, `opencode`). Its
             // conversations live in the session's own data folder, which is how they resume.
@@ -189,10 +210,14 @@ pub fn claude_trust_folder(parent_env: &[(String, String)], folder: &str) -> Res
 /// Whether the agent has recorded the conversation `id`, so the next run resumes it instead of
 /// starting it. Claude Code writes `<config>/projects/<folder>/<id>.jsonl` once the conversation has
 /// a message; Grok keeps `~/.grok/sessions/<folder>/<id>/` (its bundled docs, unverified while Grok
-/// isn't signed in). The folder part is derived from the working directory, so every folder is
-/// searched rather than re-deriving its name. Codex's ids are only known once it has written them.
+/// isn't signed in); Gemini CLI names its chats `session-<ms>-<id's first 8>.jsonl`. The folder part
+/// is derived from the working directory, so every folder is searched rather than re-deriving its
+/// name. Codex's ids are only known once it has written them.
 pub fn conversation_exists(kind: AgentKind, id: &str, parent_env: &[(String, String)]) -> bool {
     let home = || env_value(parent_env, "USERPROFILE").map(PathBuf::from);
+    if kind == AgentKind::Gemini {
+        return gemini_chat_state(id, parent_env) == GeminiChat::Resumable;
+    }
     let (root, file) = match kind {
         AgentKind::Claude => {
             let config = env_value(parent_env, "CLAUDE_CONFIG_DIR").map(PathBuf::from).or_else(|| home().map(|h| h.join(".claude")));
@@ -200,12 +225,54 @@ pub fn conversation_exists(kind: AgentKind, id: &str, parent_env: &[(String, Str
         }
         AgentKind::Grok => (home().map(|h| h.join(".grok").join("sessions")), id.to_owned()),
         AgentKind::Codex => return true,
-        AgentKind::Shell | AgentKind::Opencode => return false,
+        // Gemini is handled above. Aider has no conversation id to look for.
+        AgentKind::Aider | AgentKind::Gemini | AgentKind::Shell | AgentKind::Opencode => return false,
     };
     let Some(Ok(folders)) = root.map(std::fs::read_dir) else {
         return false;
     };
     folders.flatten().any(|f| f.path().join(&file).exists())
+}
+
+/// What Gemini CLI would find in the chat file for `id`. Its own rule decides resumability
+/// (`chorus_core::gemini`), and the two are not the same question: a file with no turn in it can't
+/// be resumed and can't be created again either.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GeminiChat {
+    /// No chat file: `--session-id <id>` makes one.
+    Missing,
+    /// A chat file with no turn: `--resume` refuses it, `--session-id` finds the id taken.
+    Empty,
+    /// At least one turn: `--resume <id>` continues it.
+    Resumable,
+}
+
+/// Gemini CLI 0.64.0 keeps `<home>\.gemini\tmp\<project>\chats\session-<ms>-<id's first 8>.jsonl`.
+/// The project folder follows the working directory, so every one is searched; the name only holds
+/// the id's first 8 characters, so the record's `sessionId` is checked too.
+pub fn gemini_chat_state(id: &str, parent_env: &[(String, String)]) -> GeminiChat {
+    let Some(short) = id.get(..8) else { return GeminiChat::Missing };
+    let Some(tmp) = env_value(parent_env, "USERPROFILE").map(|h| PathBuf::from(h).join(".gemini").join("tmp")) else {
+        return GeminiChat::Missing;
+    };
+    let suffix = format!("-{short}.jsonl");
+    let mut found = GeminiChat::Missing;
+    for project in std::fs::read_dir(tmp).into_iter().flatten().flatten() {
+        for file in std::fs::read_dir(project.path().join("chats")).into_iter().flatten().flatten() {
+            if !file.file_name().to_string_lossy().ends_with(&suffix) {
+                continue;
+            }
+            let record = std::fs::read_to_string(file.path()).unwrap_or_default();
+            if !record.contains(id) {
+                continue;
+            }
+            if chorus_core::gemini::chat_state(&record) == chorus_core::gemini::ChatState::Resumable {
+                return GeminiChat::Resumable;
+            }
+            found = GeminiChat::Empty;
+        }
+    }
+    found
 }
 
 #[cfg(test)]

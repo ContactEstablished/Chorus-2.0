@@ -161,6 +161,8 @@ export type AgentInfo = {
 	takesModel: boolean,
 	/**  Options go into the configuration of a server Chorus starts (opencode), not argv. */
 	optionsInConfig: boolean,
+	/**  The agent reports turns to Chorus. Without it, a running session is only "Running" (D47). */
+	hasEventChannel: boolean,
 	/**  An effort applies only with a model named beside it (opencode, LESSONS L5). */
 	effortNeedsModel: boolean,
 	resume: ResumeKind,
@@ -170,7 +172,7 @@ export type AgentInfo = {
 	detection: Detection | null,
 };
 
-export type AgentKind = "shell" | "claude" | "codex" | "opencode" | "grok";
+export type AgentKind = "shell" | "claude" | "codex" | "opencode" | "grok" | "gemini" | "aider";
 
 /**  Whether an agent can run on the provider; `reason` says why not. */
 export type AgentRoute = {
@@ -670,7 +672,9 @@ export type ProviderKind =
 /**  Any OpenAI-compatible endpoint (Responses API) at a base URL. */
 "gateway" | 
 /**  TypeSafe's Jev: typed decisions, not an agent model (D40). */
-"jev";
+"jev" | 
+/**  Ollama on this machine: no key, and its models are whatever it has pulled. */
+"ollama";
 
 export type ProviderSave = {
 	/**  `None` adds a provider. */
@@ -820,6 +824,8 @@ export type SessionSummary = {
 	id: number,
 	name: string,
 	agent: AgentKind,
+	/**  The agent reports turns to Chorus; without it a running session is only "Running" (D47). */
+	hasEventChannel: boolean,
 	cwd: string,
 	status: SessionStatus,
 	/**

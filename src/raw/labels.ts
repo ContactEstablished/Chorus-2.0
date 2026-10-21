@@ -6,12 +6,15 @@ export const AGENT_LABELS: Record<AgentKind, string> = {
   codex: 'Codex',
   opencode: 'opencode',
   grok: 'Grok',
+  gemini: 'Gemini CLI',
+  aider: 'Aider',
 }
 
 export const KIND_LABELS: Record<ProviderKind, string> = {
   openrouter: 'OpenRouter',
   gateway: 'OpenAI-compatible gateway',
   jev: 'Jev (TypeSafe)',
+  ollama: 'Ollama (local)',
 }
 
 /** Dollars: $1.00, or more places for small amounts ($0.0042). */

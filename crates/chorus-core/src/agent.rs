@@ -17,10 +17,13 @@ pub enum AgentKind {
     Codex,
     Opencode,
     Grok,
+    Gemini,
+    Aider,
 }
 
 impl AgentKind {
-    pub const ALL: [AgentKind; 5] = [Self::Shell, Self::Claude, Self::Codex, Self::Opencode, Self::Grok];
+    pub const ALL: [AgentKind; 7] =
+        [Self::Shell, Self::Claude, Self::Codex, Self::Opencode, Self::Grok, Self::Gemini, Self::Aider];
 
     /// The stored and serialised name.
     pub fn as_str(self) -> &'static str {
@@ -30,6 +33,8 @@ impl AgentKind {
             Self::Codex => "codex",
             Self::Opencode => "opencode",
             Self::Grok => "grok",
+            Self::Gemini => "gemini",
+            Self::Aider => "aider",
         }
     }
 
@@ -45,6 +50,8 @@ impl AgentKind {
             Self::Codex => "Codex",
             Self::Opencode => "opencode",
             Self::Grok => "Grok",
+            Self::Gemini => "Gemini CLI",
+            Self::Aider => "Aider",
         }
     }
 
@@ -55,6 +62,8 @@ impl AgentKind {
             Self::Codex => &CODEX,
             Self::Opencode => &OPENCODE,
             Self::Grok => &GROK,
+            Self::Gemini => &GEMINI,
+            Self::Aider => &AIDER,
         }
     }
 }
@@ -159,24 +168,35 @@ pub struct Spec {
     /// The CLI version these arguments were checked against.
     pub verified: Option<&'static str>,
     pub carrier: Carrier,
+    /// Whether the agent tells Chorus what it is doing: hooks, a server Chorus runs, or a transcript
+    /// file. Without one a session is only "Running" (D47), and the UI says so in those words. A new
+    /// agent is `false` until its channel is built, so nothing has to remember to change a list.
+    pub has_event_channel: bool,
+    /// Each level and the arguments it adds. An empty list means the agent's own behaviour is
+    /// already that level (aider asks before each edit with no flag of its own).
     pub efforts: &'static [(Effort, &'static [&'static str])],
     pub default_effort: Option<Effort>,
     pub permissions: &'static [(Permission, &'static [&'static str])],
     pub default_permission: Option<Permission>,
     pub model: Option<ModelArg>,
     pub resume: Resume,
+    /// Where the agent sits among Pair's preferred reviewers: a lower number is preferred. `None`
+    /// keeps it out of the list (the shell). See [`crate::launch::partner_order`].
+    pub partner_rank: Option<u8>,
 }
 
 const SHELL: Spec = Spec {
     kind: AgentKind::Shell,
     verified: None,
     carrier: Carrier::Argv,
+    has_event_channel: false,
     efforts: &[],
     default_effort: None,
     permissions: &[],
     default_permission: None,
     model: None,
     resume: Resume::None,
+    partner_rank: None,
 };
 
 /// Claude Code 2.1.300: `--effort` (low, medium, high, xhigh, max) and `--permission-mode`. Chorus 1's
@@ -185,6 +205,7 @@ const CLAUDE: Spec = Spec {
     kind: AgentKind::Claude,
     verified: Some("2.1.300"),
     carrier: Carrier::Argv,
+    has_event_channel: true,
     efforts: &[
         (Effort::Fast, &["--effort", "medium"]),
         (Effort::Balanced, &["--effort", "high"]),
@@ -201,6 +222,7 @@ const CLAUDE: Spec = Spec {
     default_permission: Some(Permission::Auto),
     model: Some(ModelArg::Flag("--model")),
     resume: Resume::Assigned { create: "--session-id", resume: "--resume" },
+    partner_rank: Some(1),
 };
 
 /// Codex 0.162.1. Options travel as `-c` overrides: Chorus 1 measured that only `-c` survives the
@@ -210,6 +232,7 @@ const CODEX: Spec = Spec {
     kind: AgentKind::Codex,
     verified: Some("0.162.1"),
     carrier: Carrier::Argv,
+    has_event_channel: true,
     efforts: &[
         (Effort::Fast, &["-c", "model_reasoning_effort=\"low\""]),
         (Effort::Balanced, &["-c", "model_reasoning_effort=\"medium\""]),
@@ -227,6 +250,7 @@ const CODEX: Spec = Spec {
     default_permission: Some(Permission::FullAccess),
     model: Some(ModelArg::CodexConfig("model")),
     resume: Resume::Discovered { subcommand: "resume" },
+    partner_rank: Some(2),
 };
 
 /// opencode 2.1.1 runs as a server plus a TUI connected to it (LESSONS L41). An effort is a model
@@ -239,6 +263,7 @@ const OPENCODE: Spec = Spec {
     kind: AgentKind::Opencode,
     verified: Some("2.1.1"),
     carrier: Carrier::ServerConfig,
+    has_event_channel: true,
     efforts: &[
         (Effort::Fast, &["variant", "\"low\""]),
         (Effort::Balanced, &["variant", "\"medium\""]),
@@ -267,6 +292,7 @@ const OPENCODE: Spec = Spec {
     default_permission: None,
     model: Some(ModelArg::ServerConfig),
     resume: Resume::Server,
+    partner_rank: Some(3),
 };
 
 /// Grok 1.0.62: `--reasoning-effort` and `--permission-mode`. A permission mode is always passed,
@@ -276,6 +302,8 @@ const GROK: Spec = Spec {
     kind: AgentKind::Grok,
     verified: Some("1.0.62"),
     carrier: Carrier::Argv,
+    // No hooks, server or transcript: a Grok session is only "Running" (D47).
+    has_event_channel: false,
     efforts: &[
         (Effort::Fast, &["--reasoning-effort", "low"]),
         (Effort::Balanced, &["--reasoning-effort", "medium"]),
@@ -292,6 +320,59 @@ const GROK: Spec = Spec {
     default_permission: Some(Permission::Auto),
     model: Some(ModelArg::Flag("-m")),
     resume: Resume::Assigned { create: "--session-id", resume: "--resume" },
+    // Last, until it has an event channel: Pair prefers an agent Chorus can watch.
+    partner_rank: Some(6),
+};
+
+/// Gemini CLI 0.64.0: `--approval-mode` (default, auto_edit, yolo, plan), `-m` and
+/// `--session-id`/`--resume <uuid>`. It has no effort setting, so none is declared. A permission
+/// mode is always passed, because a user's `general.defaultApprovalMode` setting can be auto_edit or
+/// plan. Its approval modes map one level short of Claude's: there is nothing like Auto, so that
+/// level isn't offered. No hooks, server or transcript channel is built, so a session is "Running".
+/// Its auto-update switch is a setting in the user's own `settings.json` (0.64.0 has no flag or
+/// environment variable for it), which Chorus doesn't write.
+const GEMINI: Spec = Spec {
+    kind: AgentKind::Gemini,
+    verified: Some("0.64.0"),
+    carrier: Carrier::Argv,
+    has_event_channel: false,
+    efforts: &[],
+    default_effort: None,
+    permissions: &[
+        (Permission::Manual, &["--approval-mode", "default"]),
+        (Permission::AcceptEdits, &["--approval-mode", "auto_edit"]),
+        (Permission::Plan, &["--approval-mode", "plan"]),
+        (Permission::FullAccess, &["--approval-mode", "yolo"]),
+    ],
+    default_permission: Some(Permission::Manual),
+    model: Some(ModelArg::Flag("--model")),
+    resume: Resume::Assigned { create: "--session-id", resume: "--resume" },
+    partner_rank: Some(4),
+};
+
+/// Aider 0.86.2: `--model provider/name` (it speaks OpenRouter natively, so `openrouter/<id>`), and
+/// `--reasoning-effort` for the effort. It has no permission modes: it asks before each edit, which
+/// is Manual with no arguments, and `--yes-always` accepts everything. Auto mode is the same level
+/// as Full access here, and there is no plan mode, so neither is declared. It has no conversation
+/// id either: `--restore-chat-history` (passed by the launch) reloads the folder's chat history, and
+/// resume is `None`. No event channel: `--notifications-command` runs a command line whose token
+/// would have to travel in argv, which the secret rules forbid.
+const AIDER: Spec = Spec {
+    kind: AgentKind::Aider,
+    verified: Some("0.86.2"),
+    carrier: Carrier::Argv,
+    has_event_channel: false,
+    efforts: &[
+        (Effort::Fast, &["--reasoning-effort", "low"]),
+        (Effort::Balanced, &["--reasoning-effort", "medium"]),
+        (Effort::Deep, &["--reasoning-effort", "high"]),
+    ],
+    default_effort: None,
+    permissions: &[(Permission::Manual, &[]), (Permission::FullAccess, &["--yes-always"])],
+    default_permission: Some(Permission::Manual),
+    model: Some(ModelArg::Flag("--model")),
+    resume: Resume::None,
+    partner_rank: Some(5),
 };
 
 pub const MAX_MODEL_CHARS: usize = 200;
@@ -430,6 +511,18 @@ mod tests {
         [Permission::Manual, Permission::Auto, Permission::AcceptEdits, Permission::Plan, Permission::FullAccess];
 
     #[test]
+    fn only_the_shell_is_kept_out_of_pair_and_every_rank_is_used_once() {
+        assert_eq!(AgentKind::Shell.spec().partner_rank, None);
+        assert!(!AgentKind::Shell.spec().has_event_channel);
+        let mut ranks: Vec<u8> = AgentKind::ALL.iter().filter_map(|k| k.spec().partner_rank).collect();
+        let declared = ranks.len();
+        assert_eq!(declared, AgentKind::ALL.len() - 1, "every agent but the shell declares a rank");
+        ranks.sort_unstable();
+        ranks.dedup();
+        assert_eq!(ranks.len(), declared, "two agents can't share a rank");
+    }
+
+    #[test]
     fn names_round_trip() {
         for k in AgentKind::ALL {
             assert_eq!(AgentKind::parse(k.as_str()), Some(k));
@@ -445,11 +538,12 @@ mod tests {
             // Defaults are declared options.
             assert!(s.default_effort.is_none_or(|e| s.effort_args(e).is_some()), "{k:?} default effort");
             assert!(s.default_permission.is_none_or(|p| s.permission_args(p).is_some()), "{k:?} default permission");
-            // Each declared level gives arguments of its own, declared once.
+            // Each declared level gives arguments of its own (an empty list means the agent
+            // already behaves that way), declared once.
             let mut seen = Vec::new();
             for e in EFFORTS {
                 if let Some(a) = s.effort_args(e) {
-                    assert!(!a.is_empty() && !seen.contains(&a), "{k:?} {e:?}");
+                    assert!(!seen.contains(&a), "{k:?} {e:?}");
                     assert_eq!(s.efforts.iter().filter(|(x, _)| *x == e).count(), 1);
                     seen.push(a);
                 }
@@ -457,7 +551,7 @@ mod tests {
             let mut seen = Vec::new();
             for p in PERMISSIONS {
                 if let Some(a) = s.permission_args(p) {
-                    assert!(!a.is_empty() && !seen.contains(&a), "{k:?} {p:?}");
+                    assert!(!seen.contains(&a), "{k:?} {p:?}");
                     assert_eq!(s.permissions.iter().filter(|(x, _)| *x == p).count(), 1);
                     seen.push(a);
                 }
@@ -509,6 +603,19 @@ mod tests {
         assert!(opencode.option_args(&resolved).is_empty());
         let asked = LaunchOptions { permission: Some(Permission::Auto), ..Default::default() };
         assert!(opencode.resolve(&asked).unwrap_err().contains("Auto"));
+        // Gemini CLI has no effort setting and nothing like Auto.
+        let gemini = AgentKind::Gemini.spec();
+        let asked = LaunchOptions { effort: Some(Effort::Fast), ..Default::default() };
+        assert_eq!(gemini.resolve(&asked).unwrap_err(), "Gemini CLI has no Fast effort setting");
+        // A session asks for no effort at launch, so the CLI's default stands.
+        let asked = LaunchOptions { permission: Some(Permission::Auto), ..Default::default() };
+        assert!(gemini.resolve(&asked).unwrap_err().contains("Auto"));
+        // Aider has three efforts, and only Manual and Full access.
+        let aider = AgentKind::Aider.spec();
+        let asked = LaunchOptions { effort: Some(Effort::Max), ..Default::default() };
+        assert_eq!(aider.resolve(&asked).unwrap_err(), "Aider has no Max effort setting");
+        let asked = LaunchOptions { permission: Some(Permission::Plan), ..Default::default() };
+        assert!(aider.resolve(&asked).unwrap_err().contains("Plan"));
     }
 
     #[test]
@@ -540,6 +647,23 @@ mod tests {
         );
         // Grok always gets a permission mode, even when none is chosen.
         assert!(grok.option_args(&grok.resolve(&LaunchOptions::default()).unwrap()).contains(&"--permission-mode".to_owned()));
+        let gemini = AgentKind::Gemini.spec();
+        let opts = LaunchOptions { permission: Some(Permission::Plan), model: Some("gemini-3-pro-preview".into()), ..Default::default() };
+        assert_eq!(gemini.option_args(&gemini.resolve(&opts).unwrap()), ["--approval-mode", "plan", "--model", "gemini-3-pro-preview"]);
+        // A user's settings can default Gemini to auto_edit or plan, so a mode is always passed.
+        assert_eq!(gemini.option_args(&gemini.resolve(&LaunchOptions::default()).unwrap()), ["--approval-mode", "default"]);
+        let aider = AgentKind::Aider.spec();
+        let opts = LaunchOptions {
+            effort: Some(Effort::Deep),
+            permission: Some(Permission::FullAccess),
+            model: Some("openrouter/deepseek/deepseek-v4.1-flash:free".into()),
+        };
+        assert_eq!(
+            aider.option_args(&aider.resolve(&opts).unwrap()),
+            ["--reasoning-effort", "high", "--yes-always", "--model", "openrouter/deepseek/deepseek-v4.1-flash:free"]
+        );
+        // Manual is what aider does on its own: it asks before each edit, with no flag.
+        assert!(aider.option_args(&aider.resolve(&LaunchOptions::default()).unwrap()).is_empty());
     }
 
     #[test]
@@ -548,6 +672,10 @@ mod tests {
         let claude = AgentKind::Claude.spec();
         assert_eq!(claude.conversation_args(Some(id), false), ["--session-id", id]);
         assert_eq!(claude.conversation_args(Some(id), true), ["--resume", id]);
+        // Gemini CLI takes an id to create and the same one to resume; it refuses an id that exists.
+        let gemini = AgentKind::Gemini.spec();
+        assert_eq!(gemini.conversation_args(Some(id), false), ["--session-id", id]);
+        assert_eq!(gemini.conversation_args(Some(id), true), ["--resume", id]);
         let codex = AgentKind::Codex.spec();
         assert!(codex.conversation_args(None, false).is_empty());
         assert!(codex.conversation_args(Some(id), false).is_empty());
@@ -556,6 +684,8 @@ mod tests {
         assert!(claude.conversation_args(Some(""), true).is_empty());
         assert!(claude.conversation_args(Some("--last"), true).is_empty());
         assert!(AgentKind::Shell.spec().conversation_args(Some(id), true).is_empty());
+        // Aider has no id: its history file is what a restart reloads.
+        assert!(AgentKind::Aider.spec().conversation_args(Some(id), true).is_empty());
     }
 
     #[test]

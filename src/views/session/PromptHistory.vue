@@ -53,7 +53,7 @@ const endOf = (t: TurnEntry) => (t.endReason ? (END[t.endReason] ?? t.endReason)
     <h3>Prompts <span v-if="history" class="n">{{ history.total }}</span></h3>
     <p v-if="error" class="error">{{ error }}</p>
     <p v-if="history && !history.turns.length" class="hint">
-      {{ session.agent === 'shell' || session.agent === 'grok' ? 'Chorus records no turns for this agent yet.' : 'No prompts yet. Each one you send is recorded here.' }}
+      {{ session.hasEventChannel ? 'No prompts yet. Each one you send is recorded here.' : 'Chorus records no turns for this agent yet.' }}
     </p>
     <ol v-if="history" class="turns">
       <li v-for="t in history.turns" :key="t.id" class="turn" :class="{ open: open === t.id }">

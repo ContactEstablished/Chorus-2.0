@@ -1,8 +1,8 @@
 <script setup lang="ts">
 /**
- * Providers: OpenRouter, OpenAI-compatible gateways and Jev. Each points at keys from the vault,
- * can be tested, and (except Jev) has a model catalog with a shortlist to launch from. Shown in
- * Settings → Providers.
+ * Providers: OpenRouter, OpenAI-compatible gateways, Jev, and Ollama on this machine. The first
+ * three point at keys from the vault; Ollama takes none. Each can be tested, and (except Jev) has a
+ * model catalog with a shortlist to launch from. Shown in Settings → Providers.
  */
 import { computed, onMounted, reactive, ref } from 'vue'
 import type { CatalogEntry, ProviderKind, ProviderSummary } from '../ipc'
@@ -34,12 +34,24 @@ function startAdd(): void {
   editing.value = true
 }
 
+// Ollama's address, which is also what the server row shows.
+const OLLAMA_DEFAULT = 'http://127.0.0.1:11434'
+function kindChanged(): void {
+  if (form.kind === 'ollama') {
+    form.name = 'Ollama (local)'
+    form.baseUrl = OLLAMA_DEFAULT
+    form.credentialId = null
+    form.managementCredentialId = null
+    form.cap = ''
+  }
+}
+
 function startEdit(p: ProviderSummary): void {
   Object.assign(form, {
     id: p.id,
     kind: p.kind,
     name: p.name,
-    baseUrl: p.kind === 'gateway' ? p.baseUrl : '',
+    baseUrl: p.kind === 'gateway' || p.kind === 'ollama' ? p.baseUrl : '',
     credentialId: p.credentialId,
     managementCredentialId: p.managementCredentialId,
     cap: p.capUsd === null ? '' : String(p.capUsd),
@@ -51,7 +63,7 @@ const capValue = computed(() => (form.cap.trim() === '' ? null : Number(form.cap
 const formProblem = computed(() => {
   if (!form.name.trim()) return 'Give it a name.'
   if (form.kind === 'gateway' && !form.baseUrl.trim()) return 'A gateway needs its address.'
-  if (form.kind !== 'openrouter' && form.credentialId === null) return 'Choose its key.'
+  if (form.kind !== 'openrouter' && form.kind !== 'ollama' && form.credentialId === null) return 'Choose its key.'
   if (form.kind === 'openrouter' && form.credentialId === null && form.managementCredentialId === null) return 'Choose a key.'
   if (capValue.value !== null && !(capValue.value > 0)) return 'The cap is a dollar amount above 0.'
   return null
@@ -63,8 +75,8 @@ async function submit(): Promise<void> {
     id: form.id,
     kind: form.kind,
     name: form.name,
-    baseUrl: form.kind === 'gateway' ? form.baseUrl : null,
-    credentialId: form.credentialId,
+    baseUrl: form.kind === 'gateway' || form.kind === 'ollama' ? form.baseUrl : null,
+    credentialId: form.kind === 'ollama' ? null : form.credentialId,
     managementCredentialId: form.kind === 'openrouter' ? form.managementCredentialId : null,
     capUsd: form.kind === 'openrouter' ? capValue.value : null,
   })
@@ -133,7 +145,7 @@ function supported(p: ProviderSummary): string {
         <code>{{ p.baseUrl }}</code>
       </header>
       <p class="facts">
-        Key: <strong>{{ p.credentialLabel ?? 'none' }}</strong>
+        Key: <strong>{{ p.kind === 'ollama' ? 'none: it runs on this machine' : (p.credentialLabel ?? 'none') }}</strong>
         <template v-if="p.kind === 'openrouter'">
           · Management key: <strong>{{ p.managementLabel ?? 'none (runs use the key above, without a cap)' }}</strong>
           <template v-if="p.managementCredentialId !== null"> · Cap per run: {{ money(p.capUsd ?? p.defaultCapUsd) }}</template>
@@ -200,7 +212,7 @@ function supported(p: ProviderSummary): string {
       <h3>{{ form.id === null ? 'Add a provider' : `Edit ${form.name}` }}</h3>
       <label>
         <span>Kind</span>
-        <select v-model="form.kind" :disabled="form.id !== null">
+        <select v-model="form.kind" :disabled="form.id !== null" @change="kindChanged">
           <option v-for="(label, k) in KIND_LABELS" :key="k" :value="k">{{ label }}</option>
         </select>
       </label>
@@ -212,7 +224,14 @@ function supported(p: ProviderSummary): string {
         <span>Address (OpenAI-compatible, with the Responses API)</span>
         <input v-model="form.baseUrl" placeholder="https://gateway.example.com/v1" spellcheck="false" autocomplete="off" />
       </label>
-      <label>
+      <label v-if="form.kind === 'ollama'">
+        <span>Address <em>(Ollama's own, on this machine unless you moved it)</em></span>
+        <input v-model="form.baseUrl" :placeholder="OLLAMA_DEFAULT" spellcheck="false" autocomplete="off" />
+      </label>
+      <p v-if="form.kind === 'ollama'" class="hint">
+        Ollama takes no key. Chorus never starts or stops it; Test says whether it's running.
+      </p>
+      <label v-if="form.kind !== 'ollama'">
         <span>Key <em>{{ form.kind === 'openrouter' ? '(your normal OpenRouter key)' : '' }}</em></span>
         <select v-model="form.credentialId">
           <option :value="null">None</option>
@@ -232,7 +251,7 @@ function supported(p: ProviderSummary): string {
           <input v-model="form.cap" inputmode="decimal" placeholder="1.00" autocomplete="off" />
         </label>
       </template>
-      <p v-if="!keys.keys.length" class="hint warn">Add the keys under Keys and lock first.</p>
+      <p v-if="!keys.keys.length && form.kind !== 'ollama'" class="hint warn">Add the keys under Keys and lock first.</p>
       <p v-if="formProblem" class="hint">{{ formProblem }}</p>
       <div class="actions">
         <button type="submit" class="primary" :disabled="formProblem !== null">Save</button>

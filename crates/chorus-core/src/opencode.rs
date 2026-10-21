@@ -181,7 +181,11 @@ fn connected(integration: &Value) -> Option<bool> {
 /// 2.1.1 lists a provider only once it can run: without a key, `anthropic` is in neither list but
 /// is an integration. A listed provider with a key in its own settings (opencode's free tier has
 /// `"public"`) or with no integration (Ollama) needs nothing more.
-pub fn check_model(providers_body: &str, models_body: &str, integrations_body: &str, model: &str) -> Option<ModelCheck> {
+///
+/// `keyless` is a route whose provider needs no key, such as Ollama on this machine: opencode marks
+/// that provider disabled for want of a login, which is not the same as the model not running, so
+/// neither "switched off" nor "no key" applies to it.
+pub fn check_model(providers_body: &str, models_body: &str, integrations_body: &str, model: &str, keyless: bool) -> Option<ModelCheck> {
     let (provider, id) = model.split_once('/')?;
     let providers = data(providers_body)?;
     let integrations = data(integrations_body).unwrap_or(Value::Null);
@@ -191,12 +195,12 @@ pub fn check_model(providers_body: &str, models_body: &str, integrations_body: &
             _ => ModelCheck::NoSuchProvider,
         });
     };
-    if p.get("activation").and_then(Value::as_str) == Some("disabled") {
+    if !keyless && p.get("activation").and_then(Value::as_str) == Some("disabled") {
         return Some(ModelCheck::NotConnected);
     }
     let own_key = p.pointer("/settings/apiKey").and_then(Value::as_str).is_some_and(|k| !k.is_empty());
     let signs_in = p.get("integrationID").and_then(Value::as_str).and_then(|i| integration(&integrations, i));
-    if !own_key && signs_in.and_then(connected) == Some(false) {
+    if !keyless && !own_key && signs_in.and_then(connected) == Some(false) {
         return Some(ModelCheck::NoKey);
     }
     let models = data(models_body)?;
@@ -588,46 +592,56 @@ mod tests {
 
     #[test]
     fn the_model_is_checked_against_the_server() {
-        let known = check_model(PROVIDERS, MODELS, NO_KEYS, "opencode/deepseek-v4.1-flash-free").unwrap();
+        let known = check_model(PROVIDERS, MODELS, NO_KEYS, "opencode/deepseek-v4.1-flash-free", false).unwrap();
         assert_eq!(known, ModelCheck::Known { variants: vec!["low".into(), "high".into(), "max".into()] });
         assert_eq!(model_note("opencode/deepseek-v4.1-flash-free", Some("high"), &known), None);
         assert_eq!(
             model_note("opencode/deepseek-v4.1-flash-free", Some("medium"), &known).unwrap(),
             "opencode/deepseek-v4.1-flash-free has no medium effort (it has low, high, max), so opencode uses its default."
         );
-        let none = check_model(PROVIDERS, MODELS, NO_KEYS, "opencode/big-pickle").unwrap();
+        let none = check_model(PROVIDERS, MODELS, NO_KEYS, "opencode/big-pickle", false).unwrap();
         assert!(model_note("opencode/big-pickle", Some("low"), &none).unwrap().contains("no effort settings"));
-        assert_eq!(check_model(PROVIDERS, MODELS, NO_KEYS, "switched/x"), Some(ModelCheck::NotConnected));
-        assert_eq!(check_model(PROVIDERS, MODELS, NO_KEYS, "nobody/x"), Some(ModelCheck::NoSuchProvider));
-        assert_eq!(check_model(PROVIDERS, MODELS, NO_KEYS, "opencode/nope"), Some(ModelCheck::NoSuchModel));
-        assert_eq!(check_model("[]", MODELS, NO_KEYS, "opencode/x"), None);
+        assert_eq!(check_model(PROVIDERS, MODELS, NO_KEYS, "switched/x", false), Some(ModelCheck::NotConnected));
+        assert_eq!(check_model(PROVIDERS, MODELS, NO_KEYS, "nobody/x", false), Some(ModelCheck::NoSuchProvider));
+        assert_eq!(check_model(PROVIDERS, MODELS, NO_KEYS, "opencode/nope", false), Some(ModelCheck::NoSuchModel));
+        assert_eq!(check_model("[]", MODELS, NO_KEYS, "opencode/x", false), None);
+        // A keyless provider (Ollama) runs even though opencode shows it disabled for want of a
+        // login: that is what a local provider looks like.
+        const WITH_OLLAMA: &str = r#"{"location":{},"data":[{"id":"ollama","name":"Ollama (local)","activation":"disabled","package":"x"}]}"#;
+        const OLLAMA_MODELS: &str = r#"{"location":{},"data":[{"id":"llama3.2:1b","providerID":"ollama","variants":[]}]}"#;
+        assert_eq!(check_model(WITH_OLLAMA, OLLAMA_MODELS, NO_KEYS, "ollama/llama3.2:1b", false), Some(ModelCheck::NotConnected));
+        let known = check_model(WITH_OLLAMA, OLLAMA_MODELS, NO_KEYS, "ollama/llama3.2:1b", true).unwrap();
+        assert_eq!(known, ModelCheck::Known { variants: vec![] });
+        assert_eq!(model_note("ollama/llama3.2:1b", None, &known), None);
     }
 
     #[test]
     fn a_provider_without_a_key_is_named() {
         // Listed, but nothing to sign in with: it fails its first turn with a 401.
         let routed = "openrouter/deepseek/deepseek-v4.1-flash";
-        assert_eq!(check_model(PROVIDERS, MODELS, NO_KEYS, routed), Some(ModelCheck::NoKey));
+        assert_eq!(check_model(PROVIDERS, MODELS, NO_KEYS, routed, false), Some(ModelCheck::NoKey));
         assert_eq!(
             model_note(routed, None, &ModelCheck::NoKey).unwrap(),
             "opencode has no key or login for openrouter in this session, so openrouter/deepseek/deepseek-v4.1-flash won't run. Run it on a provider from Settings."
         );
+        // A keyless route is never "no key", whatever its integration says.
+        assert!(matches!(check_model(PROVIDERS, MODELS, NO_KEYS, routed, true), Some(ModelCheck::Known { .. })));
         // A key in the environment is a connection.
-        assert!(matches!(check_model(PROVIDERS, MODELS, ENV_KEY, routed), Some(ModelCheck::Known { .. })));
+        assert!(matches!(check_model(PROVIDERS, MODELS, ENV_KEY, routed, false), Some(ModelCheck::Known { .. })));
         // Not listed at all, but opencode has it as an integration: it's the key that's missing.
-        assert_eq!(check_model(PROVIDERS, MODELS, NO_KEYS, "anthropic/claude-sonnet-4-6"), Some(ModelCheck::NoKey));
+        assert_eq!(check_model(PROVIDERS, MODELS, NO_KEYS, "anthropic/claude-sonnet-4-6", false), Some(ModelCheck::NoKey));
         // opencode's free tier has its own key, and Ollama signs in with nothing.
-        assert!(matches!(check_model(PROVIDERS, MODELS, NO_KEYS, "opencode/big-pickle"), Some(ModelCheck::Known { .. })));
-        assert!(matches!(check_model(PROVIDERS, MODELS, NO_KEYS, "ollama/qwen3"), Some(ModelCheck::Known { .. })));
+        assert!(matches!(check_model(PROVIDERS, MODELS, NO_KEYS, "opencode/big-pickle", false), Some(ModelCheck::Known { .. })));
+        assert!(matches!(check_model(PROVIDERS, MODELS, NO_KEYS, "ollama/qwen3", false), Some(ModelCheck::Known { .. })));
         // No integration list to go on: no claim about keys.
-        assert!(matches!(check_model(PROVIDERS, MODELS, "<html>", routed), Some(ModelCheck::Known { .. })));
-        assert_eq!(check_model(PROVIDERS, MODELS, "<html>", "anthropic/x"), Some(ModelCheck::NoSuchProvider));
+        assert!(matches!(check_model(PROVIDERS, MODELS, "<html>", routed, false), Some(ModelCheck::Known { .. })));
+        assert_eq!(check_model(PROVIDERS, MODELS, "<html>", "anthropic/x", false), Some(ModelCheck::NoSuchProvider));
         // Nor is an integration without a connections list.
         let unknown = r#"{"data":[{"id":"openrouter","name":"OpenRouter","methods":[{"type":"key"}]}]}"#;
-        assert!(matches!(check_model(PROVIDERS, MODELS, unknown, routed), Some(ModelCheck::Known { .. })));
+        assert!(matches!(check_model(PROVIDERS, MODELS, unknown, routed, false), Some(ModelCheck::Known { .. })));
         // Not listed though its integration has a key: opencode doesn't know it.
         let signed_in = r#"{"data":[{"id":"anthropic","name":"Anthropic","methods":[{"type":"key"}],"connections":[{"type":"env","name":"ANTHROPIC_API_KEY"}]}]}"#;
-        assert_eq!(check_model(PROVIDERS, MODELS, signed_in, "anthropic/x"), Some(ModelCheck::NoSuchProvider));
+        assert_eq!(check_model(PROVIDERS, MODELS, signed_in, "anthropic/x", false), Some(ModelCheck::NoSuchProvider));
     }
 
     #[test]

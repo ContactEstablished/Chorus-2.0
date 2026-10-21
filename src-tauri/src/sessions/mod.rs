@@ -106,6 +106,8 @@ pub struct SessionSummary {
     pub id: u32,
     pub name: String,
     pub agent: AgentKind,
+    /// The agent reports turns to Chorus; without it a running session is only "Running" (D47).
+    pub has_event_channel: bool,
     pub cwd: String,
     pub status: SessionStatus,
     /// A process is running now. `status` can be `running` without one for a moment while a
@@ -669,6 +671,7 @@ impl SessionManager {
             id: row.id,
             name: row.name.clone(),
             agent: row.agent,
+            has_event_channel: row.agent.spec().has_event_channel,
             cwd: row.cwd.clone(),
             status: row.state.into(),
             live: run.is_some(),
@@ -949,27 +952,42 @@ impl SessionManager {
                     prov::apply_routing(&mut route, &model, &s, catalog.as_ref().map(|c| c.efforts.as_slice()), effort.as_deref());
                 }
             }
-            let own_key = || -> Result<String, String> {
-                let cid = provider.credential_id.ok_or_else(|| format!("{} has no key", provider.name))?;
-                vault::decrypt(&self.store, cid)
-            };
-            let key = if provider.kind == ProviderKind::Openrouter && provider.management_credential_id.is_some() {
-                match crate::providers::keys::mint_for_run(&self.store, &provider, row.id) {
-                    Ok(minted) => {
-                        capped.ledger = Some(minted.ledger_id);
-                        notes.push(format!("This run has its own OpenRouter key, capped at ${:.2}.", minted.limit_usd));
-                        minted.key
+            // A provider that takes no key (Ollama) gets none, and nothing is minted for it.
+            if let Some(key_var) = route.key_var {
+                let own_key = || -> Result<String, String> {
+                    let cid = provider.credential_id.ok_or_else(|| format!("{} has no key", provider.name))?;
+                    vault::decrypt(&self.store, cid)
+                };
+                let key = if provider.kind == ProviderKind::Openrouter && provider.management_credential_id.is_some() {
+                    match crate::providers::keys::mint_for_run(&self.store, &provider, row.id) {
+                        Ok(minted) => {
+                            capped.ledger = Some(minted.ledger_id);
+                            notes.push(format!("This run has its own OpenRouter key, capped at ${:.2}.", minted.limit_usd));
+                            minted.key
+                        }
+                        Err(e) => {
+                            let key = own_key().map_err(|k| format!("couldn't mint a capped key ({e}), and {k}"))?;
+                            notes.push(format!("Couldn't mint a capped key ({e}), so this run uses the {} key, without a cap.", provider.name));
+                            key
+                        }
                     }
-                    Err(e) => {
-                        let key = own_key().map_err(|k| format!("couldn't mint a capped key ({e}), and {k}"))?;
-                        notes.push(format!("Couldn't mint a capped key ({e}), so this run uses the {} key, without a cap.", provider.name));
-                        key
+                } else {
+                    own_key()?
+                };
+                secrets.push((key_var.to_owned(), key));
+            }
+            if provider.kind == ProviderKind::Ollama {
+                // Chorus never starts Ollama, so say when it isn't there and when the model is odd.
+                match crate::providers::ollama_base(provider.base_url.as_deref())
+                    .and_then(|base| crate::providers::ollama_tags(&base).map(|models| (base, models)))
+                {
+                    Ok((_, models)) if !models.iter().any(|m| m.id == model) => {
+                        notes.push(format!("Ollama doesn't list {model}, so this turn may fail: pull it or pick another model."));
                     }
+                    Ok(_) => {}
+                    Err(e) => notes.push(e),
                 }
-            } else {
-                own_key()?
-            };
-            secrets.push((route.key_var.to_owned(), key));
+            }
             options.model = Some(route.model);
             route_args = route.args;
             opencode_provider = route.opencode_provider;
@@ -1030,7 +1048,18 @@ impl SessionManager {
             args.extend(route_args);
             args.extend(hook_args);
             args.extend(spec.option_args(&options));
-            let conversation = row.agent_session_id.as_deref();
+            // Gemini CLI refuses to create an id whose chat file already exists, and to resume one
+            // with no turns in it. A session that ended before its first prompt has exactly that,
+            // so it gets a fresh id rather than a launch that fails with exit 42.
+            let renewed = (row.agent == AgentKind::Gemini)
+                .then_some(row.agent_session_id.as_deref())
+                .flatten()
+                .filter(|id| agents::gemini_chat_state(id, &parent) == agents::GeminiChat::Empty)
+                .map(|_| uuid_v4(vault::random_bytes(16).try_into().expect("16 bytes")));
+            if let Some(id) = &renewed {
+                rows::set_agent_session_id(&self.store, row.id, id)?;
+            }
+            let conversation = renewed.as_deref().or(row.agent_session_id.as_deref());
             let exists = conversation.is_some_and(|id| agents::conversation_exists(row.agent, id, &parent));
             args.extend(spec.conversation_args(conversation, exists));
             (None, exists && spec.resume.kind() != ResumeKind::None)
@@ -1180,8 +1209,13 @@ impl SessionManager {
                 (id, false)
             }
         };
+        // opencode lists a provider that takes no key (Ollama) as disabled, which is not the same as
+        // the model not running.
+        let keyless = row.provider_id.is_some_and(|id| {
+            provider_rows::get(&self.store, id).ok().flatten().is_some_and(|p| p.kind == ProviderKind::Ollama)
+        });
         if let Some(model) = &options.model {
-            match server.api.check_model(model) {
+            match server.api.check_model(model, keyless) {
                 Ok(Some(check)) => notes.extend(oc::model_note(model, variant.as_deref(), &check)),
                 Ok(None) => notes.push("opencode's model list isn't in the shape Chorus checked, so the model wasn't checked.".into()),
                 Err(e) => notes.push(format!("Chorus couldn't check the model with opencode: {e}")),

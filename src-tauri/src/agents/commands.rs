@@ -41,6 +41,8 @@ pub struct AgentInfo {
     pub takes_model: bool,
     /// Options go into the configuration of a server Chorus starts (opencode), not argv.
     pub options_in_config: bool,
+    /// The agent reports turns to Chorus. Without it, a running session is only "Running" (D47).
+    pub has_event_channel: bool,
     /// An effort applies only with a model named beside it (opencode, LESSONS L5).
     pub effort_needs_model: bool,
     pub resume: ResumeKind,
@@ -60,6 +62,7 @@ fn info(spec: &Spec, detection: Option<Detection>) -> AgentInfo {
         default_permission: spec.default_permission,
         takes_model: spec.model.is_some(),
         options_in_config: spec.carrier == Carrier::ServerConfig,
+        has_event_channel: spec.has_event_channel,
         effort_needs_model: spec.carrier == Carrier::ServerConfig,
         resume: spec.resume.kind(),
         verified_version: spec.verified.map(str::to_owned),

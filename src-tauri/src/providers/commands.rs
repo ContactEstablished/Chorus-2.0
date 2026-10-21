@@ -122,8 +122,15 @@ fn check(store: &Store, s: &ProviderSave) -> Result<(String, Option<String>), St
     }
     let base_url = match s.kind {
         ProviderKind::Gateway => Some(p::clean_base_url(s.base_url.as_deref().unwrap_or(""))?),
+        // Ollama's default is kept, so the row always says where it looks.
+        ProviderKind::Ollama => Some(p::clean_base_url(
+            s.base_url.as_deref().map(str::trim).filter(|u| !u.is_empty()).unwrap_or(p::OLLAMA_URL),
+        )?),
         _ => None,
     };
+    if s.kind == ProviderKind::Ollama && s.credential_id.is_some() {
+        return Err("Ollama runs on this machine and takes no key.".into());
+    }
     for id in [s.credential_id, s.management_credential_id].into_iter().flatten() {
         credentials::get(store, id)?.ok_or("One of the chosen keys no longer exists.")?;
     }
