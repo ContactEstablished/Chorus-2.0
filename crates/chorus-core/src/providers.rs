@@ -65,16 +65,17 @@ pub fn valid_provider_name(name: &str) -> bool {
     !n.is_empty() && n.len() <= 60 && n.chars().all(|c| c.is_ascii_alphanumeric() || " -_.()".contains(c))
 }
 
-/// A gateway's base URL, without a trailing slash: `https://`, or plain `http://` only on this
-/// machine. No quotes, spaces or backslashes, because it is passed inside a Codex config value.
+/// A gateway's or Ollama's base URL, without a trailing slash: `https://`, or plain `http://` only
+/// on this machine. No quotes, spaces or backslashes, because it is passed inside a Codex config
+/// value.
 pub fn clean_base_url(url: &str) -> Result<String, String> {
     let u = url.trim().trim_end_matches('/');
     let local = ["http://127.0.0.1", "http://localhost"].iter().any(|p| u.strip_prefix(p).is_some_and(|r| r.is_empty() || r.starts_with([':', '/'])));
     if !(u.starts_with("https://") || local) {
-        return Err("A gateway address must start with https:// (or http://localhost for one on this machine).".into());
+        return Err("An address must start with https:// (or http://localhost for one on this machine).".into());
     }
     if u.len() > 300 || !u.chars().all(|c| c.is_ascii_alphanumeric() || "-._~:/?#[]@!$&()*+,;=%".contains(c)) {
-        return Err("That gateway address has characters Chorus can't pass on.".into());
+        return Err("That address has characters Chorus can't pass on.".into());
     }
     Ok(u.to_owned())
 }

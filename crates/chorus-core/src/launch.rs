@@ -168,7 +168,7 @@ mod tests {
         let all = [Shell, Claude, Codex, Opencode, Grok];
         let reviewer = |builder| plan(Preset::Pair, builder, &all, 1).unwrap()[1].agent;
         assert_eq!((reviewer(Codex), reviewer(Claude), reviewer(Opencode)), (Claude, Codex, Claude));
-        // Grok not installed: Claude's reviewer skips it.
+        // Codex not installed: Claude's reviewer is the next in order.
         assert_eq!(partner_for(Claude, &[Shell, Claude, Opencode]), Some(Opencode));
         assert!(plan(Preset::Pair, Claude, &[Shell, Claude], 1).unwrap_err().contains("only Claude Code was found"));
         assert!(plan(Preset::Pair, Shell, &all, 1).unwrap_err().contains("other than Shell"));

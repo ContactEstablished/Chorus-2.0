@@ -173,7 +173,7 @@ pub struct Spec {
     /// agent is `false` until its channel is built, so nothing has to remember to change a list.
     pub has_event_channel: bool,
     /// Each level and the arguments it adds. An empty list means the agent's own behaviour is
-    /// already that level (aider asks before each edit with no flag of its own).
+    /// already that level, with no flag for it.
     pub efforts: &'static [(Effort, &'static [&'static str])],
     pub default_effort: Option<Effort>,
     pub permissions: &'static [(Permission, &'static [&'static str])],
@@ -351,10 +351,12 @@ const GEMINI: Spec = Spec {
 };
 
 /// Aider 0.86.2: `--model provider/name` (it speaks OpenRouter natively, so `openrouter/<id>`), and
-/// `--reasoning-effort` for the effort. It has no permission modes: it asks before each edit, which
-/// is Manual with no arguments, and `--yes-always` accepts everything. Auto mode is the same level
-/// as Full access here, and there is no plan mode, so neither is declared. It has no conversation
-/// id either: `--restore-chat-history` (passed by the launch) reloads the folder's chat history, and
+/// `--reasoning-effort` for the effort. It has no permission modes. With no flag it edits (and
+/// commits) the files in the chat without asking, and asks before making a file, editing one not in
+/// the chat and running a shell command; that is declared as Manual until Q29 is answered.
+/// `--yes-always` says yes to all of those except shell commands, which it then always declines.
+/// Auto mode would be the same level as Full access, and there is no plan mode, so neither is
+/// declared. It has no conversation id either: `--restore-chat-history` (passed by the launch) reloads the folder's chat history, and
 /// resume is `None`. No event channel: `--notifications-command` runs a command line whose token
 /// would have to travel in argv, which the secret rules forbid.
 const AIDER: Spec = Spec {
@@ -672,7 +674,7 @@ mod tests {
             aider.option_args(&aider.resolve(&opts).unwrap()),
             ["--reasoning-effort", "high", "--yes-always", "--model", "openrouter/deepseek/deepseek-v4.1-flash:free"]
         );
-        // Manual is what aider does on its own: it asks before each edit, with no flag.
+        // Manual is Aider with no flag, which doesn't ask before editing a file in the chat (Q29).
         assert!(aider.option_args(&aider.resolve(&LaunchOptions::default()).unwrap()).is_empty());
     }
 
