@@ -218,6 +218,10 @@ real terminal or a structured event stream, how its key and model are set from 2
 form, where its sessions live and how they resume, and how it reports cost. Installer polish, code
 signing decision, update channel; secret scanning in CI. Once Chorus 1 is retired, the installed name drops its "2" (D51), with a
 step that moves an existing "Chorus 2" install.
+Done so far (2026-10-21): the Gemini CLI and Aider adapters, Ollama as a provider for opencode (D64),
+the CI check with the secret scan, installer polish, and designs for signing (D66, Q25), the update
+channel (Q26) and dropping the "2". Still to come: DeepSeek Harness (spike S9, Q21), and Q28–Q30's
+fixes to Gemini and Aider. opencode 2.x came from main (D58), not this phase.
 
 ## 5. Ways of working
 

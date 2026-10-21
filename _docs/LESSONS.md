@@ -322,6 +322,43 @@ ended. When `git worktree remove` fails that way (git 2.50), it has already dele
 and git's record of it. What's left is the folder in use, and running it again says "is not a working
 tree". Close's note now says so, rather than that the worktree was kept.
 
+**L45 — opencode 2.x with a provider that takes no key (P14, 2026-10-20).** `GET /api/provider` marks a
+keyless provider `activation: "disabled"`, so a keyless route mustn't read that as "not connected".
+2.1.1 accepts an Ollama block (`npm: "@ai-sdk/openai-compatible"`, `options.baseURL` ending in `/v1`)
+and runs a turn on it, but lists the provider a moment after the server first answers, so a model
+check for a keyless provider waits until it is listed.
+
+**L46 — Gemini CLI 0.64.0 (P14, 2026-10-20).**
+- `--skip-trust` trusts the folder for that session and writes nothing. It also skips what folder
+  trust protects: in a folder it doesn't trust, Gemini ignores the folder's `.gemini/settings.json`
+  (its MCP servers, hooks and commands) until the user agrees. Folder trust is on by default (Q28).
+- Exit 41 is "no auth" and 42 is "input error". `--session-id` with an id already used, and
+  `--resume` on a chat with no turn, both give 42.
+- A chat file is written as soon as a session starts, with a `<session_context>` user record that
+  the CLI ignores when deciding whether the chat can resume. So an id can be used up with no turn
+  in it: check the records, not that the file exists.
+- Auto-update has no flag or environment variable. It's `general.enableAutoUpdate` in
+  `~/.gemini/settings.json` (system settings override the user's), so Chorus can't turn it off
+  without writing the user's settings or replacing system policy with
+  `GEMINI_CLI_SYSTEM_SETTINGS_PATH` (Q27).
+
+**L47 — Aider 0.86.2 on Windows (P14, 2026-10-20; corrected in the main-line review).**
+- Install it with Python 3.12 (`uv tool install --python 3.12 aider-chat`): the machine's 3.14 breaks
+  it in `pydub`. uv's launcher is a real `aider.exe`, not an npm shim.
+- It has no permission modes. With no flag it edits the files in the chat without asking, and
+  commits them (`--auto-commits` is on by default). It asks before making a file, editing one not in
+  the chat, adding files and running a shell command. `--yes-always` says yes to those, except shell
+  commands, which it then always declines (Q29).
+- It has no conversation id. `--restore-chat-history` reloads `.aider.chat.history.md` from the
+  repository's top folder, whoever wrote it (Q30).
+- On its first run in a repository it asks to add `.aider*` to `.gitignore`, and writes the file
+  without committing it. `--reasoning-effort` goes to the model and is unset by default.
+
+**L48 — Tauri's NSIS uninstaller keeps the install path (P14, 2026-10-20).**
+`HKCU\Software\<manufacturer>\<product>` holds `$INSTDIR` as the next install's default folder, and
+is removed only when "delete app data" is ticked. `NSIS_HOOK_POSTUNINSTALL` can remove it when
+`$UpdateMode <> 1`. `customLanguageFiles` replaces a language file whole.
+
 ## Money and models
 
 **L16 — Read-then-revoke under-reports OpenRouter spend.** Reading a capped key's usage right after the

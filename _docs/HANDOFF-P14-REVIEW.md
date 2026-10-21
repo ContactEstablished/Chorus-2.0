@@ -442,3 +442,50 @@ model is `provider/model` ran even on a provider, so a bare name was refused. Ty
 - Closing the app ended all six opencode processes it had started.
 
 `npm run check` passed after the last code change (core 369 tests).
+
+## 13. Main-line review (2026-10-21)
+
+Reviewed `45eb41f..a7612a2` and `17d053e` on main, against CLAUDE.md's rules and for bugs. Each
+finding was checked against the code and the installed CLIs (Gemini CLI 0.64.0's bundle, Aider
+0.86.2's source).
+
+**Fixed in the review:**
+- An invalid Ollama address was refused as "A gateway address …". It's now "An address …".
+- `launch.rs`'s Pair test said it tested skipping Grok, but with the new order opencode wins anyway.
+  It now says Codex is the one skipped, which it is.
+- Aider's spec and test said Manual "asks before each edit". Corrected (Q29).
+
+**Still open, each a question for Matthew:**
+1. Every Gemini launch passes `--skip-trust`, so Gemini loads a folder's own `.gemini/settings.json`
+   (MCP servers that run commands, hooks) without asking. That goes against D55 (Q28).
+2. Aider's Manual doesn't ask before editing the files in the chat, and commits them (Q29).
+3. Every Aider launch restores the repository's chat history, a new session's too (Q30).
+4. With `--yes-always`, Aider declines every shell command, so Full access doesn't include them (L47).
+
+**Not confirmed:** a worktree an Aider session used is probably kept at Close. Aider's `.gitignore`
+change and its `.aider*` files are uncommitted, so Close finds changes. Q30's (a) moves the history
+files out; `.gitignore` and the tags cache would stay. Try it in the app.
+
+**Not done in P14:**
+- DeepSeek Harness (D59, spike S9, Q21) is in PLAN's P14, but wasn't in its hand-off.
+- No Gemini or Aider turn ran. So PLAN P2's bar (each option seen to apply) is met only as far as
+  each launch accepts its arguments.
+
+**Checks that passed:**
+- Migration 0011: every column is kept, foreign keys are restored even on failure,
+  `foreign_key_check` runs before the version bump, and an unknown directive is refused.
+- Typed IPC: `launch_args` gains `on_provider`, and the bindings were regenerated.
+- Secrets: Ollama gets no key, and Aider's OpenRouter key goes only into its environment. The
+  `AIza…` pattern is in the scrubber, with a test.
+- Routing tiers are still opencode on OpenRouter only.
+- Fail visible: Ollama not running, or a model it doesn't list, gives a note.
+- CLI flags were checked against each CLI's `--help`. Files are LF, with no local paths.
+
+**Doc entries, numbered:**
+- P14-D1 to D4 became D63 to D66, and the plan's decision 4 (Pair order) became D67. All are
+  Proposed: P14 marked D1 to D3 Decided, but Matthew's answers aren't written down.
+- P14-L1 became L45; L2, with L5 folded in, became L46; L3, corrected, became L47; and L4 became L48.
+- §9's questions 1 to 3 became Q25 to Q27. Q28 to Q30 come from this review.
+- PLAN's P14 now says what's done and what isn't.
+- §9's questions 4 and 5 (the OC2 hand-off file, keeping the three CLIs) are housekeeping, with no
+  number.

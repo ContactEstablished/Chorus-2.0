@@ -48,6 +48,44 @@ opencode 1.x refused (D61). 1.x was checked and is known not to work, so the sen
 reads as a contradiction. Options: (a) leave it; (b) "Versions Chorus hasn't checked are tried and
 reported; one it can't drive says why." *Default: (b), a one-line front-end change.* Blocks: nothing.
 
+**Q25 — Sign the installer with Artifact Signing Basic, or stay unsigned for now?** (P14, D66.) (a) Sign:
+$9.99 a month, individual validation in the US or Canada, minutes to set up once the Entra account
+exists; the first downloads still warn. (b) Stay unsigned until there's something to distribute: $0,
+and "Unknown publisher" on every download. *Default: (a) when the first public release is near, not
+sooner.* Blocks: D66.
+
+**Q26 — Wire `tauri-plugin-updater` now, switched off?** (P14, Task 10.) (a) Yes: the plugin loads with
+an empty endpoint and key, and turning it on is two values later. (b) Later: no dependency until there
+is a release to update. *Default: (a).* Blocks: nothing.
+
+**Q27 — Gemini CLI's auto-update: leave it on, or have Chorus turn it off?** (P14, L46.) (a) Leave it:
+0.64.0 has no switch per launch, and the only one is the user's settings file, which Chorus mustn't
+write. An update shows as a newer version at the next launch. (b) Pass `GEMINI_CLI_SYSTEM_SETTINGS_PATH`
+on each launch with auto-update off, which also replaces any real system policy file on the machine.
+*Default: (a).* Blocks: nothing.
+
+**Q28 — Should Chorus trust a folder for Gemini CLI?** (Main-line review of P14, L46, D55.) Every Gemini
+launch passes `--skip-trust`, so Gemini loads a folder's own `.gemini/settings.json` (MCP servers that
+run commands, hooks) without asking. D55 says Chorus never trusts a folder the user hasn't. (a) Drop
+`--skip-trust`: Gemini asks in its terminal the first time in each folder, including each new worktree.
+(b) Follow D55: pass `--skip-trust` only when Gemini already trusts the folder or its repository
+(read from Gemini's trusted-folders file, never written), so a trusted repository's worktrees don't
+ask. *Default: (b).* Blocks: D65.
+
+**Q29 — What should New session call Aider's permission levels?** (Main-line review of P14, L47.) Offered
+as Manual, Aider with no flag edits and commits the files in the chat without asking; Manual elsewhere
+means "asks before edits". (a) Offer it as Accept edits, plus Full access, and no Manual. (b) Keep
+Manual, with a note in New session saying what Aider asks about. *Default: (a): the names keep one
+meaning across agents.* Blocks: nothing, but until then Aider's Manual doesn't do what it says.
+
+**Q30 — Should a new Aider session start without the repository's chat history?** (Main-line review of
+P14, L47.) Every launch passes `--restore-chat-history`, which reloads `.aider.chat.history.md` from the
+repository's top folder. So a new session inherits whatever the last Aider chat there was (another
+session's, or the user's own outside Chorus), and sends it to the model at a cost. Two Aider sessions
+in one repository share one history. (a) Give each session its own history files in its state folder,
+so a Restart reloads only its own chat. (b) Keep the repository's file, and restore only on a Restart.
+*Default: (a). It also keeps those files out of the repository.* Blocks: nothing.
+
 ## Resolved 2026-10-18
 
 Matthew kept the name Chorus, accepted every recommended default, and moved voice to a separate
