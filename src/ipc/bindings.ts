@@ -128,6 +128,8 @@ export const commands = {
 	 *  Windows.
 	 */
 	splashReplay: (sessions: number, reduceMotion: boolean) => typedError<null, string>(__TAURI_INVOKE("splash_replay", { sessions, reduceMotion })),
+	sessionActionCapabilities: (sessionId: number) => typedError<SessionCapabilities, string>(__TAURI_INVOKE("session_action_capabilities", { sessionId })),
+	sessionAction: (sessionId: number, request: ActionRequest) => typedError<Delivered, string>(__TAURI_INVOKE("session_action", { sessionId, request })),
 };
 
 /** Events */
@@ -140,6 +142,22 @@ export const events = {
 /* Types */
 /**  Whether the account guardrail preflight was read (K3). */
 export type AccountCheck = "checked" | "unknown";
+
+export type ActionCapabilities = {
+	prompt: ActionCapability,
+	question: ActionCapability,
+	approval: ActionCapability,
+	plan: ActionCapability,
+	queue: ActionCapability,
+};
+
+export type ActionCapability = { channel: "pty" } | { channel: "unavailable"; reason: string };
+
+export type ActionRequest = {
+	runId: number,
+	requestId: string,
+	action: SessionAction,
+};
 
 export type Activity = 
 /**  No event yet, or the agent has no event channel (Grok, a shell). */
@@ -199,6 +217,8 @@ export type AppInfo = {
 	homeDir: string | null,
 	tauriVersion: string,
 };
+
+export type ApprovalDecision = "allow" | "deny";
 
 export type AskEntry = {
 	kind: string,
@@ -378,6 +398,14 @@ export type CredentialUse = {
 	id: number,
 	envVar: string,
 };
+
+export type Delivered = {
+	promptId: number,
+	runId: number,
+	status: DeliveryStatus,
+};
+
+export type DeliveryStatus = "uncertain" | "written" | "observed";
 
 /**  What Chorus found for one agent. */
 export type Detection = {
@@ -690,6 +718,8 @@ export type ProjectState = "active" |
 /**  Finished with: out of the rail and the Overview's chips. */
 "archived";
 
+export type PromptSource = "composer" | "automation" | "telegram";
+
 /**  The `"deny"` literal OpenRouter's `provider.data_collection` takes. */
 export type ProviderDataCollection = "deny";
 
@@ -830,6 +860,13 @@ export type RoutingProfileId =
  *  golden results pin the ranker.
  */
 "helper";
+
+export type SessionAction = { kind: "prompt"; text: string; source: PromptSource } | { kind: "answer"; ask_id: number; text: string } | { kind: "approval"; ask_id: number; decision: ApprovalDecision; message: string | null };
+
+export type SessionCapabilities = {
+	runId: number | null,
+	capabilities: ActionCapabilities,
+};
 
 /**  A session's recent turns and how complete its records are. */
 export type SessionHistory = {

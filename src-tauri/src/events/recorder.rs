@@ -77,8 +77,12 @@ impl Recorder {
         self.tracker.stale(now_ms, last_output_ms)
     }
 
-    fn clean(&self, text: &str) -> String {
+    pub(crate) fn clean(&self, text: &str) -> String {
         String::from_utf8_lossy(&scrub_all(text.as_bytes(), &self.redact, &self.patterns)).into_owned()
+    }
+
+    pub fn pending_question(&self) -> bool {
+        self.asks.iter().any(|a| a.kind == "question")
     }
 
     fn turn_for(&self, turn: Option<&str>) -> Option<i64> {
@@ -99,18 +103,26 @@ impl Recorder {
         for event in events {
             let changes = self.tracker.apply(event, now_ms);
             for change in changes {
-                self.apply_change(store, change);
+                self.apply_change(store, change, now_ms);
             }
             self.apply_detail(store, event);
         }
     }
 
-    fn apply_change(&mut self, store: &Store, change: TurnChange) {
+    fn apply_change(&mut self, store: &Store, change: TurnChange, now_ms: i64) {
         match change {
             TurnChange::Opened { key, turn, prompt } => {
                 let prompt_row = prompt
                     .filter(|p| !p.trim().is_empty())
-                    .and_then(|p| history::insert_prompt(store, self.session_id, Some(self.run_id), self.prompt_source, &self.clean(&p)).ok());
+                    .and_then(|p| {
+                        let text = self.clean(&p);
+                        // Shared delivery already persisted this prompt; consume its echo once.
+                        match crate::store::delivery::observe(store, self.run_id, &text, now_ms) {
+                            Ok(Some(id)) => Some(id),
+                            Ok(None) => history::insert_prompt(store, self.session_id, Some(self.run_id), self.prompt_source, &text).ok(),
+                            Err(_) => None,
+                        }
+                    });
                 if let Ok(row) = history::open_turn(store, self.session_id, Some(self.run_id), turn.as_deref(), prompt_row) {
                     self.turns.insert(key, row);
                     if let Some(t) = turn {
@@ -209,7 +221,7 @@ impl Recorder {
     /// The run ended: its open turns are lost.
     pub fn run_ended(&mut self, store: &Store) {
         for change in self.tracker.run_ended() {
-            self.apply_change(store, change);
+            self.apply_change(store, change, crate::store::now_ms());
         }
     }
 }

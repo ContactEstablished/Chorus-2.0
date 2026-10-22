@@ -53,7 +53,10 @@ pub fn resolve(kind: AgentKind, parent_env: &[(String, String)], scratch: &Path)
             additions: vec![("GROK_DISABLE_AUTOUPDATER", "1".into())],
         }),
         AgentKind::Codex => {
-            let (program, mut args) = through_shim(&path, "codex.cmd")?;
+            let (program, mut args) = match find_on_path(&path, "codex.exe") {
+                Some(program) => (program, vec![]),
+                None => through_shim(&path, "codex.cmd")?,
+            };
             // Codex has no environment switch for its update check (LESSONS L7).
             args.extend(["-c".into(), "check_for_update_on_startup=false".into()]);
             Ok(Launch { program, args, additions: vec![] })
@@ -281,6 +284,18 @@ pub fn gemini_chat_state(id: &str, parent_env: &[(String, String)]) -> GeminiCha
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn codex_native_install_resolves_without_an_npm_shim() {
+        let dir = std::env::temp_dir().join(format!("chorus-codex-native-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("codex.exe"), []).unwrap();
+        let env = vec![("PATH".into(), dir.display().to_string())];
+        let launch = resolve(AgentKind::Codex, &env, &dir).unwrap();
+        assert_eq!(launch.program, dir.join("codex.exe"));
+        assert_eq!(launch.args, ["-c", "check_for_update_on_startup=false"]);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn aider_sessions_have_separate_history_paths_and_restart_reuses_them() {

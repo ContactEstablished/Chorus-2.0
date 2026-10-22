@@ -76,6 +76,142 @@ fn wait_for(what: &str, mut ok: impl FnMut() -> bool) {
     wait_for_or(what, &mut ok, String::new);
 }
 
+/// A real run with an injected writer: exercises persistence/order without sending test text
+/// to a model or depending on a CLI login. Events here are synthetic; this is not P6 acceptance.
+struct DeliveryWriter {
+    manager: std::sync::Weak<SessionManager>,
+    chunks: DeliveryChunks,
+    fail_enter: bool,
+    // Dropping ConPTY's real input handle sends EOF to cmd.exe. Keep it alive while intercepting.
+    _original: Box<dyn Write + Send>,
+}
+
+type DeliveryChunks = Arc<Mutex<Vec<Vec<u8>>>>;
+
+impl Write for DeliveryWriter {
+    fn write(&mut self, data: &[u8]) -> std::io::Result<usize> {
+        let manager = self.manager.upgrade().unwrap();
+        let count: u32 = manager.store.with(|c| c.query_row("SELECT count(*) FROM prompt_deliveries", [], |r| r.get(0))).unwrap();
+        assert!(count > 0, "the durable receipt must precede every write");
+        if self.fail_enter && data == b"\r" { return Err(std::io::Error::other("injected write failure")); }
+        self.chunks.lock().unwrap().push(data.to_vec());
+        Ok(data.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> { Ok(()) }
+}
+
+fn delivery_fixture(f: &Fixture, fail_enter: bool) -> (u32, Arc<Run>, DeliveryChunks) {
+    let id = f.shell(None);
+    let seen = f.view(id);
+    // Finish ConPTY's opening cursor handshake before replacing its writer.
+    f.manager.write(id, "echo delivery-fixture-ready\r").unwrap();
+    wait_text(&seen, "delivery-fixture-ready", 2);
+    let run = f.manager.running(id).unwrap();
+    f.manager.store.with(|c| c.execute("UPDATE sessions SET agent='claude' WHERE id=?1", [id])).unwrap();
+    let chunks = Arc::new(Mutex::new(Vec::new()));
+    {
+        let mut writer = run.writer.lock().unwrap();
+        let original = std::mem::replace(&mut *writer, Box::new(std::io::sink()));
+        *writer = Box::new(DeliveryWriter { manager: Arc::downgrade(&f.manager), chunks: chunks.clone(), fail_enter, _original: original });
+    }
+    run.recorder.lock().unwrap().record(&f.manager.store, "test", &serde_json::json!({}), &[chorus_core::events::AgentEvent::Idle], crate::store::now_ms());
+    (id, run, chunks)
+}
+
+const DELIVERY_REQUEST: &str = "0f8fad5b-d9cb-469f-a165-70867728950e";
+const OTHER_REQUEST: &str = "7c9e6679-7425-40de-944b-e07fc1f90ae7";
+
+#[test]
+fn delivery_persists_before_two_writes_and_links_one_scrubbed_prompt() {
+    use chorus_core::actions::PromptSource;
+    use crate::store::delivery::DeliveryStatus;
+    let f = Fixture::new("delivery-once");
+    let (id, run, chunks) = delivery_fixture(&f, false);
+    let result = delivery::deliver_prompt(&f.manager, id, run.id, DELIVERY_REQUEST, "one\r\ntwo", PromptSource::Composer).unwrap();
+    assert_eq!(result.status, DeliveryStatus::Written);
+    assert_eq!(*chunks.lock().unwrap(), [b"\x1b[200~one\ntwo\x1b[201~".to_vec(), b"\r".to_vec()]);
+    let again = delivery::deliver_prompt(&f.manager, id, run.id, DELIVERY_REQUEST, "one\r\ntwo", PromptSource::Composer).unwrap();
+    assert_eq!(again, result);
+    assert_eq!(chunks.lock().unwrap().len(), 2);
+    assert!(delivery::deliver_prompt(&f.manager, id, run.id, OTHER_REQUEST, "next", PromptSource::Composer).is_err());
+    run.recorder.lock().unwrap().record(&f.manager.store, "test", &serde_json::json!({}), &[
+        chorus_core::events::AgentEvent::TurnStarted { turn: Some("turn1".into()), prompt: Some("one\ntwo".into()) },
+        chorus_core::events::AgentEvent::TurnEnded { turn: Some("turn1".into()), message: Some("Done".into()) },
+    ], crate::store::now_ms());
+    let again = delivery::deliver_prompt(&f.manager, id, run.id, DELIVERY_REQUEST, "one\ntwo", PromptSource::Composer).unwrap();
+    assert_eq!(again.status, DeliveryStatus::Observed);
+    let (count, source, prompt): (u32, String, u32) = f.manager.store.with(|c| c.query_row(
+        "SELECT (SELECT count(*) FROM prompts),source,(SELECT prompt_id FROM turns LIMIT 1) FROM prompts LIMIT 1", [],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+    )).unwrap();
+    assert_eq!((count, source.as_str(), prompt), (1, "composer", result.prompt_id));
+    assert!(delivery::deliver_prompt(&f.manager, id, run.id, DELIVERY_REQUEST, "changed", PromptSource::Composer).is_err());
+    assert!(delivery::deliver_prompt(&f.manager, id, run.id + 1, OTHER_REQUEST, "next", PromptSource::Composer).is_err());
+    f.manager.set_locked(id, true, None).unwrap();
+    assert!(delivery::deliver_prompt(&f.manager, id, run.id, OTHER_REQUEST, "next", PromptSource::Composer).is_err());
+    f.manager.set_locked(id, false, None).unwrap();
+    f.manager.close(id, false).unwrap();
+    assert!(f.manager.restart(id).is_err());
+    assert!(f.manager.open_live(id).is_err(), "refused restart must not recreate a closed live session");
+}
+
+#[test]
+fn partial_delivery_is_durable_uncertain_and_never_retried() {
+    use chorus_core::actions::PromptSource;
+    use crate::store::delivery::{self as receipts, DeliveryStatus};
+    let f = Fixture::new("delivery-failure");
+    let (id, run, chunks) = delivery_fixture(&f, true);
+    let result = delivery::deliver_prompt(&f.manager, id, run.id, DELIVERY_REQUEST, "hello", PromptSource::Telegram).unwrap();
+    assert_eq!(result.status, DeliveryStatus::Uncertain);
+    assert_eq!(chunks.lock().unwrap().len(), 1);
+    assert_eq!(delivery::deliver_prompt(&f.manager, id, run.id, DELIVERY_REQUEST, "hello", PromptSource::Telegram).unwrap(), result);
+    assert_eq!(chunks.lock().unwrap().len(), 1);
+    // A new connection (as after restart) sees the same uncertain receipt.
+    let reopened = Store::open(&f.dir.join("chorus.db")).unwrap();
+    assert_eq!(receipts::existing(&reopened, id, DELIVERY_REQUEST, "hello", PromptSource::Telegram).unwrap(), Some(result));
+    // A rejected duplicate insertion rolls back the prompt too.
+    assert!(receipts::begin(&reopened, id, run.id, DELIVERY_REQUEST, "hello", PromptSource::Telegram, 0).is_err());
+    let count: u32 = reopened.with(|c| c.query_row("SELECT count(*) FROM prompts", [], |r| r.get(0))).unwrap();
+    assert_eq!(count, 1);
+}
+
+#[test]
+fn unsupported_replies_and_observed_approvals_never_write_to_pty() {
+    use chorus_core::actions::{ApprovalDecision, PromptSource, SessionAction};
+    let f = Fixture::new("delivery-approval");
+    let (id, run, chunks) = delivery_fixture(&f, false);
+    for action in [
+        SessionAction::Approval { ask_id: 1, decision: ApprovalDecision::Allow, message: None },
+        SessionAction::Answer { ask_id: 1, text: "yes".into() },
+    ] {
+        let req = actions::ActionRequest { run_id: run.id, request_id: DELIVERY_REQUEST.into(), action };
+        assert!(actions::ActionRouter::dispatch(&f.manager, id, req).unwrap_err().contains("Raw"));
+    }
+    run.recorder.lock().unwrap().record(&f.manager.store, "test", &serde_json::json!({}), &[
+        chorus_core::events::AgentEvent::ApprovalAsked { turn: None, ask: None, tool: "Write".into(), target: None },
+    ], crate::store::now_ms());
+    let error = delivery::deliver_prompt(&f.manager, id, run.id, DELIVERY_REQUEST, "yes", PromptSource::Composer).unwrap_err();
+    assert!(error.contains("approval"), "unexpected refusal: {error}");
+    assert!(chunks.lock().unwrap().is_empty());
+}
+
+#[test]
+fn delivered_secrets_are_scrubbed_and_echoes_are_run_and_time_scoped() {
+    use chorus_core::actions::PromptSource;
+    use crate::store::delivery as receipts;
+    let f = Fixture::new("delivery-scrub");
+    let (id, run, _) = delivery_fixture(&f, false);
+    *run.recorder.lock().unwrap() = Recorder::new(id, run.id, "hook", Arc::new(vec![b"example-private-value".to_vec()]), Arc::new(builtin_patterns()));
+    run.recorder.lock().unwrap().record(&f.manager.store, "test", &serde_json::json!({}), &[chorus_core::events::AgentEvent::Idle], 0);
+    let result = delivery::deliver_prompt(&f.manager, id, run.id, DELIVERY_REQUEST, "use example-private-value", PromptSource::Automation).unwrap();
+    let stored: String = f.manager.store.with(|c| c.query_row("SELECT text FROM prompts WHERE id=?1", [result.prompt_id], |r| r.get(0))).unwrap();
+    assert!(!stored.contains("example-private-value"));
+    assert!(receipts::observe(&f.manager.store, run.id + 1, &stored, crate::store::now_ms()).unwrap().is_none());
+    assert!(receipts::observe(&f.manager.store, run.id, &stored, crate::store::now_ms() + 61_000).unwrap().is_none());
+    assert_eq!(receipts::observe(&f.manager.store, run.id, &stored, crate::store::now_ms()).unwrap(), Some(i64::from(result.prompt_id)));
+    assert!(receipts::observe(&f.manager.store, run.id, &stored, crate::store::now_ms()).unwrap().is_none());
+}
+
 fn wait_for_or(what: &str, ok: &mut impl FnMut() -> bool, context: impl Fn() -> String) {
     let t0 = Instant::now();
     while !ok() {

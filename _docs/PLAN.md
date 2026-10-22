@@ -64,7 +64,7 @@ scraping the screen, and records **every prompt durably** in SQLite.
 There are **14 active phases**: P0–P14 with P9 removed. Keep these identifiers: scope and decisions
 already refer to them. P0–P5 are closed; P4's full-day acceptance check was explicitly waived on
 2026-10-22, not performed (D72). P5's remaining work passed its app checks on 2026-10-22.
-M1 is complete with the recorded P1/P4 waivers. P6 is next. Work brought forward from P12 and P14
+M1 is complete with the recorded P1/P4 waivers. P6 is in progress. Work brought forward from P12 and P14
 does not close those phases.
 
 | Phase | Definition | Status and remaining work |
@@ -75,7 +75,7 @@ does not close those phases.
 | P3 | Events and durable history | Closed 2026-10-19 for Claude Code, Codex and opencode; Grok has no event channel |
 | P4 | App shell and Overview | Closed 2026-10-22; full-day acceptance waived, not performed (D72) |
 | P5 | Git and worktrees | Closed 2026-10-22; retained reuse, boot reconcile, worktree panel and diff summaries verified in the app (D73–D74) |
-| P6 | Friendly view and Next steps | Not built; structured actions, timeline, queue and narrator; resolve the Codex plan channel (Q19) |
+| P6 | Friendly view and Next steps | In progress: typed ActionRouter boundary, shared durable prompt delivery and visible channel limits; reply channels, Codex plans (Q19), timeline, queue and narrator remain |
 | P7 | Attention and notifications | Planned; fleet strip prototype exists; production inbox, notifications, tray, strip, search and export remain |
 | P8 | Bots, Automations, Notes, Documents | Planned; the four screens are placeholders |
 | P9 | Voice | Removed; separate dictation app (D22); Chorus retains compatibility (D23) |
@@ -252,6 +252,33 @@ answer (D29). Composer that **queues** instructions while the agent is busy and 
 next pause. Now / Blocker / Up next, and **suggested next steps** from the narrator (D28), with "Done —
 won't be suggested again". Without a narrator key, Friendly still shows the timeline, the plan and the
 cards, and says what's missing.
+
+**First bounded slice (2026-10-22):** continued from the clean `c106c1d` P5 checkpoint on
+`roadmap-p6`; the three preceding continuation commits and design assets were present. A fresh
+lockfile install/build reproduced the baseline: 439 Rust tests, 19 frontend tests, TypeScript,
+Clippy and secret scan. No P1/P4 acceptance waiver was reopened.
+
+- ActionRouter has generated contracts for prompts, questions and approvals. Only prompt delivery
+  is connected in this slice; reply attempts visibly refuse and preserve the agent's Raw prompt.
+- `sessions/delivery.rs` implements HANDOFF-COMMON's shared path, extended with run identity and
+  durable request IDs (D75). Prompts are scrubbed and committed before two PTY writes. Same-run
+  matching hook echoes link to that prompt once. Busy, unknown, locked and blocked states refuse.
+- Session view exposes channel limitations beside the unchanged Raw terminal. Native Codex installs
+  now resolve without an npm shim. This is a foundation, **not a working Friendly view**.
+- Q19's bounded follow-up verified current app-server initialisation, one completed subscription
+  turn, and authenticated TUI attachment through ConPTY. The generated schema contains plan events,
+  but the tiny turn emitted none. Plan/control acceptance stays open; see [S5 follow-up](spikes/S5-P6.md).
+- In an isolated dev app, Claude Code completed a shared-delivery prompt with one `composer`
+  history row and the same Raw transcript; retry returned the observed receipt without a third turn.
+  The slice passes 449 Rust tests, 19 frontend tests, TypeScript, Clippy and secret scan.
+
+**Next slices:** (1) verified held-hook question/approval replies, run/request expiry and races with
+Raw; complete the Codex app-server plan/control spike before enabling its bridge; (2) structured
+timeline, persisted plan and cards with same-session Friendly/Raw switching; (3) durable queue and
+composer with explicit cancel/restart/duplicate policy; (4) D28 narrator, costs and per-project switch,
+Now / Blocker / Up next and durable Done/dismissed actions; (5) both planned multi-phase acceptance runs.
+The queue, narrator/key fallback and both Friendly-only exit checks remain open. Nothing in this
+slice closes P6, P7 or the separate Gemini/Aider/P14 acceptance work.
 
 **Exit:** a Claude Code and a Codex session each run a planned multi-phase task to the end, approved and
 steered entirely from Friendly, with the Raw view showing the same history.

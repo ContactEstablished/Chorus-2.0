@@ -10,6 +10,7 @@ import SessionTerminal from '../../raw/SessionTerminal.vue'
 import SessionStrip from './SessionStrip.vue'
 import SessionFacts from './SessionFacts.vue'
 import PromptHistory from './PromptHistory.vue'
+import ActionChannels from './ActionChannels.vue'
 import { commands, type Attention, type SessionSummary, type WorktreeClose } from '../../ipc'
 import { terminalFor } from '../../components/terminals'
 import { useSessionsStore } from '../../stores/sessions'
@@ -250,6 +251,7 @@ async function send(bytes: string): Promise<void> {
       </div>
 
       <aside class="panel scroll">
+        <ActionChannels :session-id="s.id" :live="s.live" />
         <div v-if="readiness" class="ready" :class="`st-${s.attention}`">
           <p class="rt"><span class="dot" />{{ readiness.title }}</p>
           <p class="rx">{{ readiness.text }}</p>

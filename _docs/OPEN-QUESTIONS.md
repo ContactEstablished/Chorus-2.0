@@ -20,6 +20,14 @@ and its TUI can attach with `--remote`, the same shape as opencode's serve + att
 app-server + `--remote` behind a capability flag; until then Friendly says "plan not available for
 Codex".* Blocks: P6.
 
+2026-10-22 follow-up on Codex 0.163.0: `app-server --listen`, `--ws-auth capability-token`,
+`--ws-token-sha256`, TUI `--remote` and `--remote-auth-token-env` exist. A private server completed
+initialisation and a tiny subscription turn; its authenticated TUI reached the scratch-folder trust
+prompt through ConPTY. Generated schema includes `turn/plan/updated`, but the tiny turn emitted no
+plan notification. **Still open:** observe real plan updates and prove both clients control the
+same thread, with approval/question replies, disconnects and Raw fallback. No production bridge
+enabled yet. Details and remaining gates: [S5-P6.md](spikes/S5-P6.md).
+
 **Q21 — How should Chorus run DeepSeek Harness?** (D59.) `dsh` offers a local web UI and the server
 behind it (`dsh web`, port 3080), a one-shot headless run (`dsh --profile headless "<task>"`), a Python
 SDK, and a terminal UI only through a community plugin profile (`dsh --profile tui`). Options: (a) its

@@ -13,6 +13,8 @@
 //! are in `chorus_core::session`.
 
 pub mod commands;
+pub mod actions;
+pub mod delivery;
 pub mod job;
 pub mod mirror;
 pub mod profiles;
@@ -494,6 +496,7 @@ impl Run {
 /// A session that is open in this app run (not closed).
 struct Live {
     id: u32,
+    action: Mutex<()>,
     hub: Hub,
     run: Mutex<Option<Arc<Run>>>,
 }
@@ -663,7 +666,7 @@ impl SessionManager {
         let mut live = self.live.lock().expect("live lock");
         live.entry(id)
             .or_insert_with(|| {
-                Arc::new(Live { id, hub: Hub::new(Mirror::open(&self.scrollback_dir(), id)), run: Mutex::new(None) })
+                Arc::new(Live { id, action: Mutex::new(()), hub: Hub::new(Mirror::open(&self.scrollback_dir(), id)), run: Mutex::new(None) })
             })
             .clone()
     }
@@ -1564,6 +1567,8 @@ impl SessionManager {
 
     /// Closes a session; with `remove_worktree`, also its worktree when nothing would be lost.
     pub fn close(&self, id: u32, remove_worktree: bool) -> Result<CloseReport, String> {
+        let live = self.open_live(id).ok();
+        let _action = live.as_ref().map(|l| l.action.lock().expect("action lock"));
         let row = self.row(id)?;
         self.refuse_if_locked(&row, "close")?;
         let outcome = self.open_live(id).map(|live| self.end_run_for(&live, ExitCause::UserClose)).unwrap_or_default();
@@ -1578,6 +1583,11 @@ impl SessionManager {
     }
 
     pub fn restart(self: &Arc<Self>, id: u32) -> Result<SessionSummary, String> {
+        if self.row(id)?.state == SessionState::Closed {
+            return Err("a closed session can't be restarted".into());
+        }
+        let action_live = self.open_live(id)?;
+        let _action = action_live.action.lock().expect("action lock");
         let row = self.row(id)?;
         if row.state == SessionState::Closed {
             return Err("a closed session can't be restarted".into());
@@ -1737,6 +1747,8 @@ impl SessionManager {
     }
 
     pub fn set_locked(&self, id: u32, locked: bool, pin: Option<&str>) -> Result<SessionSummary, String> {
+        let live = self.open_live(id).ok();
+        let _action = live.as_ref().map(|l| l.action.lock().expect("action lock"));
         self.row(id)?;
         if !locked {
             crate::lock::check_unlock(&self.store, pin)?;

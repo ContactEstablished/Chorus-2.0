@@ -79,6 +79,9 @@ pub fn builder() -> Builder<tauri::Wry> {
             fleet::spike_fleet_probe,
             splash::restore_progress,
             splash::splash_replay,
+            // P6: shared action routing and explicit channel availability.
+            sessions::actions::session_action_capabilities,
+            sessions::actions::session_action,
         ])
         .events(collect_events![app::BackendPulse, sessions::SessionUpdated, fleet::FleetClick])
 }

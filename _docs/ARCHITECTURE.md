@@ -112,6 +112,14 @@ composer/actions ─► ActionRouter ─► structured channel if available, els
 - **Writes that submit:** prompt text and Enter are sent as **two writes**, so the TUI doesn't treat Enter
   as part of a paste (LESSONS L4).
 
+P6's first slice adds `sessions::actions::ActionRouter` and the shared `sessions::delivery` path
+(D75, HANDOFF-COMMON §4). Its typed action request includes the reviewed run and a stable UUID.
+The prompt and an uncertain receipt commit atomically before any PTY write; a completed write is
+not agent acknowledgement. A matching same-run hook echo within 60 seconds links the existing prompt
+and marks the receipt observed. Repeated requests never write again. No automatic retry after an
+uncertain write, crash or restart. Busy/unknown state and pending asks refuse; the queue is still
+pending. Question/approval variants currently refuse with a Raw fallback, not guessed keystrokes.
+
 ## 5. Agent channels
 
 The Friendly view, the state machine and durable history all depend on knowing what an agent is doing.

@@ -377,6 +377,18 @@ partial clean/status answer. Drain bounded output to avoid blocking Git on a ful
 only the allowed prefix. Line counts from `diff HEAD` exclude untracked content even when status
 counts those files, so the UI must state the comparison (D73–D74).
 
+**L51 — Codex can be a native install without `codex.cmd`.** The P6 continuation found Codex
+0.163.0 on PATH as `codex.exe`, while Chorus's resolver required an npm shim and would report it
+missing. Resolve the native executable as well as the established npm shim. Keep update-check
+overrides on either route; detection and launch must use the same resolution.
+
+**L52 — A protocol schema is not runtime capability evidence.** Codex 0.163.0 generated a
+`turn/plan/updated` schema and its private app-server accepted initialisation and a tiny subscription
+turn. That turn produced no plan event. Its authenticated remote TUI worked through ConPTY as far
+as folder trust. These establish different facts; neither proves a plan bridge or shared-thread
+control. A probe must set `TERM=xterm-256color` just like the app, or Codex first asks whether to
+continue with a dumb terminal. Keep Q19 open until actual plans and responses are observed.
+
 ## Money and models
 
 **L16 — Read-then-revoke under-reports OpenRouter spend.** Reading a capped key's usage right after the
