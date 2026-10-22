@@ -368,6 +368,15 @@ leaves unknown formats to Gemini's own check and never writes this file. Aider 0
 `--chat-history-file` and `--input-history-file` accept explicit paths, so `--restore-chat-history`
 can be isolated per Chorus session without a conversation id (D71).
 
+**L50 — A folder is not proof of a worktree; bounded Git output must fail visibly (P5, Git 2.50.0.windows.1).**
+An externally removed worktree can be replaced by an ordinary folder at the same path. Check Git's
+worktree inventory and canonical repository identity before relaunch or reuse; do not fall back to
+the repository. A Git query error is unknown membership, not proof of removal. Read porcelain and
+numstat with NUL separators, including rename source paths; truncated output is an error, never a
+partial clean/status answer. Drain bounded output to avoid blocking Git on a full pipe, retaining
+only the allowed prefix. Line counts from `diff HEAD` exclude untracked content even when status
+counts those files, so the UI must state the comparison (D73–D74).
+
 ## Money and models
 
 **L16 — Read-then-revoke under-reports OpenRouter spend.** Reading a capped key's usage right after the

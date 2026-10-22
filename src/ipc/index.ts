@@ -65,6 +65,8 @@ export type {
   Workspace,
   WorktreeClose,
   WorktreeInfo,
+  WorktreeEntry,
+  Snapshot,
 } from './bindings'
 
 /** The result shape of every fallible generated command. */

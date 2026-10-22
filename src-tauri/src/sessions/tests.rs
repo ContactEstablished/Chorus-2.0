@@ -323,6 +323,154 @@ fn git_in(dir: &Path, args: &[&str]) -> String {
     String::from_utf8_lossy(&out.stdout).into_owned()
 }
 
+fn worktree_request(f: &Fixture) -> CreateSession {
+    let repo = f.dir.join("repo");
+    std::fs::create_dir_all(repo.join("web")).unwrap();
+    std::fs::write(repo.join("web/file.txt"), "one\ntwo\n").unwrap();
+    std::fs::write(repo.join("old.txt"), "rename me\n").unwrap();
+    std::fs::write(repo.join("image.bin"), [0, 1, 2]).unwrap();
+    git_in(&repo, &["init", "-q", "-b", "main"]);
+    git_in(&repo, &["add", "."]);
+    git_in(&repo, &["commit", "-q", "-m", "first"]);
+    CreateSession {
+        agent: AgentKind::Shell, cwd: repo.display().to_string(), name: None, credential: None,
+        cols: 100, rows: 30, options: Default::default(), provider_id: None, description: None,
+        project_id: None, tags: Vec::new(), workspace: Workspace::NewWorktree, routing: None,
+    }
+}
+
+#[test]
+fn retained_worktrees_are_reused_and_shared_close_preserves_them() {
+    let f = Fixture::new("reuse-worktree");
+    let request = worktree_request(&f);
+    let original = f.manager.create(request.clone()).unwrap();
+    let w = original.worktree.unwrap();
+    let draft = Path::new(&w.path).join("draft.txt");
+    std::fs::write(&draft, "keep this work").unwrap();
+    assert!(f.manager.close(original.id, true).unwrap().worktree_note.unwrap().contains("uncommitted"));
+    let retained = f.manager.worktrees_list(Some(&request.cwd)).unwrap();
+    assert_eq!(retained.len(), 1);
+    assert_eq!((retained[0].id, retained[0].open_sessions), (w.id, 0));
+    let reuse = CreateSession { workspace: Workspace::ExistingWorktree(w.id), ..request.clone() };
+    let second = f.manager.create(reuse.clone()).unwrap();
+    assert!(second.live, "{:?}", second.note);
+    assert_eq!(second.worktree.unwrap().id, w.id);
+    assert_eq!(std::fs::read_to_string(&draft).unwrap(), "keep this work");
+    let third = f.manager.create(CreateSession { cwd: w.path.clone(), workspace: Workspace::Here, ..request.clone() }).unwrap();
+    assert_eq!(third.worktree.unwrap().id, w.id, "direct launches also protect shared trees");
+    assert!(f.manager.close(second.id, true).unwrap().worktree_note.unwrap().contains("another session"));
+    let joined = f.manager.create_in(CreateSession { cwd: third.cwd, workspace: Workspace::Here, ..request.clone() }, Some(w.id)).unwrap();
+    assert_eq!(joined.worktree.unwrap().id, w.id, "Pair/Workbench join path");
+    assert!(f.manager.close(third.id, true).unwrap().worktree_note.unwrap().contains("another session"));
+    assert!(f.manager.close(joined.id, true).unwrap().worktree_note.unwrap().contains("uncommitted"));
+
+    // A request cannot choose a record from another repository or escape into a nested repository.
+    let other = f.dir.join("other");
+    std::fs::create_dir_all(&other).unwrap();
+    git_in(&other, &["init", "-q", "-b", "main"]);
+    git_in(&other, &["commit", "-q", "--allow-empty", "-m", "first"]);
+    assert!(f.manager.create(CreateSession { cwd: other.display().to_string(), ..reuse.clone() }).unwrap_err().contains("different repository"));
+    assert!(f.manager.create(CreateSession { workspace: Workspace::ExistingWorktree(u32::MAX), ..request.clone() }).is_err());
+    let missing = Path::new(&request.cwd).join("untracked-folder");
+    std::fs::create_dir_all(&missing).unwrap();
+    assert!(f.manager.create(CreateSession { cwd: missing.display().to_string(), ..reuse.clone() }).unwrap_err().contains("not a folder"));
+    let nested = Path::new(&w.path).join("web");
+    git_in(&nested, &["init", "-q", "-b", "nested"]);
+    git_in(&nested, &["commit", "-q", "--allow-empty", "-m", "nested"]);
+    assert!(f.manager.create(CreateSession { cwd: Path::new(&request.cwd).join("web").display().to_string(), ..reuse }).unwrap_err().contains("different working tree"));
+    assert!(Path::new(&w.path).exists());
+}
+
+#[test]
+fn boot_reconcile_keeps_history_and_does_not_relaunch_a_removed_worktree() {
+    let f = Fixture::new("worktree-reconcile");
+    let request = worktree_request(&f);
+    let original = f.manager.create(request.clone()).unwrap();
+    let w = original.worktree.unwrap();
+    f.manager.shutdown();
+    let live = f.manager.live.lock().unwrap().get(&original.id).cloned().unwrap();
+    f.manager.end_run_for(&live, ExitCause::ChorusQuitting);
+    git_in(Path::new(&request.cwd), &["worktree", "remove", &w.path]);
+    // A replacement ordinary folder must not be accepted as the old tree.
+    std::fs::create_dir_all(&w.path).unwrap();
+    let external = f.dir.join("external");
+    git_in(Path::new(&request.cwd), &["worktree", "add", "-b", "external", &external.display().to_string()]);
+    let next = Fixture::manager(&f.dir);
+    next.restore().unwrap();
+    let s = next.summary(original.id).unwrap();
+    assert!(!s.live && s.worktree.unwrap().removed);
+    assert!(s.note.unwrap().contains("removed"));
+    assert_eq!(s.cwd, original.cwd, "no cwd fallback");
+    assert!(rows::last_run(next.store(), original.id).unwrap().is_some());
+    assert!(git_in(Path::new(&request.cwd), &["branch", "--list", &w.branch]).contains(&w.branch));
+    assert!(git_in(Path::new(&request.cwd), &["worktree", "list"]).contains("external"));
+    assert!(next.create(CreateSession { workspace: Workspace::ExistingWorktree(w.id), ..request }).is_err());
+}
+
+#[test]
+fn unreadable_git_is_unknown_and_deleted_folders_are_reconciled() {
+    let f = Fixture::new("worktree-unknown");
+    let request = worktree_request(&f);
+    let s = f.manager.create(request.clone()).unwrap();
+    let w = s.worktree.unwrap();
+    f.manager.close(s.id, false).unwrap();
+    let root = Path::new(&request.cwd);
+    std::fs::rename(root.join(".git"), root.join(".git-unavailable")).unwrap();
+    let unknown = f.manager.worktrees_list(None).unwrap();
+    assert!(!unknown[0].removed && unknown[0].problem.is_some() && unknown[0].status.is_none());
+    std::fs::rename(root.join(".git-unavailable"), root.join(".git")).unwrap();
+    std::fs::remove_dir_all(&w.path).unwrap();
+    assert!(git_in(root, &["worktree", "list"]).contains(&w.branch), "Git still has its prunable record");
+    f.manager.reconcile_worktrees().unwrap();
+    assert!(worktree_rows::get(f.manager.store(), w.id).unwrap().unwrap().removed);
+    assert!(git_in(root, &["branch", "--list", &w.branch]).contains(&w.branch));
+}
+
+#[test]
+fn git_summary_reports_net_tracked_lines_and_all_change_kinds() {
+    let f = Fixture::new("worktree-summary");
+    let request = worktree_request(&f);
+    let s = f.manager.create(request.clone()).unwrap();
+    let w = s.worktree.unwrap();
+    let path = Path::new(&w.path);
+    let clean = f.manager.session_git_status(s.id).unwrap().unwrap();
+    assert_eq!((clean.changes.files, clean.changes.ahead), (0, None));
+    git_in(path, &["branch", "--set-upstream-to", "main"]);
+    git_in(path, &["commit", "-q", "--allow-empty", "-m", "ahead"]);
+    git_in(Path::new(&request.cwd), &["commit", "-q", "--allow-empty", "-m", "behind"]);
+    std::fs::write(path.join("web/file.txt"), "one\nthree\n").unwrap();
+    git_in(path, &["add", "web/file.txt"]);
+    std::fs::write(path.join("web/file.txt"), "one\nthree\nfour\n").unwrap();
+    git_in(path, &["mv", "old.txt", "new name.txt"]);
+    std::fs::write(path.join("image.bin"), [0, 2, 3]).unwrap();
+    std::fs::write(path.join("untracked.txt"), "not included in line counts\n").unwrap();
+    let snap = f.manager.session_git_status(s.id).unwrap().unwrap();
+    let c = snap.changes;
+    assert_eq!((c.ahead, c.behind), (Some(1), Some(1)));
+    assert_eq!((c.files, c.staged, c.unstaged, c.untracked), (4, 2, 2, 1));
+    let d = snap.diff.unwrap();
+    assert_eq!((d.additions, d.deletions, d.binary), (2, 1, 1));
+    assert!(snap.diff_note.is_none());
+    f.manager.close(s.id, false).unwrap();
+}
+
+#[test]
+fn git_summary_handles_unborn_and_detached_heads() {
+    let f = Fixture::new("git-initial");
+    let root = f.dir.join("work");
+    git_in(&root, &["init", "-q", "-b", "main"]);
+    std::fs::write(root.join("first.txt"), "first\nsecond\n").unwrap();
+    git_in(&root, &["add", "."]);
+    let initial = crate::git::snapshot(&root).unwrap();
+    assert_eq!(initial.changes.staged, 1);
+    assert_eq!(initial.diff.unwrap().additions, 2);
+    git_in(&root, &["commit", "-q", "-m", "first"]);
+    git_in(&root, &["checkout", "-q", "--detach"]);
+    let detached = crate::git::snapshot(&root).unwrap();
+    assert_eq!((detached.changes.branch, detached.changes.ahead), (None, None));
+    assert_eq!(detached.changes.files, 0);
+}
+
 #[test]
 fn a_folder_given_in_short_names_is_kept_in_full() {
     // GitHub's Windows runner has its temp folder at C:\Users\RUNNER~1\…, which git writes in full.

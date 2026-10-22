@@ -5,6 +5,7 @@
  */
 import { onMounted, ref } from 'vue'
 import Icon from '../../components/Icon.vue'
+import WorktreesPanel from './WorktreesPanel.vue'
 import { commands, type Project, type ProjectState } from '../../ipc'
 import { useProjectsStore } from '../../stores/projects'
 import { useSessionsStore } from '../../stores/sessions'
@@ -172,6 +173,7 @@ const STATE_LABELS: Record<ProjectState, string> = { active: 'In the rail', hidd
         </div>
       </li>
     </ul>
+    <WorktreesPanel />
   </div>
 </template>
 

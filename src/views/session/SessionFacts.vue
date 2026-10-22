@@ -7,6 +7,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { commands, type SessionSummary } from '../../ipc'
 import TagInput from '../../components/TagInput.vue'
+import SessionGitFacts from './SessionGitFacts.vue'
 import { useProjectsStore } from '../../stores/projects'
 import { useSessionsStore } from '../../stores/sessions'
 import { useAgentsStore } from '../../stores/agents'
@@ -102,11 +103,13 @@ async function retag(tags: string[]): Promise<void> {
         <dt>Worktree</dt>
         <dd :title="s.worktree.path">
           <code>{{ s.worktree.branch }}</code>
-          <span class="sub">{{ s.worktree.removed ? 'removed; the branch is kept' : `from ${s.worktree.baseBranch ?? 'a detached HEAD'}` }}</span>
+          <span class="sub">{{ s.worktree.removed ? 'removed / missing; history kept' : `from ${s.worktree.baseBranch ?? 'a detached HEAD'}` }}</span>
         </dd>
       </template>
       <dt>Folder</dt>
       <dd><code class="path" :title="s.cwd">{{ s.cwd }}</code></dd>
+      <dt>Git</dt>
+      <dd><SessionGitFacts :key="s.id" :session-id="s.id" /></dd>
     </dl>
   </section>
 </template>

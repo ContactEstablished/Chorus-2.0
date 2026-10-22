@@ -18,6 +18,7 @@ pub mod env;
 pub mod events;
 pub mod folders;
 pub mod gemini;
+pub mod git_status;
 pub mod hooks;
 pub mod launch;
 pub mod lock;

@@ -85,6 +85,13 @@ export const commands = {
 	 *  sessions already working there.
 	 */
 	folderCheck: (folder: string) => typedError<FolderCheck, string>(__TAURI_INVOKE("folder_check", { folder })),
+	worktreesList: (folder: string | null) => typedError<WorktreeEntry[], string>(__TAURI_INVOKE("worktrees_list", { folder })),
+	sessionGitStatus: (sessionId: number) => typedError<{
+	changes: Changes,
+	/**  Net tracked changes against HEAD (empty tree before the first commit). */
+	diff: Diff | null,
+	diffNote: string | null,
+} | null, string>(__TAURI_INVOKE("session_git_status", { sessionId })),
 	/**  Recently used folders that still exist, newest first. */
 	foldersRecent: () => __TAURI_INVOKE<string[]>("folders_recent"),
 	/**
@@ -306,6 +313,19 @@ export type CatalogModel = {
 	free: boolean,
 };
 
+export type Changes = {
+	branch: string | null,
+	upstream: string | null,
+	/**  None when there is no usable upstream comparison, rather than zero. */
+	ahead: number | null,
+	behind: number | null,
+	files: number,
+	staged: number,
+	unstaged: number,
+	untracked: number,
+	conflicts: number,
+};
+
 /**  What closing a session would do to its worktree. */
 export type CloseCheck = {
 	worktree: WorktreeClose | null,
@@ -370,6 +390,12 @@ export type Detection = {
 	fit: VersionFit | null,
 	/**  Why the agent can't be launched, or why its version couldn't be read. */
 	problem: string | null,
+};
+
+export type Diff = {
+	additions: number,
+	deletions: number,
+	binary: number,
 };
 
 /**  One effort scale for every agent. */
@@ -910,6 +936,13 @@ export type Slot = {
 	role: Role | null,
 };
 
+export type Snapshot = {
+	changes: Changes,
+	/**  Net tracked changes against HEAD (empty tree before the first commit). */
+	diff: Diff | null,
+	diffNote: string | null,
+};
+
 export type TagUse = {
 	tag: string,
 	/**  How many sessions have it, closed ones included. */
@@ -1088,7 +1121,7 @@ export type Workspace =
 /**  In the folder as chosen. */
 "here" | 
 /**  In a new worktree of the folder's repository, on a branch of its own. */
-"new-worktree";
+"new-worktree" | { "existing-worktree": number };
 
 export type WorktreeClose = {
 	branch: string,
@@ -1102,13 +1135,26 @@ export type WorktreeClose = {
 	others: number,
 };
 
+export type WorktreeEntry = {
+	id: number,
+	repoRoot: string,
+	path: string,
+	branch: string,
+	removed: boolean,
+	openSessions: number,
+	/**  None means it can be selected; checked again at launch. */
+	problem: string | null,
+	status: Snapshot | null,
+};
+
 /**  A session's worktree, as the UI shows it. */
 export type WorktreeInfo = {
+	id: number,
 	branch: string,
 	path: string,
 	/**  The branch it was made from; none if that was a detached HEAD. */
 	baseBranch: string | null,
-	/**  Chorus removed it. Its branch is kept. */
+	/**  Removed by Chorus or found missing during reconciliation; history is kept. */
 	removed: boolean,
 };
 

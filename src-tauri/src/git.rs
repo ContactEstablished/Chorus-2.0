@@ -10,6 +10,9 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 use chorus_core::worktree::{self as wt, Facts};
+use chorus_core::git_status::{self, Changes, Diff, Tree};
+use serde::Serialize;
+use specta::Type;
 
 use crate::sessions::job::Job;
 
@@ -57,10 +60,13 @@ fn run(dir: &Path, args: &[&str], limit: Duration) -> Result<Ran, String> {
     let read = |pipe: Option<Box<dyn Read + Send>>| {
         std::thread::spawn(move || {
             let mut out = Vec::new();
-            if let Some(p) = pipe {
-                let _ = p.take(MAX_OUTPUT_BYTES).read_to_end(&mut out);
+            if let Some(mut p) = pipe {
+                p.by_ref().take(MAX_OUTPUT_BYTES + 1).read_to_end(&mut out).map_err(|e| format!("Reading git output: {e}"))?;
+                // Keep draining so Git can't hang on a full pipe. Never call truncated output clean.
+                std::io::copy(&mut p, &mut std::io::sink()).map_err(|e| format!("Reading git output: {e}"))?;
             }
-            String::from_utf8_lossy(&out).into_owned()
+            if out.len() as u64 > MAX_OUTPUT_BYTES { return Err("Git output exceeded the 256 KiB limit; status is unavailable.".to_owned()); }
+            String::from_utf8(out).map_err(|_| "Git returned text that isn't UTF-8.".to_owned())
         })
     };
     let stdout = read(child.stdout.take().map(|p| Box::new(p) as Box<dyn Read + Send>));
@@ -77,10 +83,11 @@ fn run(dir: &Path, args: &[&str], limit: Duration) -> Result<Ran, String> {
             }
         }
     };
+    drop(job);
     Ok(Ran {
         ok: status.success(),
-        stdout: stdout.join().unwrap_or_default(),
-        stderr: stderr.join().unwrap_or_default(),
+        stdout: stdout.join().map_err(|_| "Reading git output failed.")??,
+        stderr: stderr.join().map_err(|_| "Reading git errors failed.")??,
     })
 }
 
@@ -122,4 +129,54 @@ pub fn delete_merged_branch(main_root: &Path, branch: &str) -> Result<(), String
 pub fn remove_worktree(main_root: &Path, path: &str) -> Result<(), String> {
     let r = run(main_root, &["worktree", "remove", path], SLOW)?;
     if r.ok { Ok(()) } else { Err(complaint(&r.stderr)) }
+}
+
+pub fn worktrees(root: &Path) -> Result<Vec<Tree>, String> {
+    let r = run(root, &["worktree", "list", "--porcelain", "-z"], QUICK)?;
+    if !r.ok { return Err(format!("git worktree list: {}", complaint(&r.stderr))); }
+    git_status::worktrees(&r.stdout)
+}
+
+#[derive(Debug, Clone, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct Snapshot {
+    pub changes: Changes,
+    /// Net tracked changes against HEAD (empty tree before the first commit).
+    pub diff: Option<Diff>,
+    pub diff_note: Option<String>,
+}
+
+/// Fresh working-tree facts. Never fetches, executes external diff drivers or reads file contents
+/// into the app; numstat counts tracked changes, while status includes every untracked path.
+pub fn snapshot(path: &Path) -> Result<Snapshot, String> {
+    let s = run(path, &["status", "--porcelain=v2", "--branch", "--untracked-files=all", "--ignore-submodules=none", "-z"], QUICK)?;
+    if !s.ok { return Err(format!("git status: {}", complaint(&s.stderr))); }
+    let changes = git_status::changes(&s.stdout)?;
+    let diff = (|| {
+        let base = if s.stdout.contains("# branch.oid (initial)\0") {
+            let empty = run(path, &["hash-object", "-t", "tree", "--stdin"], QUICK)?;
+            if !empty.ok { return Err(complaint(&empty.stderr)); }
+            empty.stdout.trim().to_owned()
+        } else { "HEAD".into() };
+        let d = run(path, &["diff", "--no-ext-diff", "--no-textconv", "--numstat", "-z", &base, "--"], QUICK)?;
+        if !d.ok { return Err(format!("git diff: {}", complaint(&d.stderr))); }
+        git_status::numstat(&d.stdout)
+    })();
+    let (diff, diff_note) = match diff { Ok(d) => (Some(d), None), Err(e) => (None, Some(e)) };
+    Ok(Snapshot { changes, diff, diff_note })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn oversized_output_is_an_error_not_a_partial_answer() {
+        let dir = std::env::temp_dir();
+        let file = dir.join(format!("chorus-git-output-{}.config", std::process::id()));
+        std::fs::write(&file, format!("[large]\nvalue={}\n", "a".repeat(MAX_OUTPUT_BYTES as usize + 1))).unwrap();
+        let result = run(&dir, &["config", "--file", &file.display().to_string(), "--get", "large.value"], QUICK);
+        std::fs::remove_file(file).unwrap();
+        assert!(matches!(result, Err(e) if e.contains("exceeded")));
+    }
 }

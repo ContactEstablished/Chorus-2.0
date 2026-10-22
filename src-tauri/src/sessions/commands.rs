@@ -111,6 +111,18 @@ pub async fn folder_check(state: Manager<'_>, folder: String) -> Result<FolderCh
     blocking(&state, move |m| Ok(m.check_folder(&folder))).await
 }
 
+#[tauri::command]
+#[specta::specta]
+pub async fn worktrees_list(state: Manager<'_>, folder: Option<String>) -> Result<Vec<super::worktrees::WorktreeEntry>, String> {
+    blocking(&state, move |m| m.worktrees_list(folder.as_deref())).await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn session_git_status(state: Manager<'_>, session_id: u32) -> Result<Option<crate::git::Snapshot>, String> {
+    blocking(&state, move |m| m.session_git_status(session_id)).await
+}
+
 /// Recently used folders that still exist, newest first.
 #[tauri::command]
 #[specta::specta]

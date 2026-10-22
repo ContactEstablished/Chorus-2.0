@@ -7,14 +7,14 @@ did, and what to do next.
 Chorus 2.0 is a ground-up rebuild of Chorus on **Tauri 2 (Rust)** with a **Vue 3** web UI. Windows only
 for now. Bring your own keys: Chorus itself only talks to the providers you configure.
 
-**Status (2026-10-22):** P0–P3 are closed. P4's shell, Overview, Sessions/Wall, launch UI, projects,
-history, command palette and splash are built; its full day of real-work acceptance remains open.
-**Next: finish Git/worktrees (P5) for the Daily driver milestone, then Friendly view and attention
-(P6–P7) for the Supervisor milestone.**
+**Status (2026-10-22):** P0–P5 are closed; the Daily driver milestone is complete with the recorded
+waivers. P4's full day of real-work acceptance was explicitly waived, not performed (D72). P5's
+worktree reuse, recovery, panel and diff summaries are implemented and verified in the app.
+**Next: Friendly view and Next steps (P6), then attention (P7), for the Supervisor milestone.**
 
 There are **14 active phases**, numbered P0–P14 with P9 (voice) removed. Worktree launch and Close
 were brought into P4 from P5, launch routing from P12, and part of P14 is already merged (Gemini,
-Aider, Ollama, CI and installer polish). These phases still have remaining work. The
+Aider, Ollama, CI and installer polish). P12 and P14 still have remaining work. The
 [roadmap's status table](_docs/PLAN.md#current-position-2026-10-22) is the current source of truth;
 it links the preserved hand-off plans and distinguishes implementation from runtime acceptance.
 Recorded limits remain: P1's reboot check was waived; Grok has only launch verification and no event

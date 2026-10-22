@@ -49,6 +49,17 @@ pub fn get(store: &Store, id: u32) -> Result<Option<WorktreeRow>, String> {
     })
 }
 
+pub fn list(store: &Store) -> Result<Vec<WorktreeRow>, String> {
+    store.with(|c| {
+        let mut q = c.prepare("SELECT id, repo_root, path, branch, base_branch, removed_at FROM worktrees ORDER BY id DESC")?;
+        q.query_map([], worktree_from)?.collect()
+    })
+}
+
+pub fn set_branch(store: &Store, id: u32, branch: &str) -> Result<(), String> {
+    store.with(|c| c.execute("UPDATE worktrees SET branch = ?2 WHERE id = ?1", params![id, branch]).map(|_| ()))
+}
+
 pub fn set_removed(store: &Store, id: u32) -> Result<(), String> {
     store.with(|c| c.execute("UPDATE worktrees SET removed_at = ?2 WHERE id = ?1", params![id, now_ms()]).map(|_| ()))
 }

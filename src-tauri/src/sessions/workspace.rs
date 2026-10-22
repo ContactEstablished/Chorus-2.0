@@ -27,17 +27,20 @@ pub enum Workspace {
     Here,
     /// In a new worktree of the folder's repository, on a branch of its own.
     NewWorktree,
+    // Reuse a recorded worktree of this repository; checked again at launch.
+    ExistingWorktree(u32),
 }
 
 /// A session's worktree, as the UI shows it.
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct WorktreeInfo {
+    pub id: u32,
     pub branch: String,
     pub path: String,
     /// The branch it was made from; none if that was a detached HEAD.
     pub base_branch: Option<String>,
-    /// Chorus removed it. Its branch is kept.
+    /// Removed by Chorus or found missing during reconciliation; history is kept.
     pub removed: bool,
 }
 
@@ -228,6 +231,7 @@ impl SessionManager {
 
     pub(super) fn worktree_info(&self, id: u32) -> Option<WorktreeInfo> {
         worktree_rows::get(&self.store, id).ok().flatten().map(|w| WorktreeInfo {
+            id: w.id,
             branch: w.branch,
             path: w.path,
             base_branch: w.base_branch,
@@ -290,8 +294,13 @@ impl SessionManager {
     /// After Close: removes the session's worktree if nothing would be lost and no other session
     /// works in it. Returns what happened, to show.
     pub(super) fn retire_worktree(&self, session_id: u32, worktree_id: u32) -> Option<String> {
+        let _guard = self.worktree_lock.lock().expect("worktree lock");
         let w = worktree_rows::get(&self.store, worktree_id).ok().flatten().filter(|w| !w.removed)?;
-        if worktree_rows::other_open_sessions(&self.store, w.id, session_id).unwrap_or(0) > 0 {
+        let others = match worktree_rows::other_open_sessions(&self.store, w.id, session_id) {
+            Ok(n) => n,
+            Err(e) => return Some(format!("Kept the worktree: couldn't check other sessions ({e}).")),
+        };
+        if others > 0 {
             return Some("Kept the worktree: another session still works in it.".into());
         }
         if !Path::new(&w.path).is_dir() {
@@ -302,6 +311,9 @@ impl SessionManager {
                 }
                 Err(e) => format!("The worktree's folder is gone, but git's record of it couldn't be cleared: {e}"),
             });
+        }
+        if let Err(e) = self.validate_worktree_cwd(w.id, &w.path) {
+            return Some(format!("Kept the worktree: {e}"));
         }
         Some(match git::is_clean(Path::new(&w.path)) {
             Ok(true) => match git::remove_worktree(Path::new(&w.repo_root), &w.path) {

@@ -17,6 +17,7 @@ pub mod job;
 pub mod mirror;
 pub mod profiles;
 pub mod workspace;
+pub mod worktrees;
 
 use std::collections::{BTreeMap, HashMap};
 use std::io::{Read, Write};
@@ -509,6 +510,7 @@ pub struct SessionManager {
     store: Store,
     data_dir: PathBuf,
     live: Mutex<HashMap<u32, Arc<Live>>>,
+    worktree_lock: Mutex<()>,
     quitting: AtomicBool,
     notify: Notify,
     agents: Detector,
@@ -534,6 +536,7 @@ impl SessionManager {
             store,
             data_dir,
             live: Mutex::new(HashMap::new()),
+            worktree_lock: Mutex::new(()),
             quitting: AtomicBool::new(false),
             notify,
             agents: Detector::default(),
@@ -801,6 +804,9 @@ impl SessionManager {
     /// The second half: launches each session again. It can take seconds (an opencode session
     /// waits for its server), so the app calls it off the setup thread.
     pub fn relaunch(self: &Arc<Self>, ids: &[u32]) {
+        // Off the setup thread, before any session is relaunched. Each start also validates its
+        // worktree, so a repository Git couldn't read cannot silently fall back to another cwd.
+        if let Err(e) = self.reconcile_worktrees() { eprintln!("chorus: worktree reconciliation: {e}"); }
         for id in ids {
             let live = self.live_for(*id);
             live.hub.new_run(BOUNDARY_RELAUNCHED);
@@ -859,11 +865,19 @@ impl SessionManager {
         let fallback = format!("{} {}", req.agent.display_name(), rows::count_by_agent(&self.store, req.agent)? + 1);
         let name = clean_name(req.name.as_deref(), &fallback)?;
         let project_id = self.project_for(req.project_id, &asked)?;
+        let workspace_guard = self.worktree_lock.lock().expect("worktree lock");
+        let reused = match (join, req.workspace) {
+            (None, Workspace::ExistingWorktree(id)) => Some((id, self.reuse_worktree(id, &asked)?)),
+            (Some(id), _) => { self.validate_worktree_cwd(id, &asked)?; Some((id, asked.clone())) }
+            (None, Workspace::Here) => self.managed_worktree_at(&asked)?.map(|id| (id, asked.clone())),
+            _ => None,
+        };
         let made = match (join, req.workspace) {
             (None, Workspace::NewWorktree) => Some(self.make_worktree(&asked)?),
             _ => None,
         };
-        let cwd = made.as_ref().map_or_else(|| asked.clone(), |m| m.cwd.clone());
+        let cwd = reused.as_ref().map(|(_, cwd)| cwd.clone()).or_else(|| made.as_ref().map(|m| m.cwd.clone())).unwrap_or_else(|| asked.clone());
+        let worktree_id = reused.as_ref().map(|(id, _)| *id).or(made.as_ref().map(|m| m.id));
         let inserted = rows::insert(
             &self.store,
             &NewSession {
@@ -879,7 +893,7 @@ impl SessionManager {
                 provider_id: req.provider_id,
                 description: description.as_deref(),
                 project_id,
-                worktree_id: join.or(made.as_ref().map(|m| m.id)),
+                worktree_id,
                 routing: routing.as_deref(),
             },
         );
@@ -892,12 +906,13 @@ impl SessionManager {
                 return Err(e);
             }
         };
+        drop(workspace_guard);
         tag_rows::set(&self.store, id, &tags)?;
         if join.is_none() {
             self.remember_folder(&asked);
         }
         if req.agent == AgentKind::Claude
-            && let Some(w) = join.or(made.as_ref().map(|m| m.id))
+            && let Some(w) = worktree_id
         {
             self.trust_worktree_for_claude(w, &asked);
         }
@@ -929,6 +944,7 @@ impl SessionManager {
     fn start_run(self: &Arc<Self>, live: &Arc<Live>) -> Result<(), String> {
         let row = self.row(live.id)?;
         let size = check_size(row.cols, row.rows)?;
+        if let Some(w) = row.worktree_id { self.validate_worktree_cwd(w, &row.cwd)?; }
         if !Path::new(&row.cwd).is_dir() {
             return Err(format!("the folder {} no longer exists", row.cwd));
         }
@@ -1611,6 +1627,9 @@ impl SessionManager {
     pub fn launch(self: &Arc<Self>, req: LaunchRequest) -> Result<Vec<LaunchOutcome>, String> {
         let slots = launch_rules::plan(req.preset, req.session.agent, &self.installed(), req.count.unwrap_or(1))?;
         if req.preset == Preset::Swarm {
+            if matches!(req.session.workspace, Workspace::ExistingWorktree(_)) {
+                return Err("A Swarm makes a new worktree for each agent; choose New worktree.".into());
+            }
             return self.launch_swarm(&req.session, &slots);
         }
         let first = self.create(req.session.clone())?;

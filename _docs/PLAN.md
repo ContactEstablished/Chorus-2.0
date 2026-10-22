@@ -62,8 +62,10 @@ scraping the screen, and records **every prompt durably** in SQLite.
 ### Current position (2026-10-22)
 
 There are **14 active phases**: P0–P14 with P9 removed. Keep these identifiers: scope and decisions
-already refer to them. P0–P3 are closed; P4 is built with its full-day acceptance check still open.
-Work brought forward from P5, P12 and P14 does not close those phases.
+already refer to them. P0–P5 are closed; P4's full-day acceptance check was explicitly waived on
+2026-10-22, not performed (D72). P5's remaining work passed its app checks on 2026-10-22.
+M1 is complete with the recorded P1/P4 waivers. P6 is next. Work brought forward from P12 and P14
+does not close those phases.
 
 | Phase | Definition | Status and remaining work |
 |---|---|---|
@@ -71,8 +73,8 @@ Work brought forward from P5, P12 and P14 does not close those phases.
 | P1 | Session engine | Closed 2026-10-19; reboot check waived, not performed |
 | P2 | Agents and providers | Closed 2026-10-19; Grok checked only as far as launch |
 | P3 | Events and durable history | Closed 2026-10-19 for Claude Code, Codex and opencode; Grok has no event channel |
-| P4 | App shell and Overview | Built; a day of real work without Chorus 1 remains the acceptance gate |
-| P5 | Git and worktrees | Launch and Close already built in P4; retained-worktree reuse, boot reconcile, worktree panel and diff summaries remain |
+| P4 | App shell and Overview | Closed 2026-10-22; full-day acceptance waived, not performed (D72) |
+| P5 | Git and worktrees | Closed 2026-10-22; retained reuse, boot reconcile, worktree panel and diff summaries verified in the app (D73–D74) |
 | P6 | Friendly view and Next steps | Not built; structured actions, timeline, queue and narrator; resolve the Codex plan channel (Q19) |
 | P7 | Attention and notifications | Planned; fleet strip prototype exists; production inbox, notifications, tray, strip, search and export remain |
 | P8 | Bots, Automations, Notes, Documents | Planned; the four screens are placeholders |
@@ -83,10 +85,11 @@ Work brought forward from P5, P12 and P14 does not close those phases.
 | P13 | Phone relay | Planned; P13a delivers prompts and status; P13b answers questions and approvals after P6 |
 | P14 | More agents and ship | Partly built: Gemini, Aider, Ollama, CI, installer polish and Q28–Q30 fixes; complete real turns, DeepSeek spike/adapter, signing, updates and eventual name migration remain |
 
-**Execution order agreed 2026-10-22:** preserve and reconcile the planning documents; address the
-existing Gemini/Aider issues (Q28–Q30) and complete P4 acceptance; finish P5 for M1; build P6 and P7
-for M2; finish the remaining capability and release phases for M3. Record runtime evidence before
-closing a phase. P4's full-day check must not be replaced by a short smoke test.
+**Execution order agreed 2026-10-22:** roadmap consolidation, Q28–Q30 and P5 are complete. Build P6
+and P7 for M2, then finish the remaining capability and release phases for M3. P6 starts with the
+structured action/plan channel (including Q19), then the Friendly timeline, queue and Next steps.
+Record runtime evidence before closing a phase. P4's full-day check was waived by the user, not
+replaced by a short smoke test (D72).
 
 Scope changes already agreed and built: worktree creation/Swarm/Close moved from P5 to P4 (D53),
 the two-pane New session design and tags are in P4 (D52, D56), and launch routing moved from P12 to
@@ -198,18 +201,18 @@ text inserted or pasted by another app, and never submit it on their own.
 
 **Exit:** a day of real work in 2.0 without opening Chorus 1.
 
-**Acceptance record:** still open. During that day verify launch (including Pair/Swarm), Raw terminal
-input and paste without auto-submit, Overview state changes, session switching/Wall, history, project
-navigation, Restart and Close. Record any failures and their retest; date the full-day result before
-marking P4 closed. Gemini/Aider launch acceptance alone does not prove their options apply (P14).
+**Acceptance record:** closed 2026-10-22 by explicit user waiver of the full-day check (D72), not by a
+full-day result. The user directed work to move to P5. Gemini/Aider launch acceptance alone does not
+prove their options apply (P14).
 
 ### P5 — Git and worktrees
 New session already makes worktrees, Swarm runs, and Close removes a clean worktree and keeps
-uncommitted work (D53, built in P4). Still to come: attaching a session to a worktree an earlier one
-left; boot reconcile with `git worktree list` as the authority; worktree panel (branch, ahead/behind,
-clean); diff summary in the session facts ("11 files · +612 −48").
+uncommitted work (D53, built in P4). P5 adds attaching a session to a retained worktree; boot reconcile
+with `git worktree list` as the authority; Settings → Projects worktree panel (branch, ahead/behind,
+clean); and a diff summary in the session facts ("11 files · +612 −48"). D73–D74 define recovery and
+the summary's comparison: net tracked lines against HEAD, with untracked/binary counts shown separately.
 
-**Remaining implementation sequence:**
+**Implemented:**
 1. Reconcile recorded worktrees against Git before restoring sessions. Keep history and branches;
    surface missing/unreadable worktrees explicitly. Do not prune other tools' worktrees.
 2. Add retained-worktree selection to New session, with backend validation of the selected record,
@@ -217,7 +220,7 @@ clean); diff summary in the session facts ("11 files · +612 −48").
    selected tree; Swarm continues to make one new tree per agent.
 3. Add the worktree panel and session diff summary. Distinguish unknown upstream/status from zero
    changes; cover tracked, staged, unstaged, untracked and binary changes without reading file contents
-   into the UI. Run the exit checks below after all three pieces are integrated.
+   into the UI.
 
 **Exit (M1):** the Swarm preset launches N agents in N worktrees, and removing a worktree behind 2.0's
 back is healed on the next boot.
@@ -226,6 +229,19 @@ Also verify in the real app: a new session can reuse a retained worktree; dirty 
 the panel shows branch, clean/dirty and ahead/behind (or why unavailable); and session facts report
 changed files and line additions/deletions. A missing worktree must not silently relaunch a session
 in a different folder or discard its history. A Git failure is unknown, not proof that a worktree is gone.
+
+**Closed 2026-10-22.** Verified in an isolated dev instance with Git 2.50.0.windows.1: three live Codex
+sessions launched in three distinct Swarm worktrees; Pair and Workbench shared a selected retained tree;
+dirty Close kept its files; a shell launched through the UI's Existing worktree selector reused them.
+The panel and session facts showed four changed files, +2/−1 net tracked lines, staged/unstaged,
+untracked/binary counts, and 1 ahead / 1 behind. A detached tree was labelled explicitly. With Git
+unreadable, records stayed unknown rather than removed, then recovered when readable again.
+
+After terminating the isolated app, removing a worktree through Git and recreating an ordinary folder
+at its old path, the next boot kept that session stopped with a missing-worktree explanation and the
+original cwd/history. Other sessions restored, dirty work remained, and the external tree and branch
+records were untouched. No model prompts were sent. Automated checks: 439 Rust tests, 19 frontend tests,
+TypeScript, Clippy and secret scan passed. P4's full-day check remains waived, not performed.
 
 ### P6 — Friendly view and Next steps
 Timeline from structured events: your messages, agent messages, the plan checklist (from the agent's own

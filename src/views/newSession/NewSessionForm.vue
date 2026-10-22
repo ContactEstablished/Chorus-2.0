@@ -21,7 +21,7 @@ import {
   type PresetChoice,
   type ProfileSummary,
   type RoutingLaunchChoice,
-  type Workspace,
+  type WorktreeEntry,
 } from '../../ipc'
 import RoutingTiers from './RoutingTiers.vue'
 import ButtonGroup from '../../components/ButtonGroup.vue'
@@ -83,7 +83,13 @@ const swarmCount = ref(3)
 const cwd = ref('')
 const recent = ref<string[]>([])
 const check = ref<FolderCheck | null>(null)
-const workspace = ref<Workspace>('here')
+type WorkspaceChoice = 'here' | 'new-worktree' | 'existing'
+const workspace = ref<WorkspaceChoice>('here')
+const retained = ref<WorktreeEntry[]>([])
+const retainedId = ref<number | null>(null)
+const retainedProblem = ref<string | null>(null)
+const folderPending = ref(false)
+const chosenWorktree = computed(() => retained.value.find((w) => w.id === retainedId.value) ?? null)
 // Once the user picks a workspace, the folder check stops choosing for them.
 const workspaceChosen = ref(false)
 const name = ref('')
@@ -178,27 +184,43 @@ let checkTimer: ReturnType<typeof setTimeout> | undefined
 let checkSeq = 0
 watch(cwd, (folder) => {
   clearTimeout(checkTimer)
+  const seq = ++checkSeq
+  check.value = null
+  retained.value = []
+  retainedId.value = null
+  retainedProblem.value = null
+  folderPending.value = !!folder.trim()
   if (!folder.trim()) {
     check.value = null
     return
   }
   checkTimer = setTimeout(async () => {
-    const seq = ++checkSeq
     const r = await commands.folderCheck(folder.trim()).catch(() => null)
-    if (seq === checkSeq && r?.status === 'ok') check.value = r.data
+    if (seq !== checkSeq) return
+    if (r?.status === 'ok') check.value = r.data
+    else retainedProblem.value = r?.status === 'error' ? r.error : 'Could not check the folder.'
+    if (check.value?.git) {
+      const trees = await commands.worktreesList(folder.trim()).catch(() => null)
+      if (seq !== checkSeq) return
+      if (trees?.status === 'ok') retained.value = trees.data
+      else retainedProblem.value = trees?.status === 'error' ? trees.error : 'Could not check retained worktrees.'
+    }
+    folderPending.value = false
   }, 250)
 })
+onUnmounted(() => { clearTimeout(checkTimer); ++checkSeq })
 const git = computed(() => check.value?.git ?? null)
 const canWorktree = computed(() => !!git.value && !git.value.worktreeProblem)
 watch(check, (c) => {
-  if (!canWorktree.value) workspace.value = 'here'
+  if (c && !canWorktree.value) workspace.value = 'here'
   else if (!workspaceChosen.value) workspace.value = c?.sharing.length ? 'new-worktree' : 'here'
 })
-const workspaceOptions = computed<Choice<Workspace>[]>(() => [
+const workspaceOptions = computed<Choice<WorkspaceChoice>[]>(() => [
   { value: 'here', label: 'This folder' },
   { value: 'new-worktree', label: 'New worktree', disabled: !canWorktree.value, title: git.value?.worktreeProblem ?? undefined },
+  { value: 'existing', label: 'Existing worktree', disabled: !retained.value.length, title: retained.value.length ? 'Reuse a worktree and its files' : 'No retained worktrees for this repository' },
 ])
-function chooseWorkspace(w: Workspace): void {
+function chooseWorkspace(w: WorkspaceChoice): void {
   workspace.value = w
   workspaceChosen.value = true
 }
@@ -347,7 +369,13 @@ async function saveProfile(): Promise<void> {
 
 const blocker = computed(() => {
   if (!cwd.value.trim()) return 'Choose a folder.'
+  if (folderPending.value) return 'Checking folder and worktrees…'
+  if (!check.value) return retainedProblem.value ?? 'Could not check the folder.'
   if (check.value?.problem) return check.value.problem
+  if (preset.value !== 'swarm' && workspace.value === 'existing') {
+    if (!chosenWorktree.value) return 'Choose an existing worktree.'
+    if (chosenWorktree.value.problem) return chosenWorktree.value.problem
+  }
   if (chosenPreset.value?.reason) return chosenPreset.value.reason
   if (preset.value === 'swarm' && !canWorktree.value) return git.value?.worktreeProblem ?? 'A Swarm needs a git repository: each agent works in a worktree of its own.'
   if (keyId.value !== null && !envVar.value.trim()) return 'Name the variable the key goes in.'
@@ -376,7 +404,7 @@ function submit(): void {
     description: description.value.trim() || null,
     projectId: projectId.value,
     tags: tags.value,
-    workspace: preset.value === 'swarm' ? 'new-worktree' : workspace.value,
+    workspace: preset.value === 'swarm' ? 'new-worktree' : workspace.value === 'existing' ? { 'existing-worktree': retainedId.value! } : workspace.value,
     routing: routingApplies.value ? routing.value : null,
   }
   emit('launch', { preset: preset.value, session, count: preset.value === 'swarm' ? swarmCount.value : null })
@@ -433,9 +461,23 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
         <p v-if="check?.problem" class="hint bad">{{ check.problem }}</p>
         <p v-else-if="check?.gitNote" class="hint warn">{{ check.gitNote }}</p>
         <p v-else-if="check && !git" class="hint">Not a git repository: sessions work in the folder itself.</p>
+        <p v-if="retainedProblem" class="hint warn">{{ retainedProblem }}</p>
         <template v-if="git && preset !== 'swarm'">
           <ButtonGroup :model-value="workspace" :options="workspaceOptions" label="Work in" variant="chips" @update:model-value="chooseWorkspace" />
-          <p v-if="sharingText" class="hint" :class="{ warn: workspace === 'here' }">
+          <template v-if="workspace === 'existing'">
+            <select v-model="retainedId" aria-label="Existing worktree" class="retained-select">
+              <option :value="null">Choose a worktree…</option>
+              <option v-for="w in retained" :key="w.id" :value="w.id" :disabled="!!w.problem">
+                {{ w.branch }} · {{ w.openSessions ? `${w.openSessions} open session(s)` : 'retained' }}{{ w.problem ? ` · ${w.problem}` : '' }}
+              </option>
+            </select>
+            <p v-if="chosenWorktree" class="hint">
+              {{ chosenWorktree.path }}. Existing files and changes are kept.
+              <template v-if="chosenWorktree.openSessions">This shares files with {{ chosenWorktree.openSessions }} open session(s).</template>
+              <template v-if="sessionCount > 1">All {{ sessionCount }} new sessions work in it.</template>
+            </p>
+          </template>
+          <p v-else-if="sharingText" class="hint" :class="{ warn: workspace === 'here' }">
             {{ sharingText }}
             <template v-if="workspace === 'here'">This session would change the same files on the same branch.</template>
             <template v-else>A new worktree gives this one its own branch, {{ git.newBranch }}, made from {{ branchText }}.</template>
@@ -587,11 +629,11 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
           <dd :class="{ warn: version.warn }" :title="version.title">{{ version.text }}</dd>
         </template>
         <dt>Branch</dt>
-        <dd v-if="git" class="mono">{{ git.repo }} / {{ branchText }}</dd>
+        <dd v-if="git" class="mono">{{ git.repo }} / {{ preset !== 'swarm' && workspace === 'existing' ? (chosenWorktree?.branch ?? 'choose a worktree') : branchText }}</dd>
         <dd v-else class="muted">{{ check ? 'not a git repository' : '—' }}</dd>
         <template v-if="git">
           <dt>Works in</dt>
-          <dd>{{ preset === 'swarm' ? `${swarmCount} new worktrees` : workspace === 'new-worktree' ? 'a new worktree' : 'this folder' }}</dd>
+          <dd>{{ preset === 'swarm' ? `${swarmCount} new worktrees` : workspace === 'new-worktree' ? 'a new worktree' : workspace === 'existing' ? (chosenWorktree?.branch ?? 'choose a worktree') : 'this folder' }}</dd>
         </template>
         <dt>Name</dt>
         <dd>{{ name.trim() || 'unnamed' }}</dd>
@@ -633,6 +675,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
 </template>
 
 <style scoped>
+.retained-select { max-width: 100%; font-size: 12px; }
 /* A fixed height, so each pane scrolls on its own and Start stays in view. */
 .box {
   display: grid;

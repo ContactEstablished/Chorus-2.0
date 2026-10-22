@@ -62,6 +62,8 @@ pub fn builder() -> Builder<tauri::Wry> {
             s::tags_known,
             s::session_suggest_name,
             s::folder_check,
+            s::worktrees_list,
+            s::session_git_status,
             s::folders_recent,
             s::folder_pick,
             s::session_set_locked,

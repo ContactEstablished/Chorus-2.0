@@ -510,6 +510,7 @@ session's paths. A Gemini launch in the untrusted scratch repository had no `--s
 app's database reached schema 12. Evidence is local under `_verify/roadmap-*`, not committed.
 
 No model prompt was submitted in these checks. Complete Gemini/Aider turns, applied options and
-conversation content after Restart still need P14 runtime acceptance. P4's full-day check is also
-still open; these launch checks do not close either phase. The prior repository Aider history is
+conversation content after Restart still need P14 runtime acceptance. P4's full-day check was still
+open at this review; it was subsequently waived explicitly when Matthew directed work to P5 (D72).
+These launch checks do not supply a full-day result. The prior repository Aider history is
 kept, without an automatic import into existing sessions' new private history.
