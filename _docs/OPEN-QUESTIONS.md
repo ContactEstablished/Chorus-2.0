@@ -28,6 +28,11 @@ plan notification. **Still open:** observe real plan updates and prove both clie
 same thread, with approval/question replies, disconnects and Raw fallback. No production bridge
 enabled yet. Details and remaining gates: [S5-P6.md](spikes/S5-P6.md).
 
+A further explicit plan-tool probe completed without a plan event. A diagnostic turn using the
+actual default `gpt-6-astra` reported `update_plan` unavailable and named `request_user_input`
+as a Plan-mode tool. This is bounded evidence for that configuration, not a universal absence
+claim. See [the next slice's findings](spikes/S5-P6-REPLIES.md); Q19 and the Codex exit check stay open.
+
 **Q21 — How should Chorus run DeepSeek Harness?** (D59.) `dsh` offers a local web UI and the server
 behind it (`dsh web`, port 3080), a one-shot headless run (`dsh --profile headless "<task>"`), a Python
 SDK, and a terminal UI only through a community plugin profile (`dsh --profile tui`). Options: (a) its

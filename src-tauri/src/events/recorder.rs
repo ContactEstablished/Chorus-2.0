@@ -38,6 +38,7 @@ pub struct Recorder {
     tools: HashMap<String, i64>,
     unnamed_tools: Vec<(String, i64)>,
     asks: Vec<OpenAsk>,
+    pub(crate) replies: HashMap<i64, super::replies::HeldReply>,
     /// The agent's full transcript, from the first hook payload that names it.
     transcript: Option<String>,
 }
@@ -57,6 +58,7 @@ impl Recorder {
             tools: HashMap::new(),
             unnamed_tools: Vec::new(),
             asks: Vec::new(),
+            replies: HashMap::new(),
             transcript: None,
         }
     }
@@ -81,8 +83,51 @@ impl Recorder {
         String::from_utf8_lossy(&scrub_all(text.as_bytes(), &self.redact, &self.patterns)).into_owned()
     }
 
+    pub(crate) fn clean_value(&self, value: &Value) -> Value {
+        chorus_core::scrub::scrub_json(value, &self.redact, &self.patterns)
+    }
+
+    fn reply_details(&self, request: &chorus_core::replies::HookRequest) -> Option<chorus_core::replies::ReplyDetails> {
+        use chorus_core::replies::ReplyDetails;
+        Some(match &request.details {
+            ReplyDetails::Approval { tool, .. } => ReplyDetails::Approval {
+                tool: self.clean(tool), input: serde_json::to_string_pretty(&self.clean_value(&request.input)).ok()?,
+            },
+            details => serde_json::from_value(self.clean_value(&serde_json::to_value(details).ok()?)).ok()?,
+        })
+    }
+
     pub fn pending_question(&self) -> bool {
         self.asks.iter().any(|a| a.kind == "question")
+    }
+
+    pub fn newest_ask(&self) -> Option<i64> { self.asks.last().map(|a| a.row) }
+
+    /// Only called just after recording the corresponding ask, under this recorder's lock.
+    pub fn hold_reply(&mut self, store: &Store, payload: &Value) -> Option<super::replies::HookReceiver> {
+        let request = chorus_core::replies::claude_request(payload)?;
+        let ask = self.asks.last()?;
+        let kind = match request.details { chorus_core::replies::ReplyDetails::Question { .. } => "question", _ => "approval" };
+        if ask.kind != kind || self.replies.len() >= 16 || self.replies.contains_key(&ask.row) { return None; }
+        let details = serde_json::to_string(&self.reply_details(&request)?).ok()?;
+        store.with(|c| c.execute("UPDATE asks SET details = ?2 WHERE id = ?1", rusqlite::params![ask.row, details])).ok()?;
+        let (sender, receiver) = tokio::sync::oneshot::channel();
+        self.replies.insert(ask.row, super::replies::HeldReply { request, sender: Some(sender), opened: std::time::Instant::now() });
+        Some(receiver)
+    }
+
+    pub fn pending_replies(&self) -> Vec<super::replies::PendingReply> {
+        self.asks.iter().filter_map(|a| {
+            let reply = self.replies.get(&a.row)?;
+            let details = self.reply_details(&reply.request)?;
+            Some(super::replies::PendingReply {
+                ask_id: u32::try_from(a.row).ok()?, run_id: self.run_id, details,
+                remaining_secs: chorus_core::replies::REPLY_WAIT_SECS.saturating_sub(reply.opened.elapsed().as_secs()) as u32,
+                blocked_reason: (!reply.available()).then(|| if reply.sender.is_none() {
+                    "Reply attempted or returned to Raw. Waiting for the agent; no automatic resend.".into()
+                } else { "Reply channel expired or disconnected. Answer the agent in Raw.".into() }),
+            })
+        }).collect()
     }
 
     fn turn_for(&self, turn: Option<&str>) -> Option<i64> {
@@ -98,7 +143,7 @@ impl Recorder {
             self.transcript = Some(path.to_owned());
             let _ = history::set_run_transcript(store, self.run_id, path);
         }
-        let body = self.clean(&compact_for_log(raw));
+        let body = compact_for_log(&self.clean_value(raw));
         let _ = history::record_event(store, self.session_id, Some(self.run_id), source, hook_event_name(raw).as_deref(), &body);
         for event in events {
             let changes = self.tracker.apply(event, now_ms);
@@ -145,6 +190,7 @@ impl Recorder {
                     let _ = history::answer_ask(store, ask.row, answer);
                 }
                 self.asks.retain(|a| a.turn_row != Some(row));
+                self.replies.retain(|id, _| self.asks.iter().any(|a| a.row == *id));
             }
         }
     }
@@ -152,6 +198,7 @@ impl Recorder {
     fn answer(&mut self, store: &Store, pick: impl Fn(&OpenAsk) -> bool, answer: &str) {
         if let Some(i) = self.asks.iter().position(pick) {
             let ask = self.asks.remove(i);
+            self.replies.remove(&ask.row);
             let _ = history::answer_ask(store, ask.row, answer);
         }
     }
@@ -160,7 +207,7 @@ impl Recorder {
         match event {
             AgentEvent::ToolStarted { turn, call, tool, target } => {
                 // A tool running after an approval for it means the approval was given.
-                self.answer(store, |a| a.kind == "approval" && a.tool.as_deref() == Some(tool), "allowed");
+                self.answer(store, |a| a.kind == "approval" && a.tool.as_deref() == Some(tool) && (a.ask_ref.is_none() || a.ask_ref == *call), "allowed");
                 let target = target.as_deref().map(|t| self.clean(t));
                 if let Ok(row) = history::tool_started(store, self.session_id, self.turn_for(turn.as_deref()), call.as_deref(), tool, target.as_deref()) {
                     match call {
@@ -172,7 +219,8 @@ impl Recorder {
                 }
             }
             AgentEvent::ToolFinished { turn, call, tool, target, failed } => {
-                self.answer(store, |a| a.kind == "approval" && a.tool.as_deref() == Some(tool), "allowed");
+                self.answer(store, |a| a.kind == "approval" && a.tool.as_deref() == Some(tool) && (a.ask_ref.is_none() || a.ask_ref == *call),
+                    if *failed { "tool failed; approval outcome not observed" } else { "allowed" });
                 let row = call.as_ref().and_then(|c| self.tools.remove(c)).or_else(|| {
                     let i = self.unnamed_tools.iter().position(|(t, _)| t == tool)?;
                     Some(self.unnamed_tools.remove(i).1)
@@ -220,6 +268,7 @@ impl Recorder {
 
     /// The run ended: its open turns are lost.
     pub fn run_ended(&mut self, store: &Store) {
+        self.replies.clear();
         for change in self.tracker.run_ended() {
             self.apply_change(store, change, crate::store::now_ms());
         }

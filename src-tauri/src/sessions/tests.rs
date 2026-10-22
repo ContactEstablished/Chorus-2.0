@@ -121,6 +121,120 @@ fn delivery_fixture(f: &Fixture, fail_enter: bool) -> (u32, Arc<Run>, DeliveryCh
 const DELIVERY_REQUEST: &str = "0f8fad5b-d9cb-469f-a165-70867728950e";
 const OTHER_REQUEST: &str = "7c9e6679-7425-40de-944b-e07fc1f90ae7";
 
+fn held_approval(f: &Fixture, run: &Run, call: &str) -> (u32, crate::events::replies::HookReceiver) {
+    let payload = serde_json::json!({"hook_event_name":"PermissionRequest","tool_name":"Write","tool_use_id":call,"tool_input":{"file_path":"test.txt","content":"hello"}});
+    let mut r = run.recorder.lock().unwrap();
+    r.record(&f.manager.store, "test", &payload, &chorus_core::events::from_claude_hook(&payload), crate::store::now_ms());
+    let receiver = r.hold_reply(&f.manager.store, &payload).unwrap();
+    (r.newest_ask().unwrap() as u32, receiver)
+}
+
+#[test]
+fn held_replies_persist_once_and_never_guess_agent_acknowledgement() {
+    use chorus_core::actions::{SessionAction, ApprovalDecision};
+    let f = Fixture::new("reply-once");
+    let (id, run, chunks) = delivery_fixture(&f, false);
+    let (ask, mut receiver) = held_approval(&f, &run, "a1");
+    let request = actions::ActionRequest { run_id: run.id, request_id: DELIVERY_REQUEST.into(), action: SessionAction::Approval {
+        ask_id: ask, decision: ApprovalDecision::Allow, message: None,
+    }};
+    actions::ActionRouter::dispatch(&f.manager, id, request.clone()).unwrap();
+    let stored: (u32, Option<String>) = f.manager.store.with(|c| c.query_row(
+        "SELECT (SELECT count(*) FROM reply_attempts), answer FROM asks WHERE id=?1", [ask], |r| Ok((r.get(0)?, r.get(1)?)),
+    )).unwrap();
+    assert_eq!(stored, (1, None), "attempt is durable but not a confirmed answer");
+    assert_eq!(receiver.try_recv().unwrap()["hookSpecificOutput"]["decision"]["behavior"], "allow");
+    actions::ActionRouter::dispatch(&f.manager, id, request.clone()).unwrap();
+    let mut changed = request.clone();
+    changed.action = SessionAction::Approval { ask_id: ask, decision: ApprovalDecision::Deny, message: None };
+    assert!(actions::ActionRouter::dispatch(&f.manager, id, changed).is_err());
+    let mut duplicate = request;
+    duplicate.request_id = OTHER_REQUEST.into();
+    assert!(actions::ActionRouter::dispatch(&f.manager, id, duplicate).is_err());
+    assert!(chunks.lock().unwrap().is_empty());
+    let reopened = Store::open(&f.dir.join("chorus.db")).unwrap();
+    let count: u32 = reopened.with(|c| c.query_row("SELECT count(*) FROM reply_attempts", [], |r| r.get(0))).unwrap();
+    assert_eq!(count, 1);
+}
+
+#[test]
+fn expired_raw_answered_locked_and_stale_requests_cannot_reply() {
+    use chorus_core::actions::{SessionAction, ApprovalDecision};
+    let f = Fixture::new("reply-lifetime");
+    let (id, run, _) = delivery_fixture(&f, false);
+    let (ask, mut receiver) = held_approval(&f, &run, "a1");
+    let req = actions::ActionRequest { run_id: run.id, request_id: DELIVERY_REQUEST.into(), action: SessionAction::Approval { ask_id: ask, decision: ApprovalDecision::Allow, message: None }};
+    f.manager.set_locked(id, true, None).unwrap();
+    assert!(actions::ActionRouter::dispatch(&f.manager, id, req.clone()).is_err());
+    f.manager.set_locked(id, false, None).unwrap();
+    let mut stale = req.clone(); stale.run_id += 1;
+    assert!(actions::ActionRouter::dispatch(&f.manager, id, stale).is_err());
+    // A different parallel call of the same tool must not consume this request.
+    {
+        let mut r = run.recorder.lock().unwrap();
+        let event = |call: &str| chorus_core::events::AgentEvent::ToolFinished { turn: None, call: Some(call.into()), tool: "Write".into(), target: None, failed: false };
+        r.record(&f.manager.store, "test", &serde_json::json!({}), &[event("different")], 1);
+        assert!(r.replies.contains_key(&i64::from(ask)));
+        r.record(&f.manager.store, "test", &serde_json::json!({}), &[event("a1")], 2);
+    }
+    assert!(actions::ActionRouter::dispatch(&f.manager, id, req).is_err());
+    assert_eq!(receiver.try_recv(), Err(tokio::sync::oneshot::error::TryRecvError::Closed));
+    let (ask, receiver) = held_approval(&f, &run, "a2");
+    let request = actions::ActionRequest { run_id: run.id, request_id: OTHER_REQUEST.into(), action: SessionAction::Release { ask_id: ask }};
+    run.recorder.lock().unwrap().replies.get_mut(&i64::from(ask)).unwrap().opened -= Duration::from_secs(121);
+    assert!(actions::ActionRouter::dispatch(&f.manager, id, request.clone()).is_err());
+    assert!(run.recorder.lock().unwrap().pending_replies()[0].blocked_reason.is_some());
+    drop(receiver);
+    assert!(actions::ActionRouter::dispatch(&f.manager, id, request).is_err());
+    let count: u32 = f.manager.store.with(|c| c.query_row("SELECT count(*) FROM reply_attempts", [], |r| r.get(0))).unwrap();
+    assert_eq!(count, 0);
+}
+
+#[test]
+fn reply_database_failure_does_not_send_and_release_makes_no_decision() {
+    use chorus_core::actions::SessionAction;
+    let f = Fixture::new("reply-store-failure");
+    let (id, run, _) = delivery_fixture(&f, false);
+    let (ask, mut receiver) = held_approval(&f, &run, "a1");
+    let req = actions::ActionRequest { run_id: run.id, request_id: DELIVERY_REQUEST.into(), action: SessionAction::Release { ask_id: ask }};
+    f.manager.store.with(|c| c.execute_batch("CREATE TRIGGER refuse_reply BEFORE INSERT ON reply_attempts BEGIN SELECT RAISE(ABORT, 'injected'); END;")).unwrap();
+    assert!(actions::ActionRouter::dispatch(&f.manager, id, req.clone()).is_err());
+    assert_eq!(receiver.try_recv(), Err(tokio::sync::oneshot::error::TryRecvError::Empty));
+    f.manager.store.with(|c| c.execute_batch("DROP TRIGGER refuse_reply;")).unwrap();
+    actions::ActionRouter::dispatch(&f.manager, id, req).unwrap();
+    assert_eq!(receiver.try_recv().unwrap(), serde_json::json!({}));
+    let (_, mut receiver) = held_approval(&f, &run, "a2");
+    f.manager.close(id, false).unwrap();
+    assert_eq!(receiver.try_recv(), Err(tokio::sync::oneshot::error::TryRecvError::Closed));
+}
+
+#[test]
+fn held_question_scrubs_decoded_values_but_returns_the_actual_answer() {
+    use chorus_core::actions::SessionAction;
+    let f = Fixture::new("reply-scrub");
+    let (id, run, _) = delivery_fixture(&f, false);
+    let secret = "private\"quoted\ncredential";
+    let payload = serde_json::json!({"hook_event_name":"PreToolUse","tool_name":"AskUserQuestion","tool_use_id":"q1",
+        "tool_input":{"questions":[{"question":"Which?","options":[{"label":"choice","description":secret}]}]}});
+    let (ask, mut receiver) = {
+        let mut r = run.recorder.lock().unwrap();
+        *r = Recorder::new(id, run.id, "hook", Arc::new(vec![secret.as_bytes().to_vec()]), Arc::new(builtin_patterns()));
+        r.record(&f.manager.store, "test", &payload, &chorus_core::events::from_claude_hook(&payload), 1);
+        let receiver = r.hold_reply(&f.manager.store, &payload).unwrap();
+        let pending = serde_json::to_string(&r.pending_replies()).unwrap();
+        assert!(!pending.contains("quoted"));
+        (r.newest_ask().unwrap() as u32, receiver)
+    };
+    let req = actions::ActionRequest { run_id: run.id, request_id: DELIVERY_REQUEST.into(), action: SessionAction::Answer { ask_id: ask, answers: vec![secret.into()] }};
+    actions::ActionRouter::dispatch(&f.manager, id, req).unwrap();
+    assert_eq!(receiver.try_recv().unwrap()["hookSpecificOutput"]["updatedInput"]["answers"]["Which?"], secret);
+    let stored: (String, String, String) = f.manager.store.with(|c| c.query_row(
+        "SELECT details, (SELECT action FROM reply_attempts LIMIT 1), (SELECT body FROM agent_events ORDER BY id DESC LIMIT 1) FROM asks WHERE id=?1",
+        [ask], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+    )).unwrap();
+    for text in [stored.0, stored.1, stored.2] { assert!(!text.contains("quoted") && text.contains("REDACTED")); }
+}
+
 #[test]
 fn delivery_persists_before_two_writes_and_links_one_scrubbed_prompt() {
     use chorus_core::actions::PromptSource;
@@ -182,7 +296,7 @@ fn unsupported_replies_and_observed_approvals_never_write_to_pty() {
     let (id, run, chunks) = delivery_fixture(&f, false);
     for action in [
         SessionAction::Approval { ask_id: 1, decision: ApprovalDecision::Allow, message: None },
-        SessionAction::Answer { ask_id: 1, text: "yes".into() },
+        SessionAction::Answer { ask_id: 1, answers: vec!["yes".into()] },
     ] {
         let req = actions::ActionRequest { run_id: run.id, request_id: DELIVERY_REQUEST.into(), action };
         assert!(actions::ActionRouter::dispatch(&f.manager, id, req).unwrap_err().contains("Raw"));

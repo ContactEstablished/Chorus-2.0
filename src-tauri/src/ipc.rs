@@ -82,6 +82,7 @@ pub fn builder() -> Builder<tauri::Wry> {
             // P6: shared action routing and explicit channel availability.
             sessions::actions::session_action_capabilities,
             sessions::actions::session_action,
+            sessions::actions::session_pending_replies,
         ])
         .events(collect_events![app::BackendPulse, sessions::SessionUpdated, fleet::FleetClick])
 }

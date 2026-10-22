@@ -389,6 +389,21 @@ as folder trust. These establish different facts; neither proves a plan bridge o
 control. A probe must set `TERM=xterm-256color` just like the app, or Codex first asks whether to
 continue with a dumb terminal. Keep Q19 open until actual plans and responses are observed.
 
+**L53 — A held question hook delays the native question.** On Claude Code 2.1.308, `PreToolUse`
+for `AskUserQuestion` waits before the question UI appears. Friendly must offer an explicit release
+with no decision, and a bounded timeout, so the user can answer in Raw. `PermissionRequest` differs:
+the native permission dialog remains usable while its HTTP hook waits. A reply receipt means an
+attempt; the agent may already have accepted a competing Raw answer. A hook denial produced no
+dedicated denial acknowledgement event in the bounded check; keep the attempted denial and final
+message separate rather than inventing an acknowledgement. Releasing a native question also emits
+`PermissionRequest` for `AskUserQuestion`; ignore that duplicate approval signal and retain the
+original question until its post-tool event answers it.
+
+**L54 — Scrub decoded JSON strings before serialising.** JSON escaping changes embedded quotes,
+backslashes and newlines, defeating an exact credential match against serialised JSON text. Scrub
+string values and object keys first (question text can be a key), then format history/cards/receipts.
+For approval previews, scrub the actual input object before turning it into a display string.
+
 ## Money and models
 
 **L16 — Read-then-revoke under-reports OpenRouter spend.** Reading a capped key's usage right after the

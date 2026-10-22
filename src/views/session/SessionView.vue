@@ -11,6 +11,7 @@ import SessionStrip from './SessionStrip.vue'
 import SessionFacts from './SessionFacts.vue'
 import PromptHistory from './PromptHistory.vue'
 import ActionChannels from './ActionChannels.vue'
+import FriendlyTimeline from './FriendlyTimeline.vue'
 import { commands, type Attention, type SessionSummary, type WorktreeClose } from '../../ipc'
 import { terminalFor } from '../../components/terminals'
 import { useSessionsStore } from '../../stores/sessions'
@@ -23,6 +24,7 @@ import { AGENT_LABELS } from '../../raw/labels'
 import { AGENT_CHIPS, ATTENTION, shortPath } from '../../shell/status'
 
 const props = defineProps<{ sessionId: number }>()
+const mode = ref<'friendly' | 'raw'>('raw')
 
 const sessions = useSessionsStore()
 const projects = useProjectsStore()
@@ -41,8 +43,8 @@ watch(s, (now) => {
 
 /** DESIGN.md's readiness panel, worded for P4: answers go through the terminal until P6. */
 const READINESS: Record<Attention, { title: string; text: string }> = {
-  approval: { title: 'Waiting on you.', text: 'The agent asked permission for a consequential action. Approve or deny it in the terminal — nothing runs until then.' },
-  input: { title: 'Waiting on you.', text: 'The agent asked a question and is paused. Answer it in the terminal.' },
+  approval: { title: 'Waiting on you.', text: 'Review the request in Friendly. If its reply channel is unavailable, approve or deny in Raw.' },
+  input: { title: 'Waiting on you.', text: 'Answer the active question card in Friendly, or use Raw when no reply channel is available.' },
   failed: { title: 'Agent stopped.', text: 'History is intact. Restart runs it again, resuming its conversation where the agent allows it.' },
   working: { title: 'Agent is busy.', text: 'It is working on a turn. What you type goes straight to its terminal.' },
   ready: { title: 'Ready for the next step.', text: 'The last turn is finished. Type your next instruction in the terminal.' },
@@ -183,8 +185,8 @@ async function send(bytes: string): Promise<void> {
         <span class="dot" :class="{ pulse: s.attention === 'working' && !s.noSignal }" />{{ ATTENTION[s.attention].label }}
       </span>
       <div class="modes" role="radiogroup" aria-label="View">
-        <button role="radio" aria-checked="false" disabled title="Friendly arrives in Phase 6: the timeline, plan and question cards">Friendly</button>
-        <button role="radio" aria-checked="true" class="on">Raw</button>
+        <button role="radio" :aria-checked="mode === 'friendly'" :class="{ on: mode === 'friendly' }" @click="mode = 'friendly'">Friendly</button>
+        <button role="radio" :aria-checked="mode === 'raw'" :class="{ on: mode === 'raw' }" @click="mode = 'raw'">Raw</button>
       </div>
     </header>
 
@@ -221,7 +223,8 @@ async function send(bytes: string): Promise<void> {
     </div>
 
     <div class="body">
-      <div class="raw">
+      <FriendlyTimeline v-if="mode === 'friendly'" :session="s" @raw="mode = 'raw'" />
+      <div v-else class="raw">
         <div class="rawbar">
           <span class="att" :class="{ on: attached && s.live }">
             <span class="led" />{{ !s.live ? 'not running' : attached ? 'attached' : 'attaching…' }}
@@ -563,7 +566,6 @@ async function send(bytes: string): Promise<void> {
     border-top: 1px solid var(--border);
     max-height: 40%;
   }
-  .modes,
   .where .mono,
   .where .sep {
     display: none;

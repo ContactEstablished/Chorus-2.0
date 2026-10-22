@@ -75,7 +75,7 @@ does not close those phases.
 | P3 | Events and durable history | Closed 2026-10-19 for Claude Code, Codex and opencode; Grok has no event channel |
 | P4 | App shell and Overview | Closed 2026-10-22; full-day acceptance waived, not performed (D72) |
 | P5 | Git and worktrees | Closed 2026-10-22; retained reuse, boot reconcile, worktree panel and diff summaries verified in the app (D73–D74) |
-| P6 | Friendly view and Next steps | In progress: typed ActionRouter boundary, shared durable prompt delivery and visible channel limits; reply channels, Codex plans (Q19), timeline, queue and narrator remain |
+| P6 | Friendly view and Next steps | In progress: durable prompt delivery, Claude held-hook reply cards and a Friendly history timeline; Codex plans/control (Q19), full plan capture, queue and narrator remain |
 | P7 | Attention and notifications | Planned; fleet strip prototype exists; production inbox, notifications, tray, strip, search and export remain |
 | P8 | Bots, Automations, Notes, Documents | Planned; the four screens are placeholders |
 | P9 | Voice | Removed; separate dictation app (D22); Chorus retains compatibility (D23) |
@@ -272,9 +272,19 @@ Clippy and secret scan. No P1/P4 acceptance waiver was reopened.
   history row and the same Raw transcript; retry returned the observed receipt without a third turn.
   The slice passes 449 Rust tests, 19 frontend tests, TypeScript, Clippy and secret scan.
 
-**Next slices:** (1) verified held-hook question/approval replies, run/request expiry and races with
-Raw; complete the Codex app-server plan/control spike before enabling its bridge; (2) structured
-timeline, persisted plan and cards with same-session Friendly/Raw switching; (3) durable queue and
+**Second slice (2026-10-22):** Claude held-hook replies and same-session Friendly/Raw switching now
+work in the isolated app. A question was answered and a scratch-file write approved through the
+production Friendly cards; Raw showed the same completed turn. A second write was denied with a
+reason and left its file absent. Full timeout preserved Raw's prompt; releasing a question to Raw
+and answering an approval in Raw while its Friendly hook waited also passed. The timeline displays recorded prompts/final messages, collapsed
+tool calls and durable requests/reply attempts. Replies expire, reject stale runs, and never replay
+after an uncertain send. See [reply evidence and remaining gates](spikes/S5-P6-REPLIES.md).
+Q19 remains open: the current Codex/default-model probe emitted no plan and reported the plan tool
+unavailable; schema support alone still does not enable a production bridge. Checks pass: 456 Rust
+tests, 19 frontend tests, TypeScript, Clippy and secret scan.
+
+**Next slices:** (1) complete the Codex app-server plan/control spike before enabling its bridge;
+(2) persisted plan and intermediate-message capture; (3) durable queue and
 composer with explicit cancel/restart/duplicate policy; (4) D28 narrator, costs and per-project switch,
 Now / Blocker / Up next and durable Done/dismissed actions; (5) both planned multi-phase acceptance runs.
 The queue, narrator/key fallback and both Friendly-only exit checks remain open. Nothing in this

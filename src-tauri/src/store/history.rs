@@ -146,9 +146,13 @@ pub struct ToolEntry {
 #[derive(Debug, Clone, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct AskEntry {
+    pub id: u32,
     pub kind: String,
     pub subject: String,
     pub answer: Option<String>,
+    pub details: Option<chorus_core::replies::ReplyDetails>,
+    pub reply_attempted: bool,
+    pub reply_action: Option<chorus_core::actions::SessionAction>,
 }
 
 fn secs(ms: i64) -> u32 {
@@ -180,13 +184,18 @@ pub fn recent_turns(store: &Store, session_id: u32, limit: u32) -> Result<Vec<Tu
             .collect::<rusqlite::Result<_>>()?;
         turns.reverse();
         let mut tools = c.prepare("SELECT tool, target, failed, ended_at IS NOT NULL FROM tool_calls WHERE turn_id = ?1 ORDER BY id")?;
-        let mut asks = c.prepare("SELECT kind, subject, answer FROM asks WHERE turn_id = ?1 ORDER BY id")?;
+        let mut asks = c.prepare("SELECT id, kind, subject, answer, details, (SELECT action FROM reply_attempts r WHERE r.ask_id = asks.id) FROM asks WHERE turn_id = ?1 ORDER BY id")?;
         for t in &mut turns {
             t.tools = tools
                 .query_map([t.id], |r| Ok(ToolEntry { tool: r.get(0)?, target: r.get(1)?, failed: r.get(2)?, finished: r.get(3)? }))?
                 .collect::<rusqlite::Result<_>>()?;
             t.asks = asks
-                .query_map([t.id], |r| Ok(AskEntry { kind: r.get(0)?, subject: r.get(1)?, answer: r.get(2)? }))?
+                .query_map([t.id], |r| Ok(AskEntry {
+                    id: r.get(0)?, kind: r.get(1)?, subject: r.get(2)?, answer: r.get(3)?,
+                    details: r.get::<_, Option<String>>(4)?.and_then(|s| serde_json::from_str(&s).ok()),
+                    reply_attempted: r.get::<_, Option<String>>(5)?.is_some(),
+                    reply_action: r.get::<_, Option<String>>(5)?.and_then(|s| serde_json::from_str(&s).ok()),
+                }))?
                 .collect::<rusqlite::Result<_>>()?;
         }
         Ok(turns)

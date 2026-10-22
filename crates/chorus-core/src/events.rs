@@ -77,10 +77,16 @@ pub fn from_claude_hook(p: &Value) -> Vec<AgentEvent> {
         Some("PreToolUse") if tool == "AskUserQuestion" => {
             vec![AgentEvent::QuestionAsked { turn, ask: call, question: ask_user_question(&input).unwrap_or_default() }]
         }
-        Some("PostToolUse") if tool == "AskUserQuestion" => vec![AgentEvent::QuestionAnswered { ask: call, answer: None }],
+        Some("PostToolUse") if tool == "AskUserQuestion" => vec![AgentEvent::QuestionAnswered {
+            ask: call, answer: p.pointer("/tool_response/answers").or_else(|| input.get("answers")).and_then(question_answers),
+        }],
+        Some("PostToolUseFailure") if tool == "AskUserQuestion" => vec![AgentEvent::QuestionAnswered { ask: call, answer: Some("question failed or cancelled".into()) }],
         Some("PreToolUse") => vec![AgentEvent::ToolStarted { turn, call, tool, target: tool_target(&input) }],
         Some("PostToolUse") => vec![AgentEvent::ToolFinished { turn, call, tool, target: tool_target(&input), failed: false }],
         Some("PostToolUseFailure") => vec![AgentEvent::ToolFinished { turn, call, tool, target: tool_target(&input), failed: true }],
+        // Releasing the question's PreToolUse hook lets Claude open its native question UI.
+        // Its PermissionRequest is the same question, not an additional approval to grant.
+        Some("PermissionRequest") if tool == "AskUserQuestion" => Vec::new(),
         Some("PermissionRequest") => vec![AgentEvent::ApprovalAsked { turn, ask: call, tool, target: tool_target(&input) }],
         Some("Notification") if text(p, "notification_type").as_deref() == Some("idle_prompt") => vec![AgentEvent::Idle],
         Some("Stop") => vec![AgentEvent::TurnEnded { turn, message: text(p, "last_assistant_message") }],
@@ -99,6 +105,11 @@ fn ask_user_question(input: &Value) -> Option<String> {
         v => v.clone(),
     };
     input.pointer("/questions/0/question").and_then(Value::as_str).map(str::to_owned)
+}
+
+fn question_answers(value: &Value) -> Option<String> {
+    // Decoded text reaches the scrubber; serialising here could hide embedded credentials.
+    Some(value.as_object()?.iter().filter_map(|(q, a)| a.as_str().map(|a| format!("{q}: {a}"))).collect::<Vec<_>>().join("\n"))
 }
 
 /// A Codex 0.162.1 command hook payload, relayed by `chorus-hook` (D37).
@@ -193,6 +204,7 @@ mod tests {
             with(json!({"hook_event_name":"PreToolUse","tool_name":"AskUserQuestion","tool_use_id":"q1","tool_input":{"questions":[{"question":"Which file?"}]}})),
             [AgentEvent::QuestionAsked { turn: Some("p1".into()), ask: Some("q1".into()), question: "Which file?".into() }]
         );
+        assert!(with(json!({"hook_event_name":"PermissionRequest","tool_name":"AskUserQuestion","tool_use_id":"q1","tool_input":{"questions":[{"question":"Which file?"}]}})).is_empty());
         assert_eq!(
             with(json!({"hook_event_name":"Stop","stop_hook_active":false,"last_assistant_message":"Done."})),
             [AgentEvent::TurnEnded { turn: Some("p1".into()), message: Some("Done.".into()) }]

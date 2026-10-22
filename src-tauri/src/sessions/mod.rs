@@ -569,7 +569,7 @@ impl SessionManager {
 
     /// A hook post from a session's agent: checked against the run's token, then recorded before
     /// the reply goes back.
-    pub fn receive_hook(&self, session_id: u32, token: &str, body: &[u8]) -> Result<(), HookRefused> {
+    pub fn receive_hook(&self, session_id: u32, token: &str, body: &[u8]) -> Result<Option<crate::events::replies::HookReceiver>, HookRefused> {
         let live = self.open_live(session_id).map_err(|_| HookRefused::NotFound)?;
         let run = live.current_run().ok_or(HookRefused::NotFound)?;
         let expected = run.hook_token.as_deref().ok_or(HookRefused::NotFound)?;
@@ -583,16 +583,21 @@ impl SessionManager {
             AgentKind::Codex => ("codex-hook", chorus_core::events::from_codex_hook(&payload)),
             _ => return Err(HookRefused::NotFound),
         };
-        let before = {
+        let (before, reply) = {
             let mut recorder = run.recorder.lock().expect("recorder lock");
+            if run.requested.lock().expect("requested lock").is_some() || run.exit.lock().expect("exit lock").is_some() { return Err(HookRefused::NotFound); }
             let before = recorder.activity();
+            let last_ask = recorder.newest_ask();
             recorder.record(&self.store, source, &payload, &events, crate::store::now_ms());
-            before != recorder.activity()
+            let reply = if agent == AgentKind::Claude && last_ask != recorder.newest_ask() {
+                recorder.hold_reply(&self.store, &payload)
+            } else { None };
+            (before != recorder.activity(), reply)
         };
         if before {
             self.notify_id(session_id);
         }
-        Ok(())
+        Ok(reply)
     }
 
     /// A session's newest turns, oldest first, and how complete its records are.

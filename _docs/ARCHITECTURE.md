@@ -118,7 +118,11 @@ The prompt and an uncertain receipt commit atomically before any PTY write; a co
 not agent acknowledgement. A matching same-run hook echo within 60 seconds links the existing prompt
 and marks the receipt observed. Repeated requests never write again. No automatic retry after an
 uncertain write, crash or restart. Busy/unknown state and pending asks refuse; the queue is still
-pending. Question/approval variants currently refuse with a Raw fallback, not guessed keystrokes.
+pending. Claude question/approval replies now use held HTTP hooks (D76); other agents refuse with
+a Raw fallback. A live hook waits at most 120 seconds, and `Answer in Raw` releases it without a
+decision. Scrubbed reply attempts commit before the response; the receipt does not assert which
+answer won the race with Raw. Run/ask identity, lock and expiry are checked again at dispatch.
+No reply is automatically replayed after a timeout, restart or crash.
 
 ## 5. Agent channels
 

@@ -226,6 +226,19 @@ pub fn scrub_all(s: &[u8], secrets: &[Vec<u8>], patterns: &[Pattern]) -> Vec<u8>
     replace(s, &find_matches(s, secrets, patterns))
 }
 
+/// Scrub decoded strings before JSON escaping can hide a credential's quotes or newlines.
+/// Keys can contain user text too (for example a question-to-answer map).
+pub fn scrub_json(value: &serde_json::Value, secrets: &[Vec<u8>], patterns: &[Pattern]) -> serde_json::Value {
+    use serde_json::Value;
+    let clean = |s: &str| String::from_utf8_lossy(&scrub_all(s.as_bytes(), secrets, patterns)).into_owned();
+    match value {
+        Value::String(s) => Value::String(clean(s)),
+        Value::Array(a) => Value::Array(a.iter().map(|v| scrub_json(v, secrets, patterns)).collect()),
+        Value::Object(o) => Value::Object(o.iter().map(|(k, v)| (clean(k), scrub_json(v, secrets, patterns))).collect()),
+        v => v.clone(),
+    }
+}
+
 /// Scrubs a byte stream chunk by chunk.
 pub struct StreamScrubber {
     secrets: Vec<Vec<u8>>,
@@ -350,6 +363,17 @@ pub fn longest_shared_run(secret: &[u8], hay: &[u8], min: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn json_strings_and_keys_are_scrubbed_before_escaping() {
+        let secret = "private\"quoted\ncredential";
+        let value = serde_json::json!({secret: [secret, {"nested": secret}], "safe": true});
+        let cleaned = scrub_json(&value, &[secret.as_bytes().to_vec()], &[]);
+        let text = cleaned.to_string();
+        assert!(!text.contains("quoted") && !text.contains("credential"));
+        assert_eq!(cleaned["safe"], true);
+        assert_eq!(cleaned["[REDACTED-CREDENTIAL]"][0], "[REDACTED-CREDENTIAL]");
+    }
 
     #[test]
     fn longest_shared_run_finds_partial_leaks() {

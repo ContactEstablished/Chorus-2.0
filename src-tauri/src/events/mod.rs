@@ -3,6 +3,7 @@
 
 pub mod listener;
 pub mod recorder;
+pub mod replies;
 
 /// Why a hook post was refused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

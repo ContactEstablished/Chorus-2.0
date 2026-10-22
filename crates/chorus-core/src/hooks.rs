@@ -28,7 +28,13 @@ pub fn claude_settings(url: &str) -> String {
             "timeout": CLAUDE_HOOK_TIMEOUT_SECS,
         }]
     }]);
-    let hooks: serde_json::Map<String, Value> = CLAUDE_HOOK_EVENTS.iter().map(|e| ((*e).to_owned(), hook.clone())).collect();
+    let hooks: serde_json::Map<String, Value> = CLAUDE_HOOK_EVENTS.iter().map(|e| {
+        let mut entry = hook.clone();
+        if matches!(*e, "PermissionRequest" | "PreToolUse") {
+            entry[0]["hooks"][0]["timeout"] = json!(crate::replies::REPLY_WAIT_SECS + 5);
+        }
+        ((*e).to_owned(), entry)
+    }).collect();
     json!({ "hooks": hooks }).to_string()
 }
 

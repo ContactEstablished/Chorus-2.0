@@ -54,6 +54,8 @@ export type {
   SessionCapabilities,
   ActionRequest,
   SessionAction,
+  PendingReply,
+  ActionResult,
   Delivered,
   SessionStatus,
   SessionSummary,

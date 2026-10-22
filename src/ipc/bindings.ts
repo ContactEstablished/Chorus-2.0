@@ -129,7 +129,8 @@ export const commands = {
 	 */
 	splashReplay: (sessions: number, reduceMotion: boolean) => typedError<null, string>(__TAURI_INVOKE("splash_replay", { sessions, reduceMotion })),
 	sessionActionCapabilities: (sessionId: number) => typedError<SessionCapabilities, string>(__TAURI_INVOKE("session_action_capabilities", { sessionId })),
-	sessionAction: (sessionId: number, request: ActionRequest) => typedError<Delivered, string>(__TAURI_INVOKE("session_action", { sessionId, request })),
+	sessionAction: (sessionId: number, request: ActionRequest) => typedError<ActionResult, string>(__TAURI_INVOKE("session_action", { sessionId, request })),
+	sessionPendingReplies: (sessionId: number) => typedError<PendingReply[], string>(__TAURI_INVOKE("session_pending_replies", { sessionId })),
 };
 
 /** Events */
@@ -151,13 +152,15 @@ export type ActionCapabilities = {
 	queue: ActionCapability,
 };
 
-export type ActionCapability = { channel: "pty" } | { channel: "unavailable"; reason: string };
+export type ActionCapability = { channel: "pty" } | { channel: "held-hook" } | { channel: "unavailable"; reason: string };
 
 export type ActionRequest = {
 	runId: number,
 	requestId: string,
 	action: SessionAction,
 };
+
+export type ActionResult = { kind: "prompt"; receipt: Delivered } | { kind: "reply"; receipt: ReplyReceipt };
 
 export type Activity = 
 /**  No event yet, or the agent has no event channel (Grok, a shell). */
@@ -221,9 +224,13 @@ export type AppInfo = {
 export type ApprovalDecision = "allow" | "deny";
 
 export type AskEntry = {
+	id: number,
 	kind: string,
 	subject: string,
 	answer: string | null,
+	details: ReplyDetails | null,
+	replyAttempted: boolean,
+	replyAction: SessionAction | null,
 };
 
 /**  In urgency order, most urgent first. */
@@ -609,6 +616,14 @@ export type OpenRouterProviderPrefs_Serialize = {
 	data_collection?: ProviderDataCollection | null,
 };
 
+export type PendingReply = {
+	askId: number,
+	runId: number,
+	details: ReplyDetails,
+	remainingSecs: number,
+	blockedReason: string | null,
+};
+
 /**  How much the agent may do without asking. */
 export type Permission = 
 /**  Asks before acting. */
@@ -774,6 +789,17 @@ export type Quantization = "int4" | "int8" | "fp4" | "fp6" | "fp8" | "fp16" | "b
 /**  Undeclared, unrecognised, or different across the rows that share a tag. */
 "unknown";
 
+export type Question = {
+	question: string,
+	options?: QuestionOption[],
+	multiSelect?: boolean,
+};
+
+export type QuestionOption = {
+	label: string,
+	description: string,
+};
+
 /**  The three tiers the ranker orders. Nitro is never ranked: OpenRouter chooses. */
 export type RankedTier = "budget" | "balanced" | "fast";
 
@@ -823,6 +849,13 @@ export type RegistrySource =
 /**  Not listed: derived from the model's endpoints by [`entry_for`]. */
 "derived";
 
+export type ReplyDetails = { kind: "approval"; tool: string; input: string } | { kind: "question"; questions: Question[] };
+
+export type ReplyReceipt = {
+	askId: number,
+	runId: number,
+};
+
 /**  The sessions Chorus relaunches at start, and how many are back (each started or failed). */
 export type RestoreProgress = {
 	total: number,
@@ -861,7 +894,7 @@ export type RoutingProfileId =
  */
 "helper";
 
-export type SessionAction = { kind: "prompt"; text: string; source: PromptSource } | { kind: "answer"; ask_id: number; text: string } | { kind: "approval"; ask_id: number; decision: ApprovalDecision; message: string | null };
+export type SessionAction = { kind: "prompt"; text: string; source: PromptSource } | { kind: "answer"; ask_id: number; answers: string[] } | { kind: "approval"; ask_id: number; decision: ApprovalDecision; message: string | null } | { kind: "release"; ask_id: number };
 
 export type SessionCapabilities = {
 	runId: number | null,

@@ -27,14 +27,16 @@ pub enum ApprovalDecision { Allow, Deny }
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum SessionAction {
     Prompt { text: String, source: PromptSource },
-    Answer { ask_id: u32, text: String },
+    Answer { ask_id: u32, answers: Vec<String> },
     Approval { ask_id: u32, decision: ApprovalDecision, message: Option<String> },
+    Release { ask_id: u32 },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(tag = "channel", rename_all = "kebab-case")]
 pub enum ActionCapability {
     Pty,
+    HeldHook,
     Unavailable { reason: String },
 }
 
