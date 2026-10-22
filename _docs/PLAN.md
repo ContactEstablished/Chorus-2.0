@@ -59,8 +59,57 @@ scraping the screen, and records **every prompt durably** in SQLite.
 
 ## 4. Phases
 
-Build in this order. Each phase ends with its exit criteria **verified at runtime** (a drive of the real
-app or a real CLI), not only by compiling and passing unit tests.
+### Current position (2026-10-22)
+
+There are **14 active phases**: P0–P14 with P9 removed. Keep these identifiers: scope and decisions
+already refer to them. P0–P3 are closed; P4 is built with its full-day acceptance check still open.
+Work brought forward from P5, P12 and P14 does not close those phases.
+
+| Phase | Definition | Status and remaining work |
+|---|---|---|
+| P0 | Foundations and spikes | Closed 2026-10-19; written spike results |
+| P1 | Session engine | Closed 2026-10-19; reboot check waived, not performed |
+| P2 | Agents and providers | Closed 2026-10-19; Grok checked only as far as launch |
+| P3 | Events and durable history | Closed 2026-10-19 for Claude Code, Codex and opencode; Grok has no event channel |
+| P4 | App shell and Overview | Built; a day of real work without Chorus 1 remains the acceptance gate |
+| P5 | Git and worktrees | Launch and Close already built in P4; retained-worktree reuse, boot reconcile, worktree panel and diff summaries remain |
+| P6 | Friendly view and Next steps | Not built; structured actions, timeline, queue and narrator; resolve the Codex plan channel (Q19) |
+| P7 | Attention and notifications | Planned; fleet strip prototype exists; production inbox, notifications, tray, strip, search and export remain |
+| P8 | Bots, Automations, Notes, Documents | Planned; the four screens are placeholders |
+| P9 | Voice | Removed; separate dictation app (D22); Chorus retains compatibility (D23) |
+| P10 | Council | Planned |
+| P11 | Measurement, made visible | Planned; tokens, costs, attention and Usage UI; forecasts remain gated on data completeness |
+| P12 | Routing inspector | Launch routing built in P4; Settings → Routing, observer status and history remain |
+| P13 | Phone relay | Planned; P13a delivers prompts and status; P13b answers questions and approvals after P6 |
+| P14 | More agents and ship | Partly built: Gemini, Aider, Ollama, CI and installer polish; adapter fixes and real turns, DeepSeek spike/adapter, signing, updates and eventual name migration remain |
+
+**Execution order agreed 2026-10-22:** preserve and reconcile the planning documents; address the
+existing Gemini/Aider issues (Q28–Q30) and complete P4 acceptance; finish P5 for M1; build P6 and P7
+for M2; finish the remaining capability and release phases for M3. Record runtime evidence before
+closing a phase. P4's full-day check must not be replaced by a short smoke test.
+
+Scope changes already agreed and built: worktree creation/Swarm/Close moved from P5 to P4 (D53),
+the two-pane New session design and tags are in P4 (D52, D56), and launch routing moved from P12 to
+P4 (D57). DeepSeek Harness was added to P14 (D59); it was absent from the original P14 hand-off.
+
+**Parallel work exception:** [HANDOFF-COMMON.md](HANDOFF-COMMON.md) records Matthew's permission to
+develop P7, P8, P11, P13 and P14 alongside the main sequence. These are plans, not completion claims.
+P14 is partly merged; the other four have no implementation on the current main line. Contracts
+from an unfinished phase remain dependencies, especially P8's prompt delivery and P6's ActionRouter.
+
+| Supporting plan | Role |
+|---|---|
+| [P7](HANDOFF-P7-attention.md) | Inbox, tray, fleet strip, search and export |
+| [P8](HANDOFF-P8-bots-notes.md) | Bots, schedules, notes, documents and shared prompt delivery |
+| [P11](HANDOFF-P11-measurement.md) | Measurement UI and explicit completeness |
+| [P13](HANDOFF-P13-telegram.md) | Initial relay; interactive answers depend on P6 |
+| [P14](HANDOFF-P14-agents-ship.md) · [review](HANDOFF-P14-REVIEW.md) | Original hand-off and actual result; this roadmap includes the later DeepSeek addition |
+| [opencode port](HANDOFF-OC2-opencode.md) · [merge notes](HANDOFF-P14-OC2-MERGE.md) | Historical, superseded/completed; retain for context, do not restart |
+
+### Phase definitions
+
+Build in the order above, with the recorded parallel exception. Each phase ends with its exit criteria
+**verified at runtime** (a drive of the real app or a real CLI), not only by compiling and passing unit tests.
 
 ### P0 — Foundations and spikes
 Scaffold the Tauri 2 + Vue 3 + TypeScript + Vite + Pinia app with a Cargo workspace (`src-tauri` +
@@ -131,8 +180,8 @@ prompt sent survives a forced kill of the app mid-turn.
 
 *Closed 2026-10-19 on Matthew's call: 20 of 20 turns recorded with start and end for Claude Code, Codex
 and opencode, and each one's prompt survived a forced kill mid-turn. Grok has no event channel yet
-(OPEN-QUESTIONS Q18), so it isn't covered. Bundling the Codex hook relay in the installer is still to do
-(D46).*
+(OPEN-QUESTIONS Q18), so it isn't covered. The Codex hook relay was subsequently bundled in the
+installer in P4 (`c064ebd`, D46, L38).*
 
 ### P4 — App shell and Overview
 The Harness shell, branded Chorus with the seven-bar mark (D24): rail (Overview, Sessions, Bots,
@@ -149,6 +198,11 @@ text inserted or pasted by another app, and never submit it on their own.
 
 **Exit:** a day of real work in 2.0 without opening Chorus 1.
 
+**Acceptance record:** still open. During that day verify launch (including Pair/Swarm), Raw terminal
+input and paste without auto-submit, Overview state changes, session switching/Wall, history, project
+navigation, Restart and Close. Record any failures and their retest; date the full-day result before
+marking P4 closed. Gemini/Aider launch acceptance alone does not prove their options apply (P14).
+
 ### P5 — Git and worktrees
 New session already makes worktrees, Swarm runs, and Close removes a clean worktree and keeps
 uncommitted work (D53, built in P4). Still to come: attaching a session to a worktree an earlier one
@@ -157,6 +211,11 @@ clean); diff summary in the session facts ("11 files · +612 −48").
 
 **Exit (M1):** the Swarm preset launches N agents in N worktrees, and removing a worktree behind 2.0's
 back is healed on the next boot.
+
+Also verify in the real app: a new session can reuse a retained worktree; dirty work survives Close;
+the panel shows branch, clean/dirty and ahead/behind (or why unavailable); and session facts report
+changed files and line additions/deletions. A missing worktree must not silently relaunch a session
+in a different folder or discard its history. A Git failure is unknown, not proof that a worktree is gone.
 
 ### P6 — Friendly view and Next steps
 Timeline from structured events: your messages, agent messages, the plan checklist (from the agent's own

@@ -92,7 +92,7 @@ From the Harness mockups, confirmed as the UI direction (D9), plus one setup aid
 | Boot reconcile | Boot | P5 |
 | Worktree panel | Settings / project view | P5 |
 | Diff summary on panes | Session facts "Changes" + card | P5 |
-| Keep or remove on close | Close flow | P5 |
+| Keep or remove on close | Close flow (D53, brought forward) | P4 |
 
 ### Keys and providers
 | Feature | 2.0 home | Phase |

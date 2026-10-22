@@ -7,18 +7,18 @@ did, and what to do next.
 Chorus 2.0 is a ground-up rebuild of Chorus on **Tauri 2 (Rust)** with a **Vue 3** web UI. Windows only
 for now. Bring your own keys: Chorus itself only talks to the providers you configure.
 
-**Status:** Phase 4 (app shell and Overview) is built and in its exit check, a day of real work in 2.0:
-the Chorus shell with Glacier and Dusk, projects, the Overview,
-Sessions and the Wall of live terminals, the session view, the command palette, and the 3D splash at
-start. Phase 3 (agent events and durable history)
-closed on 2026-10-19: hooks and server events turned into live session states, and every prompt, turn,
-final message, tool call and approval kept in SQLite, scrubbed. Phase 2 (agents and providers) closed on
-2026-10-19: Claude Code, Codex, opencode, Grok and shells with one effort scale, permission
-modes, models and conversation resume; providers (OpenRouter, gateways, Jev) with model catalogs, a
-spend-capped key per run, and a launch dialog with presets and saved profiles. Grok is checked only as
-far as launching until it is signed in. Phase 1 (session engine) closed on 2026-10-19, with its reboot
-check still to be run. Phase 0 closed on 2026-10-19; every spike has a written result in
-[`_docs/spikes/`](_docs/spikes/README.md).
+**Status (2026-10-22):** P0–P3 are closed. P4's shell, Overview, Sessions/Wall, launch UI, projects,
+history, command palette and splash are built; its full day of real-work acceptance remains open.
+**Next: finish Git/worktrees (P5) for the Daily driver milestone, then Friendly view and attention
+(P6–P7) for the Supervisor milestone.**
+
+There are **14 active phases**, numbered P0–P14 with P9 (voice) removed. Worktree launch and Close
+were brought into P4 from P5, launch routing from P12, and part of P14 is already merged (Gemini,
+Aider, Ollama, CI and installer polish). These phases still have remaining work. The
+[roadmap's status table](_docs/PLAN.md#current-position-2026-10-22) is the current source of truth;
+it links the preserved hand-off plans and distinguishes implementation from runtime acceptance.
+Recorded limits remain: P1's reboot check was waived; Grok has only launch verification and no event
+channel; Gemini and Aider still need completed real turns and the review fixes in Q28–Q30.
 
 ## Docs
 
