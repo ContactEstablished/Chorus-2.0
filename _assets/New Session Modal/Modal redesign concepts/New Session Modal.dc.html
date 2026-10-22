@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="./image-slot.js"></script>
+<style>
+body{margin:0;background:#070b10;font-family:Manrope,system-ui,sans-serif;color:#e6edf4;-webkit-font-smoothing:antialiased}
+a{color:#22d3ee}a:hover{color:#67e8f9}
+input,textarea,select,button{font:inherit;color:inherit}
+input::placeholder,textarea::placeholder{color:#6c7a8c}
+</style>
+</helmet>
+<section style="display:flex;flex-wrap:wrap;gap:48px;align-items:flex-start;padding:48px">
+
+<!-- ================= 1a ================= -->
+<div id="1a" style="display:flex;flex-direction:column;gap:14px">
+  <div style="display:flex;align-items:center;gap:10px"><a href="#1a" style="font:600 12px/1 'JetBrains Mono',monospace;background:#22d3ee;color:#04131a;padding:5px 8px;border-radius:6px;text-decoration:none">1a</a><span style="font-size:13px;color:#8a97a8">Aligned labels, picker tiles, slider for effort</span></div>
+  <div style="width:720px;background:#101a25;border:1px solid #223040;border-radius:16px;box-shadow:0 30px 80px rgba(0,0,0,.6)">
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;padding:22px 28px 18px;border-bottom:1px solid #1b2733">
+      <div><div style="font-size:19px;font-weight:700">New session</div><div style="font-size:13px;color:#8a97a8;margin-top:3px">Launch an agent in a folder</div></div>
+      <button style="background:none;border:0;color:#8a97a8;font-size:20px;line-height:1;cursor:pointer;padding:4px" style-hover="color:#e6edf4">×</button>
+    </div>
+    <div style="display:grid;grid-template-columns:132px minmax(0,1fr);gap:0 24px;padding:8px 28px 4px">
+      <!-- Agent -->
+      <div style="padding:20px 0;font-size:13px;font-weight:600;color:#c9d4e0">Agent</div>
+      <div style="padding:16px 0;border-bottom:1px solid #1b2733;display:flex;flex-direction:column;gap:10px">
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <div style="display:flex;align-items:center;gap:8px;padding:8px 12px 8px 8px;border-radius:9px;background:#0e2733;border:1px solid #1fb6d0;font-size:13px;font-weight:600"><span style="font:600 10px/1 'JetBrains Mono',monospace;background:#22d3ee;color:#04131a;padding:5px 5px;border-radius:5px">CC</span>Claude Code</div>
+          <div style="display:flex;align-items:center;gap:8px;padding:8px 12px 8px 8px;border-radius:9px;background:#0c141d;border:1px solid #223040;font-size:13px;color:#aab6c4" style-hover="border-color:#33465a"><span style="font:600 10px/1 'JetBrains Mono',monospace;background:#1b2836;color:#aab6c4;padding:5px 5px;border-radius:5px">CX</span>Codex</div>
+          <div style="display:flex;align-items:center;gap:8px;padding:8px 12px 8px 8px;border-radius:9px;background:#0c141d;border:1px solid #223040;font-size:13px;color:#aab6c4" style-hover="border-color:#33465a"><span style="font:600 10px/1 'JetBrains Mono',monospace;background:#1b2836;color:#aab6c4;padding:5px 5px;border-radius:5px">OR</span>opencode</div>
+          <div style="display:flex;align-items:center;gap:8px;padding:8px 12px 8px 8px;border-radius:9px;background:#0c141d;border:1px solid #223040;font-size:13px;color:#aab6c4" style-hover="border-color:#33465a"><span style="font:600 10px/1 'JetBrains Mono',monospace;background:#1b2836;color:#aab6c4;padding:5px 5px;border-radius:5px">GK</span>Grok</div>
+          <div style="display:flex;align-items:center;gap:8px;padding:8px 12px 8px 8px;border-radius:9px;background:#0c141d;border:1px solid #223040;font-size:13px;color:#aab6c4" style-hover="border-color:#33465a"><span style="font:600 10px/1 'JetBrains Mono',monospace;background:#1b2836;color:#aab6c4;padding:5px 5px;border-radius:5px">SH</span>Shell</div>
+        </div>
+        <sc-if value="{{ showWarning }}" hint-placeholder-val="{{ true }}">
+        <div style="display:flex;gap:8px;align-items:center;font-size:12px;color:#e5c04a"><span style="width:6px;height:6px;border-radius:50%;background:#e5c04a;flex:none"></span>Version 2.1.304 is newer than 2.1.300 — some options may not apply</div>
+        </sc-if>
+      </div>
+      <!-- Mode -->
+      <div style="padding:20px 0;font-size:13px;font-weight:600;color:#c9d4e0">Mode</div>
+      <div style="padding:16px 0;border-bottom:1px solid #1b2733;display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <div style="padding:11px 14px;border-radius:10px;background:#0e2733;border:1px solid #1fb6d0;display:flex;gap:10px;align-items:flex-start"><span style="margin-top:4px;width:14px;height:14px;border-radius:50%;border:4px solid #22d3ee;box-sizing:border-box;flex:none"></span><div><div style="font-size:13px;font-weight:600">Solo</div><div style="font-size:12px;color:#8fa0b3;margin-top:2px">One agent in one terminal</div></div></div>
+        <div style="padding:11px 14px;border-radius:10px;background:#0c141d;border:1px solid #223040;display:flex;gap:10px;align-items:flex-start" style-hover="border-color:#33465a"><span style="margin-top:4px;width:14px;height:14px;border-radius:50%;border:1.5px solid #3a4b5e;box-sizing:border-box;flex:none"></span><div><div style="font-size:13px;font-weight:600;color:#c9d4e0">Pair</div><div style="font-size:12px;color:#8fa0b3;margin-top:2px">Two agents, shared context</div></div></div>
+        <div style="padding:11px 14px;border-radius:10px;background:#0c141d;border:1px solid #223040;display:flex;gap:10px;align-items:flex-start" style-hover="border-color:#33465a"><span style="margin-top:4px;width:14px;height:14px;border-radius:50%;border:1.5px solid #3a4b5e;box-sizing:border-box;flex:none"></span><div><div style="font-size:13px;font-weight:600;color:#c9d4e0">Workbench</div><div style="font-size:12px;color:#8fa0b3;margin-top:2px">Several agents, one folder</div></div></div>
+        <div style="padding:11px 14px;border-radius:10px;background:#0c141d;border:1px solid #223040;display:flex;gap:10px;align-items:flex-start" style-hover="border-color:#33465a"><span style="margin-top:4px;width:14px;height:14px;border-radius:50%;border:1.5px solid #3a4b5e;box-sizing:border-box;flex:none"></span><div><div style="font-size:13px;font-weight:600;color:#c9d4e0">Swarm</div><div style="font-size:12px;color:#8fa0b3;margin-top:2px">Many agents working in parallel</div></div></div>
+      </div>
+      <!-- Folder -->
+      <div style="padding:20px 0;font-size:13px;font-weight:600;color:#c9d4e0">Folder</div>
+      <div style="padding:16px 0;border-bottom:1px solid #1b2733;display:flex;flex-direction:column;gap:10px">
+        <div style="display:flex;gap:8px">
+          <div style="flex:1;display:flex;align-items:center;gap:10px;height:38px;padding:0 12px;border-radius:9px;background:#0c141d;border:1px solid #223040;min-width:0"><span style="font:12px/1 'JetBrains Mono',monospace;color:#c9d4e0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl;flex:1;min-width:0;text-align:left">C:\Users\matth\AppData\Local\Temp\claude\C--Projects-ContactEstablished</span></div>
+          <button style="height:38px;padding:0 14px;border-radius:9px;background:#15202c;border:1px solid #2a3949;font-size:13px;font-weight:600;cursor:pointer" style-hover="background:#1b2836">Browse…</button>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
+          <div style="font-size:12px;color:#8a97a8;display:flex;align-items:center;gap:6px"><span style="font:11px/1 'JetBrains Mono',monospace;background:#15202c;border:1px solid #223040;padding:3px 6px;border-radius:5px;color:#c9d4e0">main</span>ledger</div>
+          <div style="display:inline-flex;background:#0c141d;border:1px solid #223040;border-radius:8px;padding:3px;font-size:12px;font-weight:600">
+            <div style="padding:5px 12px;border-radius:6px;background:#1b2f3b;color:#e6edf4">This folder</div>
+            <div style="padding:5px 12px;border-radius:6px;color:#8fa0b3;cursor:pointer" style-hover="color:#e6edf4">New worktree</div>
+          </div>
+        </div>
+      </div>
+      <!-- Details -->
+      <div style="padding:20px 0;font-size:13px;font-weight:600;color:#c9d4e0">Details</div>
+      <div style="padding:16px 0;border-bottom:1px solid #1b2733;display:flex;flex-direction:column;gap:10px">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <div style="display:flex;align-items:center;height:38px;padding:0 4px 0 12px;border-radius:9px;background:#0c141d;border:1px solid #223040"><span style="font-size:12px;color:#6c7a8c;width:46px">Name</span><input value="Stan" style="flex:1;background:none;border:0;outline:0;font-size:13px;min-width:0"><button title="Random name" style="width:30px;height:30px;border:0;background:none;color:#8a97a8;cursor:pointer;border-radius:6px" style-hover="background:#15202c;color:#e6edf4">⇄</button></div>
+          <div style="display:flex;align-items:center;height:38px;padding:0 12px;border-radius:9px;background:#0c141d;border:1px solid #223040;cursor:pointer" style-hover="border-color:#33465a"><span style="font-size:12px;color:#6c7a8c;width:54px">Project</span><span style="flex:1;font-size:13px;color:#8fa0b3">By folder</span><span style="color:#6c7a8c;font-size:12px">⌄</span></div>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;min-height:38px;padding:4px 4px 4px 12px;border-radius:9px;background:#0c141d;border:1px solid #223040"><span style="font-size:12px;color:#6c7a8c;width:46px">Tags</span><span style="font-size:12px;padding:4px 8px;border-radius:6px;background:#15202c;border:1px solid #2a3949">refactor</span><input placeholder="Add tag…" style="flex:1;background:none;border:0;outline:0;font-size:13px;min-width:80px"></div>
+        <textarea placeholder="Note — what is this session for?" style="height:64px;padding:10px 12px;border-radius:9px;background:#0c141d;border:1px solid #223040;outline:0;font-size:13px;resize:none"></textarea>
+      </div>
+      <!-- Effort -->
+      <div style="padding:20px 0;font-size:13px;font-weight:600;color:#c9d4e0">Effort</div>
+      <div style="padding:20px 0 14px;border-bottom:1px solid #1b2733">
+        <div style="position:relative;height:4px;border-radius:2px;background:#223040;margin:0 6px">
+          <div style="position:absolute;left:0;top:0;bottom:0;width:66.6%;background:#22d3ee;border-radius:2px"></div>
+          <span style="position:absolute;left:0;top:50%;width:8px;height:8px;transform:translate(-50%,-50%);border-radius:50%;background:#22d3ee"></span>
+          <span style="position:absolute;left:33.3%;top:50%;width:8px;height:8px;transform:translate(-50%,-50%);border-radius:50%;background:#22d3ee"></span>
+          <span style="position:absolute;left:66.6%;top:50%;width:16px;height:16px;transform:translate(-50%,-50%);border-radius:50%;background:#e6edf4;box-shadow:0 0 0 3px #101a25,0 0 0 5px #22d3ee"></span>
+          <span style="position:absolute;left:100%;top:50%;width:8px;height:8px;transform:translate(-50%,-50%);border-radius:50%;background:#3a4b5e"></span>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);margin-top:12px;font-size:12px;color:#8fa0b3;text-align:center">
+          <div style="text-align:left">Fast</div><div>Balanced</div><div style="color:#e6edf4;font-weight:600">Deep</div><div style="text-align:right">Max</div>
+        </div>
+        <div style="margin-top:10px;font:11px/1 'JetBrains Mono',monospace;color:#6c7a8c">--effort xhigh</div>
+      </div>
+      <!-- Permissions -->
+      <div style="padding:20px 0;font-size:13px;font-weight:600;color:#c9d4e0">Permissions</div>
+      <div style="padding:16px 0">
+        <div style="display:flex;align-items:center;height:40px;padding:0 12px;border-radius:9px;background:#0c141d;border:1px solid #223040;cursor:pointer" style-hover="border-color:#33465a">
+          <div style="flex:1"><span style="font-size:13px;font-weight:600">Auto</span><span style="font-size:12px;color:#8fa0b3;margin-left:10px">Agent decides, asks on risky actions</span></div>
+          <span style="font:11px/1 'JetBrains Mono',monospace;color:#6c7a8c;margin-right:10px">--permission-mode auto</span><span style="color:#6c7a8c;font-size:12px">⌄</span>
+        </div>
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 28px 20px;border-top:1px solid #1b2733;background:#0d161f;border-radius:0 0 16px 16px">
+      <div style="font-size:12px;color:#8a97a8;display:flex;align-items:center;gap:6px;cursor:pointer" style-hover="color:#e6edf4"><span style="width:6px;height:6px;border-radius:50%;background:#34d399"></span>Runs on your Claude subscription<span style="color:#6c7a8c">›</span></div>
+      <div style="display:flex;gap:8px"><button style="height:36px;padding:0 16px;border-radius:9px;background:none;border:1px solid #2a3949;font-size:13px;font-weight:600;cursor:pointer" style-hover="background:#15202c">Cancel</button><button style="height:36px;padding:0 18px;border-radius:9px;background:#22d3ee;border:0;color:#04131a;font-size:13px;font-weight:700;cursor:pointer" style-hover="background:#67e8f9">Start session</button></div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= 1b ================= -->
+<div id="1b" style="display:flex;flex-direction:column;gap:14px">
+  <div style="display:flex;align-items:center;gap:10px"><a href="#1b" style="font:600 12px/1 'JetBrains Mono',monospace;background:#22d3ee;color:#04131a;padding:5px 8px;border-radius:6px;text-decoration:none">1b</a><span style="font-size:13px;color:#8a97a8">Essentials first, advanced options collapsible</span></div>
+  <div style="width:600px;background:#101a25;border:1px solid #223040;border-radius:16px;box-shadow:0 30px 80px rgba(0,0,0,.6)">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:22px 28px 6px">
+      <div style="font-size:19px;font-weight:700">New session</div>
+      <button style="background:none;border:0;color:#8a97a8;font-size:20px;line-height:1;cursor:pointer;padding:4px" style-hover="color:#e6edf4">×</button>
+    </div>
+    <div style="padding:14px 28px 8px;display:flex;flex-direction:column;gap:18px">
+      <!-- Agent select -->
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <div style="font-size:12px;font-weight:600;color:#8fa0b3;letter-spacing:.02em">AGENT</div>
+        <div style="display:flex;align-items:center;gap:10px;height:46px;padding:0 12px 0 10px;border-radius:10px;background:#0c141d;border:1px solid #223040;cursor:pointer" style-hover="border-color:#33465a">
+          <span style="font:600 11px/1 'JetBrains Mono',monospace;background:#22d3ee;color:#04131a;padding:7px 6px;border-radius:6px">CC</span>
+          <div style="flex:1"><div style="font-size:14px;font-weight:600">Claude Code</div></div>
+          <sc-if value="{{ showWarning }}" hint-placeholder-val="{{ true }}"><span style="font-size:11px;font-weight:600;color:#e5c04a;background:rgba(229,192,74,.1);border:1px solid rgba(229,192,74,.3);padding:3px 7px;border-radius:5px">v2.1.304 · untested</span></sc-if>
+          <span style="color:#6c7a8c;font-size:12px">⌄</span>
+        </div>
+      </div>
+      <!-- Folder -->
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <div style="display:flex;justify-content:space-between;font-size:12px;font-weight:600;color:#8fa0b3;letter-spacing:.02em">FOLDER<span style="font-weight:500;letter-spacing:0;color:#6c7a8c;display:flex;gap:5px;align-items:center;text-transform:none"><span style="font-family:'JetBrains Mono',monospace;color:#8fa0b3">ledger</span>on<span style="font-family:'JetBrains Mono',monospace;color:#c9d4e0">main</span></span></div>
+        <div style="display:flex;align-items:center;gap:8px;height:46px;padding:0 6px 0 12px;border-radius:10px;background:#0c141d;border:1px solid #223040">
+          <span style="font:12px/1.3 'JetBrains Mono',monospace;color:#c9d4e0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl;min-width:0;text-align:left">C:\Users\matth\AppData\Local\Temp\claude\C--Projects-ContactEstablished</span>
+          <button style="height:34px;padding:0 12px;border-radius:7px;background:#15202c;border:1px solid #2a3949;font-size:12px;font-weight:600;cursor:pointer" style-hover="background:#1b2836">Browse…</button>
+        </div>
+        <label style="display:flex;align-items:center;gap:10px;margin-top:4px;font-size:13px;color:#c9d4e0;cursor:pointer"><span style="width:30px;height:18px;border-radius:9px;background:#223040;position:relative;flex:none"><span style="position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:#8fa0b3"></span></span>Work in a new worktree instead of this folder</label>
+      </div>
+      <!-- Name / Project -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div style="display:flex;flex-direction:column;gap:6px"><div style="font-size:12px;font-weight:600;color:#8fa0b3;letter-spacing:.02em">NAME</div><div style="display:flex;align-items:center;height:46px;padding:0 6px 0 12px;border-radius:10px;background:#0c141d;border:1px solid #223040"><input value="Stan" style="flex:1;background:none;border:0;outline:0;font-size:14px;min-width:0"><button title="Random name" style="width:34px;height:34px;border:0;background:none;color:#8a97a8;cursor:pointer;border-radius:7px" style-hover="background:#15202c;color:#e6edf4">⇄</button></div></div>
+        <div style="display:flex;flex-direction:column;gap:6px"><div style="font-size:12px;font-weight:600;color:#8fa0b3;letter-spacing:.02em">PROJECT</div><div style="display:flex;align-items:center;height:46px;padding:0 12px;border-radius:10px;background:#0c141d;border:1px solid #223040;cursor:pointer" style-hover="border-color:#33465a"><span style="flex:1;font-size:14px;color:#8fa0b3">By folder</span><span style="color:#6c7a8c;font-size:12px">⌄</span></div></div>
+      </div>
+      <!-- Collapsible: Run options (open) -->
+      <div style="border:1px solid #1b2733;border-radius:12px;overflow:hidden">
+        <div style="display:flex;align-items:center;gap:10px;padding:12px 14px;background:#0d161f;cursor:pointer">
+          <span style="color:#8fa0b3;font-size:12px;display:inline-block;transform:rotate(90deg)">›</span>
+          <span style="font-size:13px;font-weight:600;flex:1">Run options</span>
+          <span style="font-size:12px;color:#8fa0b3">Solo · Deep · Auto</span>
+        </div>
+        <div style="padding:16px 14px;display:flex;flex-direction:column;gap:16px;border-top:1px solid #1b2733">
+          <div style="display:grid;grid-template-columns:96px 1fr;gap:12px;align-items:start">
+            <div style="font-size:13px;color:#8fa0b3;padding-top:8px">Mode</div>
+            <div style="display:flex;flex-direction:column;gap:4px">
+              <div style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;background:#0e2733"><span style="width:14px;height:14px;border-radius:50%;border:4px solid #22d3ee;box-sizing:border-box;flex:none"></span><span style="font-size:13px;font-weight:600;width:88px">Solo</span><span style="font-size:12px;color:#8fa0b3">One agent in one terminal</span></div>
+              <div style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;cursor:pointer" style-hover="background:#0c141d"><span style="width:14px;height:14px;border-radius:50%;border:1.5px solid #3a4b5e;box-sizing:border-box;flex:none"></span><span style="font-size:13px;font-weight:600;color:#c9d4e0;width:88px">Pair</span><span style="font-size:12px;color:#8fa0b3">Two agents, shared context</span></div>
+              <div style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;cursor:pointer" style-hover="background:#0c141d"><span style="width:14px;height:14px;border-radius:50%;border:1.5px solid #3a4b5e;box-sizing:border-box;flex:none"></span><span style="font-size:13px;font-weight:600;color:#c9d4e0;width:88px">Workbench</span><span style="font-size:12px;color:#8fa0b3">Several agents, one folder</span></div>
+              <div style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;cursor:pointer" style-hover="background:#0c141d"><span style="width:14px;height:14px;border-radius:50%;border:1.5px solid #3a4b5e;box-sizing:border-box;flex:none"></span><span style="font-size:13px;font-weight:600;color:#c9d4e0;width:88px">Swarm</span><span style="font-size:12px;color:#8fa0b3">Many agents in parallel</span></div>
+            </div>
+          </div>
+          <div style="display:grid;grid-template-columns:96px 1fr;gap:12px;align-items:center">
+            <div style="font-size:13px;color:#8fa0b3">Effort</div>
+            <div style="display:flex;align-items:center;gap:10px">
+              <div style="display:inline-flex;background:#0c141d;border:1px solid #223040;border-radius:8px;padding:3px;font-size:12px;font-weight:600">
+                <div style="padding:6px 12px;border-radius:6px;color:#8fa0b3;cursor:pointer" style-hover="color:#e6edf4">Fast</div>
+                <div style="padding:6px 12px;border-radius:6px;color:#8fa0b3;cursor:pointer" style-hover="color:#e6edf4">Balanced</div>
+                <div style="padding:6px 12px;border-radius:6px;background:#1b2f3b;color:#e6edf4">Deep</div>
+                <div style="padding:6px 12px;border-radius:6px;color:#8fa0b3;cursor:pointer" style-hover="color:#e6edf4">Max</div>
+              </div>
+              <span style="font:11px/1 'JetBrains Mono',monospace;color:#6c7a8c">--effort xhigh</span>
+            </div>
+          </div>
+          <div style="display:grid;grid-template-columns:96px 1fr;gap:12px;align-items:center">
+            <div style="font-size:13px;color:#8fa0b3">Permissions</div>
+            <div style="display:flex;align-items:center;gap:10px">
+              <div style="display:inline-flex;background:#0c141d;border:1px solid #223040;border-radius:8px;padding:3px;font-size:12px;font-weight:600">
+                <div style="padding:6px 12px;border-radius:6px;color:#8fa0b3;cursor:pointer" style-hover="color:#e6edf4">Manual</div>
+                <div style="padding:6px 12px;border-radius:6px;background:#1b2f3b;color:#e6edf4">Auto</div>
+                <div style="padding:6px 12px;border-radius:6px;color:#8fa0b3;cursor:pointer" style-hover="color:#e6edf4">Accept edits</div>
+                <div style="padding:6px 12px;border-radius:6px;color:#8fa0b3;cursor:pointer" style-hover="color:#e6edf4">Plan</div>
+              </div>
+              <span style="font:11px/1 'JetBrains Mono',monospace;color:#6c7a8c">--permission-mode auto</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <!-- Collapsible: Details (closed) -->
+      <div style="border:1px solid #1b2733;border-radius:12px;display:flex;align-items:center;gap:10px;padding:12px 14px;background:#0d161f;cursor:pointer">
+        <span style="color:#8fa0b3;font-size:12px">›</span>
+        <span style="font-size:13px;font-weight:600;flex:1">Tags &amp; note</span>
+        <span style="font-size:12px;color:#6c7a8c">Optional</span>
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:18px 28px 22px">
+      <div style="font-size:12px;color:#8a97a8;display:flex;align-items:center;gap:6px"><span style="width:6px;height:6px;border-radius:50%;background:#34d399"></span>Claude subscription</div>
+      <div style="display:flex;gap:8px"><button style="height:38px;padding:0 16px;border-radius:9px;background:none;border:1px solid #2a3949;font-size:13px;font-weight:600;cursor:pointer" style-hover="background:#15202c">Cancel</button><button style="height:38px;padding:0 18px;border-radius:9px;background:#22d3ee;border:0;color:#04131a;font-size:13px;font-weight:700;cursor:pointer" style-hover="background:#67e8f9">Start</button></div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= 1c ================= -->
+<div id="1c" style="display:flex;flex-direction:column;gap:14px">
+  <div style="display:flex;align-items:center;gap:10px"><a href="#1c" style="font:600 12px/1 'JetBrains Mono',monospace;background:#22d3ee;color:#04131a;padding:5px 8px;border-radius:6px;text-decoration:none">1c</a><span style="font-size:13px;color:#8a97a8">Two-pane: form + live summary / command preview</span></div>
+  <div style="width:880px;display:grid;grid-template-columns:minmax(0,1fr) 280px;background:#101a25;border:1px solid #223040;border-radius:16px;box-shadow:0 30px 80px rgba(0,0,0,.6);overflow:hidden">
+    <div style="padding:24px 28px 22px;display:flex;flex-direction:column;gap:20px;border-right:1px solid #1b2733;min-width:0">
+      <div style="font-size:19px;font-weight:700">New session</div>
+      <!-- Agent list -->
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <div style="font-size:13px;font-weight:600;color:#c9d4e0">Agent</div>
+        <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:6px">
+          <div style="display:flex;flex-direction:column;align-items:center;gap:7px;padding:12px 6px;border-radius:10px;background:#0e2733;border:1px solid #1fb6d0"><image-slot id="logo-claude" style="width:72px;height:72px;font-size:9px" shape="rounded" radius="10" fit="contain" placeholder="Logo"></image-slot><span style="font-size:12px;font-weight:600">Claude Code</span></div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:7px;padding:12px 6px;border-radius:10px;background:#0c141d;border:1px solid #223040;cursor:pointer" style-hover="border-color:#33465a"><image-slot id="logo-codex" style="width:72px;height:72px;font-size:9px" shape="rounded" radius="10" fit="contain" placeholder="Logo"></image-slot><span style="font-size:12px;color:#aab6c4">Codex</span></div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:7px;padding:12px 6px;border-radius:10px;background:#0c141d;border:1px solid #223040;cursor:pointer" style-hover="border-color:#33465a"><image-slot id="logo-opencode" style="width:72px;height:72px;font-size:9px" shape="rounded" radius="10" fit="contain" placeholder="Logo"></image-slot><span style="font-size:12px;color:#aab6c4">opencode</span></div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:7px;padding:12px 6px;border-radius:10px;background:#0c141d;border:1px solid #223040;cursor:pointer" style-hover="border-color:#33465a"><image-slot id="logo-grok" style="width:72px;height:72px;font-size:9px" shape="rounded" radius="10" fit="contain" placeholder="Logo"></image-slot><span style="font-size:12px;color:#aab6c4">Grok</span></div>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:7px;padding:12px 6px;border-radius:10px;background:#0c141d;border:1px solid #223040;cursor:pointer" style-hover="border-color:#33465a"><image-slot id="logo-shell" style="width:72px;height:72px;font-size:9px" shape="rounded" radius="10" fit="contain" placeholder="Logo"></image-slot><span style="font-size:12px;color:#aab6c4">Shell</span></div>
+        </div>
+      </div>
+      <!-- Folder + worktree -->
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <div style="font-size:13px;font-weight:600;color:#c9d4e0">Folder</div>
+        <div style="display:flex;align-items:center;gap:8px;height:42px;padding:0 6px 0 12px;border-radius:10px;background:#0c141d;border:1px solid #223040">
+          <span style="font:12px/1.3 'JetBrains Mono',monospace;color:#c9d4e0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl;min-width:0;text-align:left">C:\Users\matth\AppData\Local\Temp\claude\C--Projects-ContactEstablished</span>
+          <button style="height:32px;padding:0 12px;border-radius:7px;background:#15202c;border:1px solid #2a3949;font-size:12px;font-weight:600;cursor:pointer" style-hover="background:#1b2836">Browse…</button>
+        </div>
+        <div style="display:flex;gap:6px;margin-top:2px">
+          <div style="display:flex;align-items:center;gap:8px;padding:8px 12px;border-radius:8px;background:#0e2733;border:1px solid #1fb6d0;font-size:12px;font-weight:600"><span style="width:12px;height:12px;border-radius:50%;border:3.5px solid #22d3ee;box-sizing:border-box"></span>This folder</div>
+          <div style="display:flex;align-items:center;gap:8px;padding:8px 12px;border-radius:8px;background:#0c141d;border:1px solid #223040;font-size:12px;color:#aab6c4;cursor:pointer" style-hover="border-color:#33465a"><span style="width:12px;height:12px;border-radius:50%;border:1.5px solid #3a4b5e;box-sizing:border-box"></span>New worktree</div>
+        </div>
+      </div>
+      <!-- Name / project / tags -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div style="display:flex;flex-direction:column;gap:6px"><div style="font-size:13px;font-weight:600;color:#c9d4e0">Name</div><div style="display:flex;align-items:center;height:42px;padding:0 6px 0 12px;border-radius:10px;background:#0c141d;border:1px solid #223040"><input value="Stan" style="flex:1;background:none;border:0;outline:0;font-size:13px;min-width:0"><button title="Random name" style="width:30px;height:30px;border:0;background:none;color:#8a97a8;cursor:pointer;border-radius:6px" style-hover="background:#15202c;color:#e6edf4">⇄</button></div></div>
+        <div style="display:flex;flex-direction:column;gap:6px"><div style="font-size:13px;font-weight:600;color:#c9d4e0">Project</div><div style="display:flex;align-items:center;height:42px;padding:0 12px;border-radius:10px;background:#0c141d;border:1px solid #223040;cursor:pointer" style-hover="border-color:#33465a"><span style="flex:1;font-size:13px;color:#8fa0b3">By folder</span><span style="color:#6c7a8c;font-size:12px">⌄</span></div></div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <div style="font-size:13px;font-weight:600;color:#c9d4e0">Tags <span style="font-weight:500;color:#6c7a8c">&amp; note</span></div>
+        <div style="border-radius:10px;background:#0c141d;border:1px solid #223040;overflow:hidden">
+          <div style="display:flex;align-items:center;gap:6px;min-height:40px;padding:4px 4px 4px 12px;border-bottom:1px solid #1b2733"><span style="font-size:12px;padding:4px 8px;border-radius:6px;background:#15202c;border:1px solid #2a3949">refactor</span><input placeholder="Add tag…" style="flex:1;background:none;border:0;outline:0;font-size:13px;min-width:80px"></div>
+          <textarea placeholder="What is this session for?" style="display:block;width:100%;box-sizing:border-box;height:56px;padding:10px 12px;background:none;border:0;outline:0;font-size:13px;resize:none"></textarea>
+        </div>
+      </div>
+      <!-- Effort + Permissions -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div style="display:flex;flex-direction:column;gap:6px"><div style="font-size:13px;font-weight:600;color:#c9d4e0">Effort</div>
+          <div style="display:flex;flex-direction:column;gap:3px">
+            <div style="display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:8px;cursor:pointer" style-hover="background:#0c141d"><span style="width:14px;height:14px;border-radius:50%;border:1.5px solid #3a4b5e;box-sizing:border-box"></span><span style="font-size:13px;color:#c9d4e0;flex:1">Fast</span></div>
+            <div style="display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:8px;cursor:pointer" style-hover="background:#0c141d"><span style="width:14px;height:14px;border-radius:50%;border:1.5px solid #3a4b5e;box-sizing:border-box"></span><span style="font-size:13px;color:#c9d4e0;flex:1">Balanced</span></div>
+            <div style="display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:8px;background:#0e2733"><span style="width:14px;height:14px;border-radius:50%;border:4px solid #22d3ee;box-sizing:border-box"></span><span style="font-size:13px;font-weight:600;flex:1">Deep</span><span style="font:11px/1 'JetBrains Mono',monospace;color:#6c7a8c">xhigh</span></div>
+            <div style="display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:8px;cursor:pointer" style-hover="background:#0c141d"><span style="width:14px;height:14px;border-radius:50%;border:1.5px solid #3a4b5e;box-sizing:border-box"></span><span style="font-size:13px;color:#c9d4e0;flex:1">Max</span></div>
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px"><div style="font-size:13px;font-weight:600;color:#c9d4e0">Permissions</div>
+          <div style="display:flex;flex-direction:column;gap:3px">
+            <div style="display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:8px;cursor:pointer" style-hover="background:#0c141d"><span style="width:14px;height:14px;border-radius:50%;border:1.5px solid #3a4b5e;box-sizing:border-box"></span><span style="font-size:13px;color:#c9d4e0;flex:1">Manual</span></div>
+            <div style="display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:8px;background:#0e2733"><span style="width:14px;height:14px;border-radius:50%;border:4px solid #22d3ee;box-sizing:border-box"></span><span style="font-size:13px;font-weight:600;flex:1">Auto</span><span style="font:11px/1 'JetBrains Mono',monospace;color:#6c7a8c">auto</span></div>
+            <div style="display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:8px;cursor:pointer" style-hover="background:#0c141d"><span style="width:14px;height:14px;border-radius:50%;border:1.5px solid #3a4b5e;box-sizing:border-box"></span><span style="font-size:13px;color:#c9d4e0;flex:1">Accept edits</span></div>
+            <div style="display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:8px;cursor:pointer" style-hover="background:#0c141d"><span style="width:14px;height:14px;border-radius:50%;border:1.5px solid #3a4b5e;box-sizing:border-box"></span><span style="font-size:13px;color:#c9d4e0;flex:1">Plan</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- Summary pane -->
+    <div style="background:#0b131c;padding:24px 22px 22px;display:flex;flex-direction:column;gap:18px">
+      <div style="display:flex;align-items:center;justify-content:space-between"><div style="font-size:12px;font-weight:600;color:#8fa0b3;letter-spacing:.04em">SUMMARY</div><button style="background:none;border:0;color:#8a97a8;font-size:20px;line-height:1;cursor:pointer;padding:0" style-hover="color:#e6edf4">×</button></div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <div style="font-size:12px;color:#8fa0b3">Mode</div>
+        <div style="display:inline-flex;background:#0c141d;border:1px solid #223040;border-radius:8px;padding:3px;font-size:12px;font-weight:600;align-self:flex-start">
+          <div style="padding:5px 10px;border-radius:6px;background:#1b2f3b">Solo</div>
+          <div style="padding:5px 10px;border-radius:6px;color:#8fa0b3;cursor:pointer" style-hover="color:#e6edf4">Pair</div>
+          <div style="padding:5px 10px;border-radius:6px;color:#8fa0b3;cursor:pointer" style-hover="color:#e6edf4">Bench</div>
+          <div style="padding:5px 10px;border-radius:6px;color:#8fa0b3;cursor:pointer" style-hover="color:#e6edf4">Swarm</div>
+        </div>
+        <div style="font-size:12px;color:#6c7a8c">One agent in one terminal</div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:10px;font-size:13px">
+        <div style="display:flex;justify-content:space-between;gap:10px"><span style="color:#8fa0b3">Agent</span><span style="font-weight:600">Claude Code</span></div>
+        <div style="display:flex;justify-content:space-between;gap:10px"><span style="color:#8fa0b3">Version</span><sc-if value="{{ showWarning }}" hint-placeholder-val="{{ true }}"><span style="font-weight:600;color:#e5c04a">2.1.304 · untested</span></sc-if></div>
+        <div style="display:flex;justify-content:space-between;gap:10px"><span style="color:#8fa0b3">Branch</span><span style="font:12px/1.4 'JetBrains Mono',monospace">ledger / main</span></div>
+        <div style="display:flex;justify-content:space-between;gap:10px"><span style="color:#8fa0b3">Name</span><span style="font-weight:600">Stan</span></div>
+        <div style="display:flex;justify-content:space-between;gap:10px"><span style="color:#8fa0b3">Project</span><span style="color:#6c7a8c">By folder</span></div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <div style="font-size:12px;color:#8fa0b3">Command</div>
+        <div style="font:12px/1.6 'JetBrains Mono',monospace;color:#c9d4e0;background:#0c141d;border:1px solid #223040;border-radius:8px;padding:10px 12px;word-break:break-all"><span style="color:#22d3ee">claude</span> --effort xhigh<br>--permission-mode auto</div>
+      </div>
+      <div style="flex:1"></div>
+      <div style="font-size:12px;color:#8a97a8;display:flex;align-items:center;gap:6px"><span style="width:6px;height:6px;border-radius:50%;background:#34d399"></span>Runs on your Claude subscription</div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <button style="height:40px;border-radius:10px;background:#22d3ee;border:0;color:#04131a;font-size:14px;font-weight:700;cursor:pointer" style-hover="background:#67e8f9">Start session</button>
+        <button style="height:36px;border-radius:10px;background:none;border:1px solid #2a3949;font-size:13px;font-weight:600;cursor:pointer" style-hover="background:#15202c">Cancel</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+</section>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;showWarning&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;State&quot;}}">
+class Component extends DCLogic {
+  renderVals() {
+    return { showWarning: this.props.showWarning ?? true };
+  }
+}
+</script>
+</body>
+</html>
