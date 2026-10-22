@@ -485,6 +485,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
             <ButtonGroup v-if="permissionOptions.length" v-model="permissionShown" :options="permissionOptions" label="Permissions" variant="radios" :clearable="info.defaultPermission === null" />
             <p v-else class="hint">{{ info.displayName }} has no permission mode Chorus can pass at launch yet.</p>
             <p v-if="permissionOptions.length && permissionShown === null" class="hint">None chosen: {{ info.displayName }}'s own setting applies.</p>
+            <p v-if="agent === 'aider'" class="hint">Aider edits and commits files in the chat without asking. Full access also accepts other confirmations, but Aider declines shell commands in that mode.</p>
           </div>
         </section>
 

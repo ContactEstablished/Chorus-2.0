@@ -57,6 +57,7 @@ use crate::store::history;
 use crate::store::projects as project_rows;
 use crate::store::providers as provider_rows;
 use crate::store::tags as tag_rows;
+use crate::store::worktrees as worktree_rows;
 use crate::store::sessions::{self as rows, NewRun, NewSession, SessionRow};
 use crate::store::{Store, credentials};
 use crate::routing;
@@ -948,6 +949,23 @@ impl SessionManager {
         }
         let spec = row.agent.spec();
         let mut notes: Vec<String> = Vec::new();
+        if row.agent == AgentKind::Aider && !state_dir.join("aider.chat.history.md").exists()
+            && Path::new(&row.cwd).join(".aider.chat.history.md").is_file()
+        {
+            notes.push("Aider uses this session's own history. The repository's previous chat is kept in .aider.chat.history.md and isn't imported.".into());
+        }
+        if row.agent == AgentKind::Gemini {
+            let repository = row.worktree_id.and_then(|id| worktree_rows::get(&self.store, id).ok().flatten())
+                .filter(|w| !w.removed && chorus_core::folders::inside(&row.cwd, &w.path))
+                .filter(|w| crate::git::facts(Path::new(&row.cwd)).ok().flatten()
+                    .is_some_and(|f| chorus_core::folders::same(&f.main_root, &w.repo_root)))
+                .map(|w| w.repo_root);
+            match agents::gemini::launch_trusted(&parent, &row.cwd, repository.as_deref()) {
+                Ok(true) => launch.args.push("--skip-trust".into()),
+                Ok(false) => {}
+                Err(note) => notes.push(note),
+            }
+        }
         // A provider: its key in the environment (a key minted for this run where it can be), and
         // the model, arguments or opencode block its route needs. A minted key is revoked if the
         // launch fails from here on.

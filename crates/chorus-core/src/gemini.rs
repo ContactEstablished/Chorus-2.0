@@ -8,6 +8,43 @@
 
 use serde_json::Value;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum TrustLevel {
+    TrustFolder,
+    TrustParent,
+    DoNotTrust,
+}
+
+/// A rule read from Gemini 0.64.0's trustedFolders.json. The shell resolves `path` to its real
+/// effective folder (the parent for TRUST_PARENT) before matching. Specificity uses the original
+/// rule's length, as Gemini does, even when the effective folder is its parent.
+#[derive(Debug)]
+pub struct TrustRule {
+    pub path: String,
+    pub level: TrustLevel,
+    pub specificity: usize,
+}
+
+pub fn trust_rules(config: &str) -> Option<Vec<TrustRule>> {
+    let rules: std::collections::BTreeMap<String, TrustLevel> = serde_json::from_str(config).ok()?;
+    Some(rules.into_iter().map(|(path, level)| TrustRule { specificity: path.encode_utf16().count(), path, level }).collect())
+}
+
+/// The most specific matching rule wins. An explicit refusal wins an ambiguous tie, so Chorus
+/// never widens trust because two rules differ only in case or path spelling.
+pub fn folder_trust(rules: &[TrustRule], cwd: &str) -> Option<bool> {
+    rules.iter().filter(|r| crate::folders::inside(cwd, &r.path))
+        .max_by_key(|r| (r.specificity, r.level == TrustLevel::DoNotTrust))
+        .map(|r| r.level != TrustLevel::DoNotTrust)
+}
+
+/// A managed worktree may inherit its repository's trust; a refusal on the actual worktree
+/// always takes precedence. An unrecognised or absent rule never grants trust.
+pub fn launch_trusted(rules: &[TrustRule], cwd: &str, repository: Option<&str>) -> bool {
+    folder_trust(rules, cwd).or_else(|| repository.and_then(|p| folder_trust(rules, p))) == Some(true)
+}
+
 /// What the CLI would find in a chat file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChatState {
@@ -51,6 +88,30 @@ pub fn chat_state(record: &str) -> ChatState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn worktree_trust_requires_a_trusted_repository_and_respects_refusals() {
+        let mut rules = trust_rules(r#"{"C:/work/repo":"TRUST_FOLDER","C:/work/repo/private":"DO_NOT_TRUST"}"#).unwrap();
+        assert_eq!(folder_trust(&rules, r"c:\work\repo\src"), Some(true));
+        assert_eq!(folder_trust(&rules, r"C:\work\repo\private\src"), Some(false));
+        assert_eq!(folder_trust(&rules, r"C:\work\repo-other"), None);
+        let wt = "C:/work/.chorus2/repo/1234";
+        assert!(!launch_trusted(&rules, wt, None));
+        assert!(launch_trusted(&rules, wt, Some("C:/work/repo")));
+        rules.extend(trust_rules(r#"{"C:/work/.chorus2":"DO_NOT_TRUST"}"#).unwrap());
+        assert!(!launch_trusted(&rules, wt, Some("C:/work/repo")));
+        assert!(trust_rules("not json").is_none());
+        assert!(trust_rules(r#"{"C:/work":"UNKNOWN"}"#).is_none());
+        assert!(trust_rules("[]").is_none());
+    }
+
+    #[test]
+    fn parent_trust_uses_the_original_rules_specificity() {
+        let mut rules = trust_rules(r#"{"C:/work/repo":"DO_NOT_TRUST","C:/work/repo/child":"TRUST_PARENT"}"#).unwrap();
+        let parent = rules.iter_mut().find(|r| r.level == TrustLevel::TrustParent).unwrap();
+        parent.path = "C:/work/repo".into(); // The shell resolves the parent before matching.
+        assert_eq!(folder_trust(&rules, "C:/work/repo/other"), Some(true));
+    }
 
     // The record Gemini CLI 0.64.0 wrote for a session that exited before its first prompt
     // (trimmed; the full one is 1,316 bytes).

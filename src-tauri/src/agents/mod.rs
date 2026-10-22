@@ -8,6 +8,7 @@
 pub mod codex;
 pub mod commands;
 pub mod detect;
+pub mod gemini;
 pub mod opencode;
 
 use std::path::{Path, PathBuf};
@@ -58,12 +59,10 @@ pub fn resolve(kind: AgentKind, parent_env: &[(String, String)], scratch: &Path)
             Ok(Launch { program, args, additions: vec![] })
         }
         AgentKind::Gemini => {
-            let (program, mut args) = through_shim(&path, "gemini.cmd")?;
-            // The folder is trusted for this session only, so the first run in a project never
-            // stops at "Do you trust this folder?". Nothing is written to the user's settings.
+            let (program, args) = through_shim(&path, "gemini.cmd")?;
+            // Folder trust is checked at launch, once the session's actual folder is known.
             // 0.64.0 has no auto-update switch on the command line or in the environment; its
             // `general.enableAutoUpdate` is a setting in the user's own settings file.
-            args.push("--skip-trust".into());
             Ok(Launch { program, args, additions: vec![] })
         }
         AgentKind::Aider => Ok(Launch {
@@ -72,8 +71,12 @@ pub fn resolve(kind: AgentKind, parent_env: &[(String, String)], scratch: &Path)
             args: vec![
                 // 0.86.2 checks for a new version on every launch unless told not to (L7).
                 "--no-check-update".into(),
-                // Aider has no conversation id; this reloads the folder's chat history, so a
-                // restarted session continues where it left off.
+                // Aider has no conversation id. Each Chorus session owns its history, so a new
+                // session starts empty and Restart reloads only that session's chat (Q30).
+                "--chat-history-file".into(),
+                scratch.join("aider.chat.history.md").display().to_string(),
+                "--input-history-file".into(),
+                scratch.join("aider.input.history").display().to_string(),
                 "--restore-chat-history".into(),
             ],
             additions: vec![],
@@ -278,6 +281,28 @@ pub fn gemini_chat_state(id: &str, parent_env: &[(String, String)]) -> GeminiCha
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn aider_sessions_have_separate_history_paths_and_restart_reuses_them() {
+        let dir = std::env::temp_dir().join(format!("chorus-aider-history-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        // Resolution needs a program on PATH; this test never runs the stub.
+        std::fs::write(dir.join("aider.exe"), []).unwrap();
+        let env = vec![("PATH".into(), dir.display().to_string())];
+        let first = resolve(AgentKind::Aider, &env, &dir.join("session1")).unwrap();
+        let second = resolve(AgentKind::Aider, &env, &dir.join("session2")).unwrap();
+        let again = resolve(AgentKind::Aider, &env, &dir.join("session1")).unwrap();
+        for flag in ["--chat-history-file", "--input-history-file"] {
+            let at = first.args.iter().position(|v| v == flag).unwrap() + 1;
+            assert!(Path::new(&first.args[at]).starts_with(dir.join("session1")));
+            assert!(Path::new(&second.args[at]).starts_with(dir.join("session2")));
+            assert_ne!(first.args[at], second.args[at]);
+        }
+        assert_eq!(first.args, again.args);
+        assert!(first.args.iter().any(|a| a == "--restore-chat-history"));
+        assert!(!dir.join("session1").exists(), "resolution never writes history");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn trusting_a_folder_rewrites_claude_codes_config_in_place() {

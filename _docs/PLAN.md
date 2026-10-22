@@ -81,7 +81,7 @@ Work brought forward from P5, P12 and P14 does not close those phases.
 | P11 | Measurement, made visible | Planned; tokens, costs, attention and Usage UI; forecasts remain gated on data completeness |
 | P12 | Routing inspector | Launch routing built in P4; Settings → Routing, observer status and history remain |
 | P13 | Phone relay | Planned; P13a delivers prompts and status; P13b answers questions and approvals after P6 |
-| P14 | More agents and ship | Partly built: Gemini, Aider, Ollama, CI and installer polish; adapter fixes and real turns, DeepSeek spike/adapter, signing, updates and eventual name migration remain |
+| P14 | More agents and ship | Partly built: Gemini, Aider, Ollama, CI, installer polish and Q28–Q30 fixes; complete real turns, DeepSeek spike/adapter, signing, updates and eventual name migration remain |
 
 **Execution order agreed 2026-10-22:** preserve and reconcile the planning documents; address the
 existing Gemini/Aider issues (Q28–Q30) and complete P4 acceptance; finish P5 for M1; build P6 and P7
@@ -209,6 +209,16 @@ uncommitted work (D53, built in P4). Still to come: attaching a session to a wor
 left; boot reconcile with `git worktree list` as the authority; worktree panel (branch, ahead/behind,
 clean); diff summary in the session facts ("11 files · +612 −48").
 
+**Remaining implementation sequence:**
+1. Reconcile recorded worktrees against Git before restoring sessions. Keep history and branches;
+   surface missing/unreadable worktrees explicitly. Do not prune other tools' worktrees.
+2. Add retained-worktree selection to New session, with backend validation of the selected record,
+   repository membership, current existence and folder containment. Pair/Workbench may share the
+   selected tree; Swarm continues to make one new tree per agent.
+3. Add the worktree panel and session diff summary. Distinguish unknown upstream/status from zero
+   changes; cover tracked, staged, unstaged, untracked and binary changes without reading file contents
+   into the UI. Run the exit checks below after all three pieces are integrated.
+
 **Exit (M1):** the Swarm preset launches N agents in N worktrees, and removing a worktree behind 2.0's
 back is healed on the next boot.
 
@@ -279,8 +289,11 @@ signing decision, update channel; secret scanning in CI. Once Chorus 1 is retire
 step that moves an existing "Chorus 2" install.
 Done so far (2026-10-21): the Gemini CLI and Aider adapters, Ollama as a provider for opencode (D64),
 the CI check with the secret scan, installer polish, and designs for signing (D66, Q25), the update
-channel (Q26) and dropping the "2". Still to come: DeepSeek Harness (spike S9, Q21), and Q28–Q30's
-fixes to Gemini and Aider. opencode 2.x came from main (D58), not this phase.
+channel (Q26) and dropping the "2". On 2026-10-22, Q28–Q30's fixes were implemented: conditional
+Gemini trust, honest Aider permission labels and per-session Aider history (D69–D71). Still to come:
+complete real Gemini/Aider turns and option/resume verification; DeepSeek Harness (spike S9, Q21);
+and implementing/validating the release designs when the release decisions are settled.
+opencode 2.x came from main (D58), not this phase.
 
 ## 5. Ways of working
 

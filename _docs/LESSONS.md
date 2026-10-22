@@ -359,6 +359,15 @@ check for a keyless provider waits until it is listed.
 is removed only when "delete app data" is ticked. `NSIS_HOOK_POSTUNINSTALL` can remove it when
 `$UpdateMode <> 1`. `customLanguageFiles` replaces a language file whole.
 
+**L49 — Gemini trust rules need real paths and precedence (0.64.0, rechecked 2026-10-22).**
+`~/.gemini/trustedFolders.json` maps paths to `TRUST_FOLDER`, `TRUST_PARENT` or `DO_NOT_TRUST`.
+The CLI resolves junctions with `realpathSync`, matches subpaths, and picks the longest original rule
+path, even when `TRUST_PARENT` makes the effective path its parent. A refusal is a real decision,
+not a missing rule. Chorus resolves paths in its IO layer and matches in the pure core (D69); it
+leaves unknown formats to Gemini's own check and never writes this file. Aider 0.86.2's
+`--chat-history-file` and `--input-history-file` accept explicit paths, so `--restore-chat-history`
+can be isolated per Chorus session without a conversation id (D71).
+
 ## Money and models
 
 **L16 — Read-then-revoke under-reports OpenRouter spend.** Reading a capped key's usage right after the

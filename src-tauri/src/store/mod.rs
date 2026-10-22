@@ -33,6 +33,7 @@ const MIGRATION_FILES: &[(&str, &str)] = &[
     ("0009_tags_worktrees.sql", include_str!("../../migrations/0009_tags_worktrees.sql")),
     ("0010_routing.sql", include_str!("../../migrations/0010_routing.sql")),
     ("0011_p14_agent_check.sql", include_str!("../../migrations/0011_p14_agent_check.sql")),
+    ("0012_aider_permissions.sql", include_str!("../../migrations/0012_aider_permissions.sql")),
 ];
 
 pub struct Store {
@@ -245,7 +246,7 @@ mod tests {
                 Ok((version, counts, super::foreign_key_violations(c).unwrap()))
             })
             .unwrap();
-        assert_eq!(version, 11);
+        assert_eq!(version, MIGRATION_FILES.len() as u32);
         assert_eq!(counts, [1; 11], "every row survives the rebuild");
         assert!(violations.is_empty(), "{violations:?}");
 
@@ -315,5 +316,37 @@ mod tests {
         on_disk.sort();
         let listed: Vec<String> = MIGRATION_FILES.iter().map(|(n, _)| (*n).to_owned()).collect();
         assert_eq!(on_disk, listed, "every file in src-tauri/migrations must be listed in MIGRATION_FILES");
+    }
+
+    #[test]
+    fn aider_permission_migration_keeps_profiles_and_other_agents_choices() {
+        let conn = database_at_version_10();
+        conn.pragma_update(None, "foreign_keys", "OFF").unwrap();
+        conn.execute_batch(MIGRATION_FILES[10].1).unwrap();
+        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
+        conn.pragma_update(None, "user_version", 11).unwrap();
+        for (id, agent, options) in [
+            (1, "aider", r#"{"permission":"manual","effort":"deep","model":"test"}"#),
+            (2, "claude", r#"{"permission":"manual"}"#),
+            (3, "aider", r#"{"permission":"full-access"}"#),
+            (4, "aider", "{}"),
+            (5, "aider", "unreadable"),
+        ] {
+            conn.execute("INSERT INTO sessions (id,name,agent,cwd,state,cols,rows,created_at,options) VALUES (?1,'x',?2,'C:\\w','exited',80,24,1,?3)",
+                rusqlite::params![id, agent, options]).unwrap();
+            conn.execute("INSERT INTO launch_profiles (id,name,agent,options,created_at,updated_at) VALUES (?1,?1,?2,?3,1,1)",
+                rusqlite::params![id, agent, options]).unwrap();
+        }
+        let store = Store::init(conn).unwrap();
+        store.with(|c| {
+            for table in ["sessions", "launch_profiles"] {
+                let values: Vec<String> = c.prepare(&format!("SELECT options FROM {table} ORDER BY id"))?
+                    .query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
+                let first: serde_json::Value = serde_json::from_str(&values[0]).unwrap();
+                assert_eq!(first, serde_json::json!({"permission":"accept-edits", "effort":"deep", "model":"test"}));
+                assert_eq!(values[1..], [r#"{"permission":"manual"}"#, r#"{"permission":"full-access"}"#, "{}", "unreadable"]);
+            }
+            Ok(())
+        }).unwrap();
     }
 }

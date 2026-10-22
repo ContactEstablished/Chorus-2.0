@@ -18,7 +18,8 @@ Aider, Ollama, CI and installer polish). These phases still have remaining work.
 [roadmap's status table](_docs/PLAN.md#current-position-2026-10-22) is the current source of truth;
 it links the preserved hand-off plans and distinguishes implementation from runtime acceptance.
 Recorded limits remain: P1's reboot check was waived; Grok has only launch verification and no event
-channel; Gemini and Aider still need completed real turns and the review fixes in Q28–Q30.
+channel; Gemini and Aider still need completed real turns. The review fixes in Q28–Q30 are implemented
+(conditional folder trust, corrected permission labels, isolated history; D69–D71).
 
 ## Docs
 

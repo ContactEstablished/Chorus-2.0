@@ -489,3 +489,27 @@ files out; `.gitignore` and the tags cache would stay. Try it in the app.
 - PLAN's P14 now says what's done and what isn't.
 - §9's questions 4 and 5 (the OC2 hand-off file, keeping the three CLIs) are housekeeping, with no
   number.
+
+## 14. Roadmap follow-through (2026-10-22)
+
+Q28–Q30 are implemented as D69–D71. Gemini only skips its trust prompt when its recorded rules
+trust the folder or the managed worktree's repository; a refusal on the worktree wins. Aider now
+offers Accept edits and Full access, with an explanation of its behaviour. Migration 0012 updates
+old Aider Manual labels in sessions and profiles. Aider's chat and input history paths belong to
+the Chorus session, so two sessions in one repository no longer share those files.
+
+Verified against installed Gemini CLI 0.64.0 (including its bundled trust implementation) and Aider
+0.86.2 (`--help`). `npm run check` passed: 430 Rust tests and 19 frontend tests, typecheck, Clippy and
+secret scan. The new tests cover trust inheritance/refusals, read-only trust files, isolated history
+paths and restart reuse, and migration of old sessions/profiles while preserving other settings.
+
+In an isolated labelled dev app: New session showed Accept edits and Full access without Manual,
+and the explanation fitted the form with Start still visible. Two Aider sessions launched in the
+same scratch repository; their recorded chat/input paths were different. Restart kept the first
+session's paths. A Gemini launch in the untrusted scratch repository had no `--skip-trust`. The
+app's database reached schema 12. Evidence is local under `_verify/roadmap-*`, not committed.
+
+No model prompt was submitted in these checks. Complete Gemini/Aider turns, applied options and
+conversation content after Restart still need P14 runtime acceptance. P4's full-day check is also
+still open; these launch checks do not close either phase. The prior repository Aider history is
+kept, without an automatic import into existing sessions' new private history.

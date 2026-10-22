@@ -353,10 +353,10 @@ const GEMINI: Spec = Spec {
 /// Aider 0.86.2: `--model provider/name` (it speaks OpenRouter natively, so `openrouter/<id>`), and
 /// `--reasoning-effort` for the effort. It has no permission modes. With no flag it edits (and
 /// commits) the files in the chat without asking, and asks before making a file, editing one not in
-/// the chat and running a shell command; that is declared as Manual until Q29 is answered.
+/// the chat and running a shell command; that is Accept edits (Q29).
 /// `--yes-always` says yes to all of those except shell commands, which it then always declines.
 /// Auto mode would be the same level as Full access, and there is no plan mode, so neither is
-/// declared. It has no conversation id either: `--restore-chat-history` (passed by the launch) reloads the folder's chat history, and
+/// declared. It has no conversation id either: `--restore-chat-history` reloads the session's own history files (Q30), and
 /// resume is `None`. No event channel: `--notifications-command` runs a command line whose token
 /// would have to travel in argv, which the secret rules forbid.
 const AIDER: Spec = Spec {
@@ -370,8 +370,8 @@ const AIDER: Spec = Spec {
         (Effort::Deep, &["--reasoning-effort", "high"]),
     ],
     default_effort: None,
-    permissions: &[(Permission::Manual, &[]), (Permission::FullAccess, &["--yes-always"])],
-    default_permission: Some(Permission::Manual),
+    permissions: &[(Permission::AcceptEdits, &[]), (Permission::FullAccess, &["--yes-always"])],
+    default_permission: Some(Permission::AcceptEdits),
     model: Some(ModelArg::Flag("--model")),
     resume: Resume::None,
     partner_rank: Some(5),
@@ -622,12 +622,15 @@ mod tests {
         // A session asks for no effort at launch, so the CLI's default stands.
         let asked = LaunchOptions { permission: Some(Permission::Auto), ..Default::default() };
         assert!(gemini.resolve(&asked).unwrap_err().contains("Auto"));
-        // Aider has three efforts, and only Manual and Full access.
+        // Aider has three efforts, and only Accept edits and Full access.
         let aider = AgentKind::Aider.spec();
         let asked = LaunchOptions { effort: Some(Effort::Max), ..Default::default() };
         assert_eq!(aider.resolve(&asked).unwrap_err(), "Aider has no Max effort setting");
         let asked = LaunchOptions { permission: Some(Permission::Plan), ..Default::default() };
         assert!(aider.resolve(&asked).unwrap_err().contains("Plan"));
+        let asked = LaunchOptions { permission: Some(Permission::Manual), ..Default::default() };
+        assert!(aider.resolve(&asked).unwrap_err().contains("Manual"));
+        assert_eq!(aider.resolve(&LaunchOptions::default()).unwrap().permission, Some(Permission::AcceptEdits));
     }
 
     #[test]
@@ -674,7 +677,7 @@ mod tests {
             aider.option_args(&aider.resolve(&opts).unwrap()),
             ["--reasoning-effort", "high", "--yes-always", "--model", "openrouter/deepseek/deepseek-v4.1-flash:free"]
         );
-        // Manual is Aider with no flag, which doesn't ask before editing a file in the chat (Q29).
+        // Accept edits is Aider with no flag: existing chat files are edited without asking.
         assert!(aider.option_args(&aider.resolve(&LaunchOptions::default()).unwrap()).is_empty());
     }
 
