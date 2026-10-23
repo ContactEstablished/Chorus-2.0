@@ -29,6 +29,7 @@ pub mod names;
 pub mod opencode;
 pub mod prefs;
 pub mod projects;
+pub mod progress;
 pub mod providers;
 pub mod routing;
 pub mod scrollback;

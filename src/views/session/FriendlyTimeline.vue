@@ -1,12 +1,16 @@
 <script setup lang="ts">
 import { onBeforeUnmount, ref, watch } from 'vue'
-import { commands, unwrap, type SessionHistory, type SessionSummary, type PendingReply } from '../../ipc'
+import { commands, unwrap, type SessionHistory, type SessionSummary, type PendingReply, type SessionProgress } from '../../ipc'
 import ReplyCard from './ReplyCard.vue'
+import FriendlyPlan from './FriendlyPlan.vue'
+import FriendlyMessages from './FriendlyMessages.vue'
 
 const props = defineProps<{ session: SessionSummary }>()
 const emit = defineEmits<{ raw: [] }>()
 const history = ref<SessionHistory | null>(null)
 const pending = ref<PendingReply[]>([])
+const progress = ref<SessionProgress | null>(null)
+const progressError = ref('')
 const error = ref('')
 let generation = 0
 let timer: ReturnType<typeof setTimeout> | undefined
@@ -16,10 +20,15 @@ async function load(): Promise<void> {
   const current = ++generation
   const id = props.session.id
   try {
-    const [h, p] = await Promise.all([unwrap(commands.sessionHistory(id, 100)), unwrap(commands.sessionPendingReplies(id))])
+    const [h, p, updates] = await Promise.all([
+      unwrap(commands.sessionHistory(id, 100)), unwrap(commands.sessionPendingReplies(id)),
+      unwrap(commands.sessionProgress(id)).then(data => ({ data, error: '' }), e => ({ data: null, error: String(e) })),
+    ])
     if (disposed || current !== generation) return
     history.value = h
     pending.value = p
+    progress.value = updates.data
+    progressError.value = updates.error
     error.value = ''
   } catch (e) {
     if (current === generation) { error.value = String(e); pending.value = [] }
@@ -27,7 +36,7 @@ async function load(): Promise<void> {
     if (!disposed && current === generation) timer = setTimeout(() => void load(), 1500)
   }
 }
-watch(() => props.session.id, () => { history.value = null; pending.value = []; void load() }, { immediate: true })
+watch(() => props.session.id, () => { history.value = null; pending.value = []; progress.value = null; progressError.value = ''; void load() }, { immediate: true })
 onBeforeUnmount(() => { disposed = true; generation++; clearTimeout(timer) })
 </script>
 
@@ -41,12 +50,20 @@ onBeforeUnmount(() => { disposed = true; generation++; clearTimeout(timer) })
     <div v-if="pending.length" class="pending">
       <ReplyCard v-for="p in pending" :key="`${p.runId}-${p.askId}`" :session-id="session.id" :pending="p" @refresh="load" @raw="emit('raw')" />
     </div>
-    <p class="limitation">Plan capture and the instruction queue are not connected yet. Use Raw for new instructions. Narrated summaries and Next steps are not available yet.</p>
+    <p class="limitation">The instruction queue is not connected yet. Use Raw for new instructions. Narrated summaries and Next steps are not available yet.</p>
+    <p v-if="progressError" class="error" role="alert">Progress could not refresh: {{ progressError }}. Check Raw for the current plan and messages.</p>
+    <template v-if="progress">
+      <p class="limitation">{{ progress.note }}</p>
+      <p v-if="progress.error" class="error" role="alert">{{ progress.error }}</p>
+      <FriendlyPlan :plan="progress.plan" :current-run-id="progress.currentRunId" />
+      <FriendlyMessages :messages="progress.messages" :turn-id="null" />
+    </template>
     <p v-if="history && !history.turns.length" class="empty">{{ session.hasEventChannel ? 'Waiting for the first recorded prompt.' : 'This agent has no structured history channel. Use Raw.' }}</p>
     <ol v-if="history" class="timeline">
       <li v-for="turn in history.turns" :key="turn.id" class="turn">
         <div class="meta"><time>{{ new Date(turn.startedAtSecs * 1000).toLocaleString() }}</time><span>{{ turn.endReason ?? 'In progress' }}</span></div>
         <article class="message user"><h3>You <small>{{ turn.promptSource }}</small></h3><p>{{ turn.prompt ?? 'Prompt was not observed.' }}</p></article>
+        <FriendlyMessages v-if="progress" :messages="progress.messages" :turn-id="turn.id" :final-message="turn.finalMessage" />
         <details v-if="turn.tools.length" class="tools">
           <summary>{{ turn.tools.length }} tool {{ turn.tools.length === 1 ? 'call' : 'calls' }}</summary>
           <ul><li v-for="(tool, i) in turn.tools" :key="i"><strong>{{ tool.tool }}</strong> · {{ tool.failed ? 'Failed' : tool.finished ? 'Finished' : 'Started' }}<code v-if="tool.target">{{ tool.target }}</code></li></ul>

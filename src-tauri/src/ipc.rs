@@ -83,6 +83,8 @@ pub fn builder() -> Builder<tauri::Wry> {
             sessions::actions::session_action_capabilities,
             sessions::actions::session_action,
             sessions::actions::session_pending_replies,
+            // P6 plans: persisted checklists and visible assistant messages.
+            sessions::progress::session_progress,
         ])
         .events(collect_events![app::BackendPulse, sessions::SessionUpdated, fleet::FleetClick])
 }

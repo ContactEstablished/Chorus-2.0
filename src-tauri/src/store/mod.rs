@@ -9,6 +9,7 @@ pub mod replies;
 pub mod history;
 pub mod profiles;
 pub mod projects;
+pub mod progress;
 pub mod providers;
 pub mod routing;
 pub mod sessions;
@@ -38,6 +39,7 @@ const MIGRATION_FILES: &[(&str, &str)] = &[
     ("0012_aider_permissions.sql", include_str!("../../migrations/0012_aider_permissions.sql")),
     ("0013_p6_delivery.sql", include_str!("../../migrations/0013_p6_delivery.sql")),
     ("0014_p6_replies.sql", include_str!("../../migrations/0014_p6_replies.sql")),
+    ("0015_p6_progress.sql", include_str!("../../migrations/0015_p6_progress.sql")),
 ];
 
 pub struct Store {

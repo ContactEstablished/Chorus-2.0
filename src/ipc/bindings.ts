@@ -131,6 +131,7 @@ export const commands = {
 	sessionActionCapabilities: (sessionId: number) => typedError<SessionCapabilities, string>(__TAURI_INVOKE("session_action_capabilities", { sessionId })),
 	sessionAction: (sessionId: number, request: ActionRequest) => typedError<ActionResult, string>(__TAURI_INVOKE("session_action", { sessionId, request })),
 	sessionPendingReplies: (sessionId: number) => typedError<PendingReply[], string>(__TAURI_INVOKE("session_pending_replies", { sessionId })),
+	sessionProgress: (sessionId: number) => typedError<SessionProgress, string>(__TAURI_INVOKE("session_progress", { sessionId })),
 };
 
 /** Events */
@@ -152,7 +153,7 @@ export type ActionCapabilities = {
 	queue: ActionCapability,
 };
 
-export type ActionCapability = { channel: "pty" } | { channel: "held-hook" } | { channel: "unavailable"; reason: string };
+export type ActionCapability = { channel: "pty" } | { channel: "held-hook" } | { channel: "observed" } | { channel: "unavailable"; reason: string };
 
 export type ActionRequest = {
 	runId: number,
@@ -642,6 +643,22 @@ export type PermissionChoice = {
 	args: string,
 };
 
+export type PlanSnapshot = {
+	id: number,
+	runId: number,
+	turnId: number | null,
+	steps: PlanStep[],
+	incomplete: boolean,
+};
+
+export type PlanStatus = "pending" | "in-progress" | "completed";
+
+export type PlanStep = {
+	id: string,
+	title: string,
+	status: PlanStatus,
+};
+
 export type Prefs = {
 	theme: Theme,
 	/**  The whole window's zoom, 0.8 to 1.6. */
@@ -709,6 +726,13 @@ export type ProfileSummary = {
 	providerName: string | null,
 	credential: CredentialUse | null,
 	updatedAtSecs: number,
+};
+
+export type ProgressMessage = {
+	id: number,
+	runId: number,
+	turnId: number | null,
+	text: string,
 };
 
 export type Project = {
@@ -912,6 +936,14 @@ export type SessionHistory = {
 	withPrompt: number,
 	/**  Where the agent keeps the full transcript (Claude Code's JSONL, Codex's rollout). */
 	transcriptPath: string | null,
+};
+
+export type SessionProgress = {
+	plan: PlanSnapshot | null,
+	messages: ProgressMessage[],
+	currentRunId: number | null,
+	note: string,
+	error: string | null,
 };
 
 export type SessionStatus = "running" | "exited" | "closed";

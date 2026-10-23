@@ -37,6 +37,7 @@ pub enum SessionAction {
 pub enum ActionCapability {
     Pty,
     HeldHook,
+    Observed,
     Unavailable { reason: String },
 }
 
@@ -61,11 +62,11 @@ pub fn capabilities(agent: AgentKind) -> ActionCapabilities {
         },
         question: unavailable("Structured question replies are not wired yet. Answer the agent in Raw."),
         approval: unavailable("Chorus currently observes approvals only. Approve or deny in Raw."),
-        plan: unavailable(if agent == AgentKind::Codex {
+        plan: if agent == AgentKind::Claude { ActionCapability::Observed } else { unavailable(if agent == AgentKind::Codex {
             "Codex plan updates are not connected in this session. Read its plan in Raw."
         } else {
             "Plan capture is not wired yet. Read the agent's plan in Raw."
-        }),
+        }) },
         queue: unavailable("The durable instruction queue is not built yet. Wait for the turn to finish."),
     }
 }
@@ -166,7 +167,7 @@ mod tests {
             let caps = capabilities(agent);
             assert!(matches!(caps.approval, ActionCapability::Unavailable { .. }));
             assert!(matches!(caps.question, ActionCapability::Unavailable { .. }));
-            assert!(matches!(caps.plan, ActionCapability::Unavailable { .. }));
+            assert_eq!(matches!(caps.plan, ActionCapability::Observed), agent == AgentKind::Claude);
         }
     }
 }

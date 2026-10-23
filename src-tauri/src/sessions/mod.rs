@@ -18,6 +18,7 @@ pub mod delivery;
 pub mod job;
 pub mod mirror;
 pub mod profiles;
+pub mod progress;
 pub mod workspace;
 pub mod worktrees;
 
@@ -283,7 +284,7 @@ const BOUNDARY_RESTARTED: &str = "── Restarted ──";
 /// How often an open Claude Code turn's transcript is checked for an interrupt.
 const TRANSCRIPT_POLL: Duration = Duration::from_secs(2);
 /// The most of a transcript read in one check.
-const MAX_TRANSCRIPT_READ: u64 = 4 * 1024 * 1024;
+pub(crate) const MAX_TRANSCRIPT_READ: u64 = 4 * 1024 * 1024;
 /// The most turns one history request returns.
 const MAX_HISTORY_TURNS: u32 = 500;
 /// How often "no signal" is checked.
@@ -311,7 +312,7 @@ fn random_token() -> String {
 
 /// The complete lines between `from` and `to` in a file, and how many bytes they took (a line
 /// still being written is left for next time).
-fn read_new_lines(path: &str, from: u64, to: u64) -> Option<(Vec<String>, u64)> {
+pub(crate) fn read_new_lines(path: &str, from: u64, to: u64) -> Option<(Vec<String>, u64)> {
     use std::io::{Seek, SeekFrom};
     let mut f = std::fs::File::open(path).ok()?;
     f.seek(SeekFrom::Start(from)).ok()?;
@@ -1318,7 +1319,8 @@ impl SessionManager {
             let mut seen: Option<(String, u64)> = None;
             while !run.wait_finished(TRANSCRIPT_POLL) {
                 let (path, open) = {
-                    let r = run.recorder.lock().expect("recorder lock");
+                    let mut r = run.recorder.lock().expect("recorder lock");
+                    r.read_progress(&m.store);
                     (r.transcript_path(), r.has_open_turn())
                 };
                 let Some(path) = path else { continue };
