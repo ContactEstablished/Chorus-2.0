@@ -83,6 +83,13 @@ pub fn builder() -> Builder<tauri::Wry> {
             sessions::actions::session_action_capabilities,
             sessions::actions::session_action,
             sessions::actions::session_pending_replies,
+            // P6 narrator: configuration, summaries and persistent suggestions.
+            crate::narrator::narrator_config,
+            crate::narrator::narrator_config_save,
+            crate::narrator::narrator_project_enabled,
+            crate::narrator::narrator_project_set,
+            crate::narrator::narrator_panel,
+            crate::narrator::narrator_resolve,
         ])
         .events(collect_events![app::BackendPulse, sessions::SessionUpdated, fleet::FleetClick])
 }

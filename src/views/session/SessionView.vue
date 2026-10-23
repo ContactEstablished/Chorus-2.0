@@ -12,6 +12,8 @@ import SessionFacts from './SessionFacts.vue'
 import PromptHistory from './PromptHistory.vue'
 import ActionChannels from './ActionChannels.vue'
 import FriendlyTimeline from './FriendlyTimeline.vue'
+import NarratorPanel from './NarratorPanel.vue'
+import { stageComposerSuggestion } from './composerDrafts'
 import { commands, type Attention, type SessionSummary, type WorktreeClose } from '../../ipc'
 import { terminalFor } from '../../components/terminals'
 import { useSessionsStore } from '../../stores/sessions'
@@ -139,6 +141,12 @@ async function toggleLock(): Promise<void> {
   if (ok) askingPin.value = false
 }
 
+function stageSuggestion(text: string): void {
+  stageComposerSuggestion(props.sessionId, text)
+  mode.value = 'friendly'
+  notices.info('Suggestion added to the composer draft. Review it before sending.')
+}
+
 // The terminal.
 const attached = ref(false)
 const size = ref<{ cols: number; rows: number } | null>(null)
@@ -259,6 +267,7 @@ async function send(bytes: string): Promise<void> {
           <p class="rt"><span class="dot" />{{ readiness.title }}</p>
           <p class="rx">{{ readiness.text }}</p>
         </div>
+        <NarratorPanel :session-id="s.id" @draft="stageSuggestion" />
         <PromptHistory :session="s" />
         <SessionFacts :session="s" />
       </aside>

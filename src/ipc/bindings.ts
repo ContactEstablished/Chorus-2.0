@@ -131,6 +131,12 @@ export const commands = {
 	sessionActionCapabilities: (sessionId: number) => typedError<SessionCapabilities, string>(__TAURI_INVOKE("session_action_capabilities", { sessionId })),
 	sessionAction: (sessionId: number, request: ActionRequest) => typedError<ActionResult, string>(__TAURI_INVOKE("session_action", { sessionId, request })),
 	sessionPendingReplies: (sessionId: number) => typedError<PendingReply[], string>(__TAURI_INVOKE("session_pending_replies", { sessionId })),
+	narratorConfig: () => typedError<Config, string>(__TAURI_INVOKE("narrator_config")),
+	narratorConfigSave: (input: Config) => typedError<null, string>(__TAURI_INVOKE("narrator_config_save", { input })),
+	narratorProjectEnabled: (projectId: number) => typedError<boolean, string>(__TAURI_INVOKE("narrator_project_enabled", { projectId })),
+	narratorProjectSet: (projectId: number, enabled: boolean) => typedError<null, string>(__TAURI_INVOKE("narrator_project_set", { projectId, enabled })),
+	narratorPanel: (sessionId: number) => typedError<Panel, string>(__TAURI_INVOKE("narrator_panel", { sessionId })),
+	narratorResolve: (sessionId: number, actionId: number, disposition: Disposition) => typedError<null, string>(__TAURI_INVOKE("narrator_resolve", { sessionId, actionId, disposition })),
 };
 
 /** Events */
@@ -144,6 +150,12 @@ export const events = {
 /**  Whether the account guardrail preflight was read (K3). */
 export type AccountCheck = "checked" | "unknown";
 
+export type Action = {
+	id: number,
+	suggestion: Suggestion,
+	status: string,
+};
+
 export type ActionCapabilities = {
 	prompt: ActionCapability,
 	question: ActionCapability,
@@ -153,6 +165,8 @@ export type ActionCapabilities = {
 };
 
 export type ActionCapability = { channel: "pty" } | { channel: "held-hook" } | { channel: "unavailable"; reason: string };
+
+export type ActionKind = "continue" | "review" | "answer" | "retry";
 
 export type ActionRequest = {
 	runId: number,
@@ -366,6 +380,11 @@ export type CloseReport = {
 	worktreeNote: string | null,
 };
 
+export type Config = {
+	credentialId: number | null,
+	model: string,
+};
+
 export type CreateSession = {
 	agent: AgentKind,
 	cwd: string,
@@ -432,6 +451,8 @@ export type Diff = {
 	deletions: number,
 	binary: number,
 };
+
+export type Disposition = "done" | "dismissed";
 
 /**  One effort scale for every agent. */
 export type Effort = "fast" | "balanced" | "deep" | "max";
@@ -614,6 +635,16 @@ export type OpenRouterProviderPrefs_Serialize = {
 	require_parameters?: boolean | null,
 	quantizations?: Quantization[] | null,
 	data_collection?: ProviderDataCollection | null,
+};
+
+export type Panel = {
+	turnId: number | null,
+	summary: Summary,
+	status: string,
+	reason: string | null,
+	actions: Action[],
+	knownCostUsd: number | null,
+	unknownCostCalls: number,
 };
 
 export type PendingReply = {
@@ -1011,6 +1042,22 @@ export type Snapshot = {
 	/**  Net tracked changes against HEAD (empty tree before the first commit). */
 	diff: Diff | null,
 	diffNote: string | null,
+};
+
+export type Suggestion = {
+	kind: ActionKind,
+	title: string,
+	what: string,
+	sends: string,
+	eta: string,
+};
+
+export type Summary = {
+	now: string,
+	blocker: string | null,
+	next: string,
+	is_question: boolean,
+	actions: Suggestion[],
 };
 
 export type TagUse = {

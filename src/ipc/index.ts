@@ -73,6 +73,8 @@ export type {
   WorktreeInfo,
   WorktreeEntry,
   Snapshot,
+  Panel,
+  Disposition,
 } from './bindings'
 
 /** The result shape of every fallible generated command. */

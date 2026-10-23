@@ -26,6 +26,7 @@ pub mod launch;
 pub mod lock;
 pub mod migrate;
 pub mod names;
+pub mod narrator;
 pub mod opencode;
 pub mod prefs;
 pub mod projects;

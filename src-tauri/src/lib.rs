@@ -7,6 +7,7 @@ mod fleet;
 mod git;
 mod ipc;
 mod lock;
+mod narrator;
 mod prefs;
 mod projects;
 mod providers;
@@ -77,6 +78,7 @@ pub fn run() {
             // Sessions open now, so views can attach; they relaunch off this thread, because an
             // opencode session waits for its server.
             // The listener agent hooks post to, before any session launches (P3).
+            narrator::start(manager.clone())?;
             manager.set_hook_listener(events::listener::start(manager.clone()));
             manager.watch_signals();
             let relaunch = manager.reopen()?;

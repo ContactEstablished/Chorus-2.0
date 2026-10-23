@@ -180,6 +180,9 @@ impl Recorder {
                 let Some(row) = self.turns.remove(&key) else { return };
                 let message = message.map(|m| self.clean(&m));
                 let _ = history::close_turn(store, row, end.as_str(), message.as_deref());
+                if end == chorus_core::activity::TurnEnd::Done {
+                    let _ = crate::store::narrator::enqueue(store, self.session_id, row);
+                }
                 // Asks still open when their turn ends: nothing answered them through a channel.
                 let answer = match end {
                     chorus_core::activity::TurnEnd::Interrupted => "turn interrupted",
