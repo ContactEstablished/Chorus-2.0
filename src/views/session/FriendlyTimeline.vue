@@ -2,6 +2,7 @@
 import { onBeforeUnmount, ref, watch } from 'vue'
 import { commands, unwrap, type SessionHistory, type SessionSummary, type PendingReply } from '../../ipc'
 import ReplyCard from './ReplyCard.vue'
+import SessionComposer from './SessionComposer.vue'
 
 const props = defineProps<{ session: SessionSummary }>()
 const emit = defineEmits<{ raw: [] }>()
@@ -41,7 +42,7 @@ onBeforeUnmount(() => { disposed = true; generation++; clearTimeout(timer) })
     <div v-if="pending.length" class="pending">
       <ReplyCard v-for="p in pending" :key="`${p.runId}-${p.askId}`" :session-id="session.id" :pending="p" @refresh="load" @raw="emit('raw')" />
     </div>
-    <p class="limitation">Plan capture and the instruction queue are not connected yet. Use Raw for new instructions. Narrated summaries and Next steps are not available yet.</p>
+    <p class="limitation">Plan capture is not connected yet. Narrated summaries and Next steps are not available yet.</p>
     <p v-if="history && !history.turns.length" class="empty">{{ session.hasEventChannel ? 'Waiting for the first recorded prompt.' : 'This agent has no structured history channel. Use Raw.' }}</p>
     <ol v-if="history" class="timeline">
       <li v-for="turn in history.turns" :key="turn.id" class="turn">
@@ -63,6 +64,7 @@ onBeforeUnmount(() => { disposed = true; generation++; clearTimeout(timer) })
         <article v-if="turn.finalMessage" class="message agent"><h3>Agent</h3><p>{{ turn.finalMessage }}</p></article>
       </li>
     </ol>
+    <SessionComposer :key="session.id" :session-id="session.id" @raw="emit('raw')" />
     <p v-if="history && history.total > history.turns.length" class="limitation">Showing the latest {{ history.turns.length }} of {{ history.total }} turns.</p>
   </div>
 </template>

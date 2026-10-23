@@ -131,6 +131,10 @@ export const commands = {
 	sessionActionCapabilities: (sessionId: number) => typedError<SessionCapabilities, string>(__TAURI_INVOKE("session_action_capabilities", { sessionId })),
 	sessionAction: (sessionId: number, request: ActionRequest) => typedError<ActionResult, string>(__TAURI_INVOKE("session_action", { sessionId, request })),
 	sessionPendingReplies: (sessionId: number) => typedError<PendingReply[], string>(__TAURI_INVOKE("session_pending_replies", { sessionId })),
+	sessionQueue: (sessionId: number) => typedError<QueueSnapshot, string>(__TAURI_INVOKE("session_queue", { sessionId })),
+	enqueueInstruction: (sessionId: number, request: QueueRequest) => typedError<null, string>(__TAURI_INVOKE("enqueue_instruction", { sessionId, request })),
+	changeQueuedInstruction: (sessionId: number, instructionId: number, reviewedRunId: number | null) => typedError<null, string>(__TAURI_INVOKE("change_queued_instruction", { sessionId, instructionId, reviewedRunId })),
+	confirmRawPromptEmpty: (sessionId: number, runId: number) => typedError<null, string>(__TAURI_INVOKE("confirm_raw_prompt_empty", { sessionId, runId })),
 };
 
 /** Events */
@@ -798,6 +802,28 @@ export type Question = {
 export type QuestionOption = {
 	label: string,
 	description: string,
+};
+
+export type QueueRequest = {
+	runId: number,
+	requestId: string,
+	text: string,
+};
+
+export type QueueSnapshot = {
+	runId: number | null,
+	rawEmpty: boolean,
+	blockedReason: string | null,
+	entries: QueuedInstruction[],
+};
+
+export type QueuedInstruction = {
+	id: number,
+	runId: number,
+	requestId: string,
+	text: string,
+	status: string,
+	deliveryStatus: string | null,
 };
 
 /**  The three tiers the ranker orders. Nitro is never ranked: OpenRouter chooses. */

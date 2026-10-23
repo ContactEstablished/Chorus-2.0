@@ -83,6 +83,11 @@ pub fn builder() -> Builder<tauri::Wry> {
             sessions::actions::session_action_capabilities,
             sessions::actions::session_action,
             sessions::actions::session_pending_replies,
+            // P6 queue: durable instructions and explicit Raw draft coordination.
+            sessions::queue::session_queue,
+            sessions::queue::enqueue_instruction,
+            sessions::queue::change_queued_instruction,
+            sessions::queue::confirm_raw_prompt_empty,
         ])
         .events(collect_events![app::BackendPulse, sessions::SessionUpdated, fleet::FleetClick])
 }

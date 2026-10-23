@@ -15,6 +15,7 @@
 pub mod commands;
 pub mod actions;
 pub mod delivery;
+pub mod queue;
 pub mod job;
 pub mod mirror;
 pub mod profiles;
@@ -440,6 +441,9 @@ struct Run {
     id: u32,
     pid: u32,
     writer: Mutex<Box<dyn Write + Send>>,
+    /// Only an explicit user assertion can establish an empty Raw prompt.
+    raw_empty: AtomicBool,
+    queue_error: Mutex<Option<String>>,
     master: Mutex<Option<Box<dyn MasterPty + Send>>>,
     job: Job,
     /// Set before Chorus itself ends the process (Close, Restart), so the exit isn't taken for the
@@ -624,6 +628,7 @@ impl SessionManager {
                     live.values().filter_map(|l| l.current_run().map(|r| (l.id, r))).collect()
                 };
                 for (id, run) in runs {
+                    queue::tick(&m, id);
                     let stale = run.recorder.lock().expect("recorder lock").stale(crate::store::now_ms(), run.last_output_ms.load(Ordering::Relaxed));
                     if run.no_signal_shown.swap(stale, Ordering::SeqCst) != stale {
                         m.notify_id(id);
@@ -1184,6 +1189,8 @@ impl SessionManager {
             pid,
             started: Instant::now(),
             writer: Mutex::new(writer),
+            raw_empty: AtomicBool::new(false),
+            queue_error: Mutex::new(None),
             master: Mutex::new(Some(pair.master)),
             job,
             requested: Mutex::new(None),
@@ -1535,7 +1542,10 @@ impl SessionManager {
         if data.len() > MAX_WRITE_BYTES {
             return Err("write too large".into());
         }
+        let live = self.open_live(id)?;
+        let _action = live.action.lock().expect("action lock");
         let run = self.running(id)?;
+        if !data.is_empty() { run.raw_empty.store(false, Ordering::SeqCst); }
         let mut writer = run.writer.lock().expect("writer lock");
         writer.write_all(data.as_bytes()).and_then(|()| writer.flush()).map_err(|e| e.to_string())
     }

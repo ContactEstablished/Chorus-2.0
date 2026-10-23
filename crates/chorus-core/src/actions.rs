@@ -66,7 +66,10 @@ pub fn capabilities(agent: AgentKind) -> ActionCapabilities {
         } else {
             "Plan capture is not wired yet. Read the agent's plan in Raw."
         }),
-        queue: unavailable("The durable instruction queue is not built yet. Wait for the turn to finish."),
+        queue: match agent {
+            AgentKind::Claude | AgentKind::Codex => ActionCapability::Pty,
+            _ => unavailable("The queue needs a verified prompt channel. Use Raw for this agent."),
+        },
     }
 }
 
@@ -77,7 +80,7 @@ pub fn prompt_blocker(locked: bool, live: bool, activity: Activity, pending_ques
     else if activity == Activity::AwaitingApproval { Some("Session is waiting for an approval. Answer it in Raw first.") }
     else if pending_question { Some("Session is waiting for a structured answer. Answer it in Raw first.") }
     else if unobserved { Some("The previous delivery has not been observed. Check Raw before sending again.") }
-    else if activity == Activity::Working { Some("Session is busy. The instruction queue is not built yet; wait for its next pause.") }
+    else if activity == Activity::Working { Some("Session is busy. Queue the instruction for its next confirmed pause.") }
     else if !matches!(activity, Activity::Ready | Activity::NeedsAnswer) { Some("No confirmed prompt is available. Check Raw first.") }
     else { None }
 }
