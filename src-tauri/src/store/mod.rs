@@ -1,15 +1,17 @@
-//! The SQLite store (ARCHITECTURE §7): one database in the app's data folder, WAL mode,
+//! The SQLite store (ARCHITECTURE Â§7): one database in the app's data folder, WAL mode,
 //! `synchronous=FULL` (history must survive power loss; write volume is low), foreign keys on, and
 //! numbered forward-only migrations from `src-tauri/migrations/` (planned by
 //! `chorus_core::migrate`). Typed queries for each area live in the submodules.
 
 pub mod credentials;
 pub mod delivery;
+pub mod queue;
 pub mod replies;
 pub mod history;
 pub mod profiles;
 pub mod narrator;
 pub mod projects;
+pub mod progress;
 pub mod providers;
 pub mod routing;
 pub mod sessions;
@@ -39,7 +41,9 @@ const MIGRATION_FILES: &[(&str, &str)] = &[
     ("0012_aider_permissions.sql", include_str!("../../migrations/0012_aider_permissions.sql")),
     ("0013_p6_delivery.sql", include_str!("../../migrations/0013_p6_delivery.sql")),
     ("0014_p6_replies.sql", include_str!("../../migrations/0014_p6_replies.sql")),
-    ("0015_p6_narrator.sql", include_str!("../../migrations/0015_p6_narrator.sql")),
+    ("0015_p6_progress.sql", include_str!("../../migrations/0015_p6_progress.sql")),
+    ("0016_p6_queue.sql", include_str!("../../migrations/0016_p6_queue.sql")),
+    ("0017_p6_narrator.sql", include_str!("../../migrations/0017_p6_narrator.sql")),
 ];
 
 pub struct Store {
@@ -127,7 +131,7 @@ fn apply(conn: &mut Connection, m: &chorus_core::migrate::Migration<'_>, check_f
     tx.commit().map_err(|e| e.to_string())
 }
 
-/// `PRAGMA foreign_key_check` as `child table → missing parent table`, empty when every reference
+/// `PRAGMA foreign_key_check` as `child table â†’ missing parent table`, empty when every reference
 /// resolves.
 fn foreign_key_violations(conn: &Connection) -> Result<Vec<String>, String> {
     let mut stmt = conn.prepare("PRAGMA foreign_key_check").map_err(|e| e.to_string())?;
@@ -136,7 +140,7 @@ fn foreign_key_violations(conn: &Connection) -> Result<Vec<String>, String> {
     while let Some(row) = rows.next().map_err(|e| e.to_string())? {
         let child: String = row.get(0).map_err(|e| e.to_string())?;
         let parent: String = row.get(2).map_err(|e| e.to_string())?;
-        out.push(format!("{child} → {parent}"));
+        out.push(format!("{child} â†’ {parent}"));
     }
     Ok(out)
 }

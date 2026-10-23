@@ -22,18 +22,19 @@ struct OpenAsk {
 }
 
 pub struct Recorder {
-    session_id: u32,
-    run_id: u32,
+    pub(super) session_id: u32,
+    pub(super) run_id: u32,
     /// `"hook"` for prompts seen through Claude Code's or Codex's hooks, `"server"` for opencode.
     prompt_source: &'static str,
-    tracker: Tracker,
+    pub(super) tracker: Tracker,
     redact: Arc<Vec<Vec<u8>>>,
     patterns: Arc<Vec<Pattern>>,
     /// Tracker key → turn row.
     turns: HashMap<u64, i64>,
     /// The agent's turn id → turn row, to file tool calls under the right turn.
-    turn_rows: HashMap<String, i64>,
-    newest_turn: Option<i64>,
+    pub(super) turn_rows: HashMap<String, i64>,
+    pub(super) newest_turn: Option<i64>,
+    pub(crate) progress: super::progress::Capture,
     /// Call id → tool row; calls without an id are matched by tool name, oldest first.
     tools: HashMap<String, i64>,
     unnamed_tools: Vec<(String, i64)>,
@@ -55,6 +56,7 @@ impl Recorder {
             turns: HashMap::new(),
             turn_rows: HashMap::new(),
             newest_turn: None,
+            progress: Default::default(),
             tools: HashMap::new(),
             unnamed_tools: Vec::new(),
             asks: Vec::new(),
@@ -144,6 +146,7 @@ impl Recorder {
             let _ = history::set_run_transcript(store, self.run_id, path);
         }
         let body = compact_for_log(&self.clean_value(raw));
+        self.capture_progress(store, source, raw);
         let _ = history::record_event(store, self.session_id, Some(self.run_id), source, hook_event_name(raw).as_deref(), &body);
         for event in events {
             let changes = self.tracker.apply(event, now_ms);
@@ -271,6 +274,7 @@ impl Recorder {
 
     /// The run ended: its open turns are lost.
     pub fn run_ended(&mut self, store: &Store) {
+        self.read_progress(store);
         self.replies.clear();
         for change in self.tracker.run_ended() {
             self.apply_change(store, change, crate::store::now_ms());

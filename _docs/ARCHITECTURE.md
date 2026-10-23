@@ -213,6 +213,25 @@ Rule: anything written to `prompts`, `messages`, `tool_calls` or `asks` passes t
 
 ## 9. Narrator (Now / Blocker / Up next and suggested steps)
 
+P6 implementation separates pure plan/message parsing, queue gates and narrator validation in
+`chorus-core` from capture, SQLite, delivery and HTTP in the shell. Migrations 0015–0017 persist
+progress, queue entries and narrator attempts/actions respectively. Claude task hooks populate plan
+snapshots; a bounded transcript cursor records visible assistant text without thinking or tool output.
+Unknown correlation stays explicit. Other adapters expose missing capture capabilities.
+
+The queue uses D75's delivery receipts and serializes against Raw input, Close, Restart and Lock.
+Instructions are scrubbed and committed before delivery; uncertain attempts never replay. Only
+queued entries can be cancelled. Restart requires explicit rearming for the reviewed run. The user
+checks that Raw's prompt is empty before delivery; any later Raw input invalidates that assertion.
+
+Narrator calls run once per successful completed turn, without startup backfill/retry. Input plans
+must be complete and belong to the same run/turn. Responses are bounded, scrubbed and validated;
+turn/run/settings are rechecked after the call, preserving cost but suppressing stale suggestions.
+Current panels do not expose model suggestions from an earlier run/turn. Exact trimmed send text
+identifies resolved actions, preserving case and internal whitespace in code. Draft insertion appends
+without sending; `is_question` never overrides structured agent state. A live paid narrator remains
+an acceptance gate; fake transport tests cover response/cost/failure behavior.
+
 At each turn end, a small model reads the last prompt, the final message, the plan, tool-call summaries and
 the diff stat (all scrubbed), and returns JSON: `now`, `blocker`, `next`, `is_question`, and up to four
 `actions` (`kind`, `title`, `what`, `sends`, `eta`). One call per turn end, cost recorded against the

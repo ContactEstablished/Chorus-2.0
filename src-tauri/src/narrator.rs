@@ -66,10 +66,18 @@ pub fn start(manager: Arc<SessionManager>) -> Result<(), String> {
     Ok(())
 }
 
-/// Keep independent of the optional plan capture module so this slice builds in isolation.
-/// The integration replaces this explicit absence with a same-run, same-turn snapshot.
-fn plan_input(_store: &Store, _session: u32, _turn: u32) -> String {
-    "Plan not available to the narrator in this build.".into()
+/// Only use a complete snapshot attributed to the turn being summarised.
+fn plan_input(store: &Store, session: u32, turn: u32) -> Result<String, String> {
+    let run: Option<u32> = store.with(|c| c.query_row(
+        "SELECT run_id FROM turns WHERE id=?1 AND session_id=?2",
+        rusqlite::params![turn, session], |r| r.get(0),
+    ))?;
+    let plan = store::progress::latest_plan(store, session)?;
+    match plan {
+        Some(plan) if Some(plan.run_id) == run && plan.turn_id == Some(turn) && !plan.incomplete =>
+            serde_json::to_string(&plan.steps).map_err(|_| "The recorded plan could not be read.".into()),
+        _ => Ok("No complete structured plan was captured for this turn. Do not infer a plan from earlier runs or turns.".into()),
+    }
 }
 
 /// Recheck immediately before HTTP after Git/DB IO, including a project reassignment.
@@ -181,7 +189,7 @@ fn summarise_with(
                     .as_deref()
                     .unwrap_or("Final message unavailable"),
             ),
-            plan: &clean_json(&plan_input(store, session, turn)),
+            plan: &clean_json(&plan_input(store, session, turn)?),
             tools: &clean(&tool_text),
             diff: &clean_json(&diff),
             resolved: &clean_json(&rows::resolved(store, session)?),
@@ -198,6 +206,10 @@ fn summarise_with(
     let value: Value =
         serde_json::from_str(&response).map_err(|_| "Narrator response was not JSON.")?;
     let cost = core::cost(&value);
+    if still_enabled(store, session, turn, row.project_id, &config).is_err() {
+        return rows::finish(store, session, turn, &core::fallback(),
+            Some("The session or narrator settings changed while the summary was being generated. Its cost is recorded; its suggestions are not current."), cost);
+    }
     let summary = value
         .pointer("/choices/0/message/content")
         .and_then(Value::as_str)
@@ -338,6 +350,26 @@ pub fn narrator_resolve(
 mod tests {
     use super::*;
     #[test]
+    fn narrator_uses_only_complete_same_turn_plan() {
+        use chorus_core::progress::{PlanChange, PlanStatus};
+        let store = Store::in_memory();
+        store.with(|c| {
+            c.execute("INSERT INTO sessions(id,name,agent,cwd,state,cols,rows,created_at) VALUES(1,'test','claude','scratch','exited',80,24,1)", [])?;
+            c.execute("INSERT INTO runs(id,session_id,program,args,started_at) VALUES(1,1,'test','[]',1)", [])?;
+            Ok(())
+        }).unwrap();
+        let turn = store::history::open_turn(&store, 1, Some(1), None, None).unwrap() as u32;
+        assert!(plan_input(&store, 1, turn).unwrap().starts_with("No complete"));
+        store::progress::record_plan(&store, 1, 1, Some(turn.into()), "task-1", PlanChange::Upsert {
+            id: "1".into(), title: Some("Verify the greeting".into()), status: Some(PlanStatus::Completed),
+        }).unwrap();
+        assert!(plan_input(&store, 1, turn).unwrap().contains("Verify the greeting"));
+        let next = store::history::open_turn(&store, 1, Some(1), None, None).unwrap() as u32;
+        assert!(plan_input(&store, 1, next).unwrap().starts_with("No complete"));
+        store::progress::mark_plan_incomplete(&store, 1).unwrap();
+        assert!(plan_input(&store, 1, turn).unwrap().starts_with("No complete"));
+    }
+    #[test]
     fn last_moment_gate_refuses_project_change_disable_and_new_turn() {
         let store = Store::in_memory();
         store.with(|c|c.execute("INSERT INTO sessions(id,name,agent,cwd,state,cols,rows,created_at) VALUES(1,'test','claude','scratch','exited',80,24,1)",[])).unwrap();
@@ -437,5 +469,29 @@ mod tests {
             panic!("No key must not send a request")
         });
         assert!(result.unwrap_err().contains("No narrator key"));
+    }
+
+    #[test]
+    fn response_after_new_turn_preserves_cost_without_old_suggestions() {
+        let store = Store::in_memory();
+        store.with(|c| c.execute("INSERT INTO sessions(id,name,agent,cwd,state,cols,rows,created_at) VALUES(1,'test','claude','scratch','exited',80,24,1)", [])).unwrap();
+        let key = vault::add(&store, "fixture", "test-only-narrator-credential").unwrap();
+        let settings = Config { credential_id: Some(key), model: "fixture/model".into() };
+        store::settings::set(&store, SETTINGS_KEY, &serde_json::to_string(&settings).unwrap()).unwrap();
+        let turn = store::history::open_turn(&store, 1, None, None, None).unwrap() as u32;
+        store::history::close_turn(&store, turn.into(), "done", Some("Finished")).unwrap();
+        rows::enqueue(&store, 1, turn.into()).unwrap();
+        rows::claim(&store).unwrap();
+        let manager = SessionManager::new(store, std::env::temp_dir(), Box::new(|_| {}));
+        summarise_with(&manager, 1, turn, |_, _| {
+            store::history::open_turn(manager.store(), 1, None, None, None).unwrap();
+            let mut answer = core::fallback();
+            answer.actions[0].sends = "Stale suggestion from the previous task".into();
+            Ok(serde_json::json!({"choices":[{"message":{"content":serde_json::to_string(&answer).unwrap()}}],"usage":{"cost":0.003}}).to_string())
+        }).unwrap();
+        let panel = rows::panel(manager.store(), 1, None).unwrap();
+        assert_ne!(panel.status, "ready");
+        assert_eq!(panel.known_cost_usd, 0.003);
+        assert!(panel.actions.iter().all(|a| !a.suggestion.sends.contains("Stale suggestion")));
     }
 }

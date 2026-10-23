@@ -115,6 +115,7 @@ fn delivery_fixture(f: &Fixture, fail_enter: bool) -> (u32, Arc<Run>, DeliveryCh
         *writer = Box::new(DeliveryWriter { manager: Arc::downgrade(&f.manager), chunks: chunks.clone(), fail_enter, _original: original });
     }
     run.recorder.lock().unwrap().record(&f.manager.store, "test", &serde_json::json!({}), &[chorus_core::events::AgentEvent::Idle], crate::store::now_ms());
+    run.raw_empty.store(true, Ordering::SeqCst);
     (id, run, chunks)
 }
 
@@ -850,4 +851,118 @@ fn a_worktree_git_removed_only_in_part_is_reported_so() {
     assert!(note.starts_with("Removed the worktree from git, but couldn't delete all of its folder"), "{note}");
     assert!(f.manager.summary(s.id).unwrap().worktree.unwrap().removed);
     assert!(!git_in(&repo, &["worktree", "list"]).contains(&wt.branch));
+}
+
+
+fn queue_request(run: &Run, request: &str, text: &str) -> queue::QueueRequest {
+    queue::QueueRequest { run_id: run.id, request_id: request.into(), text: text.into() }
+}
+fn observe_queue_turn(f: &Fixture, run: &Run, text: &str) {
+    run.recorder.lock().unwrap().record(&f.manager.store, "test", &serde_json::json!({}), &[
+        chorus_core::events::AgentEvent::TurnStarted { turn: None, prompt: Some(text.into()) },
+        chorus_core::events::AgentEvent::TurnEnded { turn: None, message: Some("Done.".into()) },
+    ], crate::store::now_ms());
+}
+
+#[test]
+fn queue_is_fifo_and_waits_for_observation_and_raw_draft_confirmation() {
+    let f = Fixture::new("queue-fifo");
+    let (id, run, chunks) = delivery_fixture(&f, false);
+    queue::enqueue(&f.manager, id, queue_request(&run, DELIVERY_REQUEST, "first")).unwrap();
+    queue::enqueue(&f.manager, id, queue_request(&run, OTHER_REQUEST, "second")).unwrap();
+    // Same identity is idempotent; changed content is refused.
+    queue::enqueue(&f.manager, id, queue_request(&run, DELIVERY_REQUEST, "first")).unwrap();
+    assert!(queue::enqueue(&f.manager, id, queue_request(&run, DELIVERY_REQUEST, "changed")).is_err());
+    assert_eq!(queue::snapshot(&f.manager, id).unwrap().entries.len(), 2);
+    assert!(delivery::deliver_prompt(&f.manager, id, run.id, OTHER_REQUEST, "second", chorus_core::actions::PromptSource::Composer).unwrap_err().contains("earlier"));
+    queue::dispatch(&f.manager, id).unwrap();
+    assert_eq!(*chunks.lock().unwrap(), [b"first".to_vec(), b"\r".to_vec()]);
+    assert!(queue::dispatch(&f.manager, id).is_err(), "a second instruction cannot share an unobserved pause");
+    observe_queue_turn(&f, &run, "first");
+    f.manager.write(id, "raw draft").unwrap();
+    assert!(!queue::snapshot(&f.manager, id).unwrap().raw_empty);
+    assert!(queue::dispatch(&f.manager, id).unwrap_err().contains("Raw"));
+    assert!(queue::confirm_empty(&f.manager, id, run.id + 1).is_err());
+    queue::confirm_empty(&f.manager, id, run.id).unwrap();
+    queue::dispatch(&f.manager, id).unwrap();
+    let entries = queue::snapshot(&f.manager, id).unwrap().entries;
+    assert!(entries.iter().all(|e| e.status == "attempted"));
+    assert_eq!(chunks.lock().unwrap().len(), 5);
+    assert!(queue::change(&f.manager, id, entries[0].id, None).is_err(), "attempts cannot be cancelled as if unsent");
+    queue::dispatch(&f.manager, id).unwrap();
+    assert_eq!(chunks.lock().unwrap().len(), 5);
+}
+
+#[test]
+fn queue_cancel_and_uncertain_attempts_survive_reopen_without_replay() {
+    let f = Fixture::new("queue-uncertain");
+    let (id, run, chunks) = delivery_fixture(&f, true);
+    queue::enqueue(&f.manager, id, queue_request(&run, DELIVERY_REQUEST, "cancel me")).unwrap();
+    let first = crate::store::queue::first(&f.manager.store, id).unwrap().unwrap();
+    queue::change(&f.manager, id, first.id, None).unwrap();
+    queue::dispatch(&f.manager, id).unwrap();
+    assert!(chunks.lock().unwrap().is_empty());
+    assert!(delivery::deliver_prompt(&f.manager, id, run.id, DELIVERY_REQUEST, "cancel me", chorus_core::actions::PromptSource::Composer).is_err());
+    queue::enqueue(&f.manager, id, queue_request(&run, OTHER_REQUEST, "partial")).unwrap();
+    queue::dispatch(&f.manager, id).unwrap();
+    assert_eq!(chunks.lock().unwrap().len(), 1);
+    let reopened = Store::open(&f.dir.join("chorus.db")).unwrap();
+    let entries = crate::store::queue::list(&reopened, id).unwrap();
+    assert_eq!(entries[0].status, "attempted");
+    assert_eq!(entries[0].delivery_status.as_deref(), Some("uncertain"));
+    assert_eq!(entries[1].status, "cancelled");
+    queue::dispatch(&f.manager, id).unwrap();
+    assert_eq!(chunks.lock().unwrap().len(), 1);
+}
+
+#[test]
+fn queue_stale_head_blocks_later_entries_until_explicit_review() {
+    let f = Fixture::new("queue-review");
+    let (id, run, chunks) = delivery_fixture(&f, false);
+    queue::enqueue(&f.manager, id, queue_request(&run, DELIVERY_REQUEST, "old instruction")).unwrap();
+    queue::enqueue(&f.manager, id, queue_request(&run, OTHER_REQUEST, "new instruction")).unwrap();
+    let first = crate::store::queue::first(&f.manager.store, id).unwrap().unwrap();
+    let old_run: u32 = f.manager.store.with(|c| {
+        c.execute("INSERT INTO runs(session_id,program,args,started_at,ended_at) VALUES (?1,'test','[]',0,1)", [id])?;
+        Ok(c.last_insert_rowid() as u32)
+    }).unwrap();
+    f.manager.store.with(|c| c.execute("UPDATE instruction_queue SET run_id=?2 WHERE id=?1", rusqlite::params![first.id,old_run])).unwrap();
+    queue::dispatch(&f.manager, id).unwrap();
+    assert!(chunks.lock().unwrap().is_empty());
+    assert!(queue::snapshot(&f.manager, id).unwrap().blocked_reason.unwrap().contains("restarted"));
+    assert!(queue::change(&f.manager, id, first.id, Some(old_run)).is_err());
+    queue::change(&f.manager, id, first.id, Some(run.id)).unwrap();
+    queue::dispatch(&f.manager, id).unwrap();
+    assert_eq!(chunks.lock().unwrap()[0], b"old instruction");
+}
+
+#[test]
+fn queue_storage_failure_is_visible_and_happens_before_any_write() {
+    let f = Fixture::new("queue-storage");
+    let (id, run, chunks) = delivery_fixture(&f, false);
+    queue::enqueue(&f.manager, id, queue_request(&run, DELIVERY_REQUEST, "safe")).unwrap();
+    f.manager.store.with(|c| c.execute_batch("CREATE TRIGGER fail_prompt BEFORE INSERT ON prompts BEGIN SELECT RAISE(ABORT,'injected persistence failure'); END;")).unwrap();
+    queue::tick(&f.manager, id);
+    assert!(queue::snapshot(&f.manager, id).unwrap().blocked_reason.unwrap().contains("persistence failure"));
+    assert!(chunks.lock().unwrap().is_empty());
+    assert_eq!(crate::store::queue::first(&f.manager.store, id).unwrap().unwrap().status, "queued");
+}
+
+#[test]
+fn queue_approval_lock_and_unknown_state_never_dispatch_and_text_is_scrubbed() {
+    let f = Fixture::new("queue-guards");
+    let (id, run, chunks) = delivery_fixture(&f, false);
+    *run.recorder.lock().unwrap() = Recorder::new(id, run.id, "hook", Arc::new(vec![b"private-queue-test".to_vec()]), Arc::new(builtin_patterns()));
+    queue::enqueue(&f.manager, id, queue_request(&run, DELIVERY_REQUEST, "use private-queue-test")).unwrap();
+    let entry = crate::store::queue::first(&f.manager.store, id).unwrap().unwrap();
+    assert!(!entry.text.contains("private-queue-test"));
+    assert!(entry.text.contains("REDACTED"));
+    assert!(queue::dispatch(&f.manager, id).is_err());
+    run.recorder.lock().unwrap().record(&f.manager.store, "test", &serde_json::json!({}), &[chorus_core::events::AgentEvent::Idle], 1);
+    f.manager.set_locked(id, true, None).unwrap();
+    assert!(queue::dispatch(&f.manager, id).is_err());
+    f.manager.set_locked(id, false, None).unwrap();
+    let (_ask, _held) = held_approval(&f, &run, "queue-approval");
+    assert!(queue::dispatch(&f.manager, id).is_err());
+    assert!(chunks.lock().unwrap().is_empty());
 }

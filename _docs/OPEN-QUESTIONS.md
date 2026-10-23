@@ -33,6 +33,11 @@ actual default `gpt-6-astra` reported `update_plan` unavailable and named `reque
 as a Plan-mode tool. This is bounded evidence for that configuration, not a universal absence
 claim. See [the next slice's findings](spikes/S5-P6-REPLIES.md); Q19 and the Codex exit check stay open.
 
+A Plan-mode follow-up on the same CLI/default model observed a structured question,
+accepted its answer and received `serverRequest/resolved`. It still emitted no progress
+plan update. Question control and plan capture are distinct capabilities; authenticated
+same-thread Raw/controller verification remains open. See [mode evidence](spikes/S5-P6-Q19-MODES.md).
+
 **Q21 — How should Chorus run DeepSeek Harness?** (D59.) `dsh` offers a local web UI and the server
 behind it (`dsh web`, port 3080), a one-shot headless run (`dsh --profile headless "<task>"`), a Python
 SDK, and a terminal UI only through a community plugin profile (`dsh --profile tui`). Options: (a) its

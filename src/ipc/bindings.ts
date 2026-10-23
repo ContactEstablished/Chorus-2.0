@@ -137,6 +137,11 @@ export const commands = {
 	narratorProjectSet: (projectId: number, enabled: boolean) => typedError<null, string>(__TAURI_INVOKE("narrator_project_set", { projectId, enabled })),
 	narratorPanel: (sessionId: number) => typedError<Panel, string>(__TAURI_INVOKE("narrator_panel", { sessionId })),
 	narratorResolve: (sessionId: number, actionId: number, disposition: Disposition) => typedError<null, string>(__TAURI_INVOKE("narrator_resolve", { sessionId, actionId, disposition })),
+	sessionProgress: (sessionId: number) => typedError<SessionProgress, string>(__TAURI_INVOKE("session_progress", { sessionId })),
+	sessionQueue: (sessionId: number) => typedError<QueueSnapshot, string>(__TAURI_INVOKE("session_queue", { sessionId })),
+	enqueueInstruction: (sessionId: number, request: QueueRequest) => typedError<null, string>(__TAURI_INVOKE("enqueue_instruction", { sessionId, request })),
+	changeQueuedInstruction: (sessionId: number, instructionId: number, reviewedRunId: number | null) => typedError<null, string>(__TAURI_INVOKE("change_queued_instruction", { sessionId, instructionId, reviewedRunId })),
+	confirmRawPromptEmpty: (sessionId: number, runId: number) => typedError<null, string>(__TAURI_INVOKE("confirm_raw_prompt_empty", { sessionId, runId })),
 };
 
 /** Events */
@@ -164,7 +169,7 @@ export type ActionCapabilities = {
 	queue: ActionCapability,
 };
 
-export type ActionCapability = { channel: "pty" } | { channel: "held-hook" } | { channel: "unavailable"; reason: string };
+export type ActionCapability = { channel: "pty" } | { channel: "held-hook" } | { channel: "observed" } | { channel: "unavailable"; reason: string };
 
 export type ActionKind = "continue" | "review" | "answer" | "retry";
 
@@ -673,6 +678,22 @@ export type PermissionChoice = {
 	args: string,
 };
 
+export type PlanSnapshot = {
+	id: number,
+	runId: number,
+	turnId: number | null,
+	steps: PlanStep[],
+	incomplete: boolean,
+};
+
+export type PlanStatus = "pending" | "in-progress" | "completed";
+
+export type PlanStep = {
+	id: string,
+	title: string,
+	status: PlanStatus,
+};
+
 export type Prefs = {
 	theme: Theme,
 	/**  The whole window's zoom, 0.8 to 1.6. */
@@ -740,6 +761,13 @@ export type ProfileSummary = {
 	providerName: string | null,
 	credential: CredentialUse | null,
 	updatedAtSecs: number,
+};
+
+export type ProgressMessage = {
+	id: number,
+	runId: number,
+	turnId: number | null,
+	text: string,
 };
 
 export type Project = {
@@ -829,6 +857,28 @@ export type Question = {
 export type QuestionOption = {
 	label: string,
 	description: string,
+};
+
+export type QueueRequest = {
+	runId: number,
+	requestId: string,
+	text: string,
+};
+
+export type QueueSnapshot = {
+	runId: number | null,
+	rawEmpty: boolean,
+	blockedReason: string | null,
+	entries: QueuedInstruction[],
+};
+
+export type QueuedInstruction = {
+	id: number,
+	runId: number,
+	requestId: string,
+	text: string,
+	status: string,
+	deliveryStatus: string | null,
 };
 
 /**  The three tiers the ranker orders. Nitro is never ranked: OpenRouter chooses. */
@@ -943,6 +993,14 @@ export type SessionHistory = {
 	withPrompt: number,
 	/**  Where the agent keeps the full transcript (Claude Code's JSONL, Codex's rollout). */
 	transcriptPath: string | null,
+};
+
+export type SessionProgress = {
+	plan: PlanSnapshot | null,
+	messages: ProgressMessage[],
+	currentRunId: number | null,
+	note: string,
+	error: string | null,
 };
 
 export type SessionStatus = "running" | "exited" | "closed";

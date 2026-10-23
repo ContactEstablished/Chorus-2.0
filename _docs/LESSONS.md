@@ -24,7 +24,13 @@ makes "no bytes for N seconds" a trustworthy signal that the agent **stopped**. 
 signal: typing echoes, resizes repaint, and hook-less agents write constantly.
 
 **L4 — Send prompt text and Enter as two separate writes.** A trailing `\r` in the same write is read as
-part of a bracketed paste and lands as a newline in the input box; the agent never runs.
+part of a bracketed paste and lands as a newline in the input box; the agent never runs. The P6 runtime
+check also found adjacent separate writes could coalesce: Claude displayed the queued prompt with a
+blank next line and emitted no prompt hook. A bootstrap probe with a 200 ms gap between text and Enter
+submitted successfully. Shared delivery now waits 200 ms after flushing text, retaining its action,
+writer and recorder locks through Enter. This is a timing workaround, not agent acknowledgement;
+a fresh real queue request was observed by the agent and completed after the gap. Existing written
+or uncertain requests must not be replayed.
 
 **L5 — opencode silently ignores an effort it doesn't recognise.** Wrong variant name, missing model
 binding, or a model mismatch: no error, no log, clean exit. The only proof an effort applied is the stored

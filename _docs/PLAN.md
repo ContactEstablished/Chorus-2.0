@@ -283,12 +283,18 @@ Q19 remains open: the current Codex/default-model probe emitted no plan and repo
 unavailable; schema support alone still does not enable a production bridge. Checks pass: 456 Rust
 tests, 19 frontend tests, TypeScript, Clippy and secret scan.
 
-**Next slices:** (1) complete the Codex app-server plan/control spike before enabling its bridge;
-(2) persisted plan and intermediate-message capture; (3) durable queue and
-composer with explicit cancel/restart/duplicate policy; (4) D28 narrator, costs and per-project switch,
-Now / Blocker / Up next and durable Done/dismissed actions; (5) both planned multi-phase acceptance runs.
-The queue, narrator/key fallback and both Friendly-only exit checks remain open. Nothing in this
-slice closes P6, P7 or the separate Gemini/Aider/P14 acceptance work.
+**Third slice (2026-10-22):** Claude task-tool plans and visible intermediate messages are persisted;
+Friendly has a composer and durable FIFO queue; D28's narrator has settings, project opt-out,
+recorded/unknown costs, generic no-key drafts and durable Done/dismissed suggestions. Suggestions
+append to the composer for review, never submit automatically. Integration keeps plans bound to the
+same run/turn and rejects stale narrator suggestions. See
+[integration review](HANDOFF-P6-INTEGRATION-REVIEW.md) for checks, observed behavior and limitations.
+
+**Remaining gates:** complete Q19 before enabling the Codex plan/control bridge; verify a configured
+live narrator; finish queue recovery acceptance and both planned multi-phase Friendly-only runs.
+A fresh session still needs an initial Raw turn before structured readiness permits composer delivery.
+The Codex Plan-mode probe answered a real structured question but emitted no progress-plan updates.
+Nothing in this slice closes P6, P7 or the separate Gemini/Aider/P14 acceptance work.
 
 **Exit:** a Claude Code and a Codex session each run a planned multi-phase task to the end, approved and
 steered entirely from Friendly, with the Raw view showing the same history.

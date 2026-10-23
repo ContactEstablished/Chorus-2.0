@@ -43,13 +43,13 @@ watch(s, (now) => {
   if (!now) view.forgetSession(props.sessionId)
 })
 
-/** DESIGN.md's readiness panel, worded for P4: answers go through the terminal until P6. */
+/** Readiness guidance shared by Friendly and Raw views. */
 const READINESS: Record<Attention, { title: string; text: string }> = {
   approval: { title: 'Waiting on you.', text: 'Review the request in Friendly. If its reply channel is unavailable, approve or deny in Raw.' },
   input: { title: 'Waiting on you.', text: 'Answer the active question card in Friendly, or use Raw when no reply channel is available.' },
   failed: { title: 'Agent stopped.', text: 'History is intact. Restart runs it again, resuming its conversation where the agent allows it.' },
-  working: { title: 'Agent is busy.', text: 'It is working on a turn. What you type goes straight to its terminal.' },
-  ready: { title: 'Ready for the next step.', text: 'The last turn is finished. Type your next instruction in the terminal.' },
+  working: { title: 'Agent is busy.', text: 'It is working on a turn. Queue an instruction in Friendly for the next confirmed pause, or follow its progress in Raw.' },
+  ready: { title: 'Ready for the next step.', text: 'The last turn is finished. Write your next instruction in the Friendly composer or Raw.' },
   running: { title: 'Running.', text: "Chorus has no event from this agent, so it can't tell whether it's busy. Watch the terminal." },
   done: { title: 'Session finished.', text: 'It exited cleanly. Restart starts it again, in the same conversation where the agent allows it.' },
 }

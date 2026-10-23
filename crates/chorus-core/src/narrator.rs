@@ -68,13 +68,9 @@ pub fn excerpt(text: &str, bytes: usize) -> String {
     format!("{}…", &text[..end])
 }
 
-/// Equivalent whitespace/case is suppressed locally even if the model repeats a completed step.
+/// Only surrounding whitespace is immaterial; code identifiers and literals stay distinct.
 pub fn signature(sends: &str) -> String {
-    sends
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .to_lowercase()
+    sends.trim().to_owned()
 }
 
 pub fn fallback() -> Summary {
@@ -193,9 +189,8 @@ mod tests {
         assert_eq!(cost(&json!({})), None);
         assert_eq!(cost(&json!({"usage":{"cost":0.0}})), Some(0.0));
         assert_eq!(cost(&json!({"usage":{"cost":-1}})), None);
-        assert_eq!(
-            signature(" Review  THIS\nwork "),
-            signature("review this work")
-        );
+        assert_eq!(signature(" Review this work "), signature("Review this work"));
+        assert_ne!(signature("Rename foo to Foo"), signature("Rename Foo to foo"));
+        assert_ne!(signature("Replace \"a  b\""), signature("Replace \"a b\""));
     }
 }

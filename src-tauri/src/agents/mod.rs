@@ -43,7 +43,7 @@ pub fn resolve(kind: AgentKind, parent_env: &[(String, String)], scratch: &Path)
         AgentKind::Claude => Ok(Launch {
             program: find_on_path(&path, "claude.exe").ok_or("claude.exe not found on PATH")?,
             args: vec![],
-            additions: vec![("DISABLE_AUTOUPDATER", "1".into())],
+            additions: vec![("DISABLE_AUTOUPDATER", "1".into()), ("CLAUDE_CODE_ENABLE_TODO_TOOLS", "1".into())],
         }),
         AgentKind::Grok => Ok(Launch {
             program: find_on_path(&path, "grok.exe").ok_or("grok.exe not found on PATH")?,

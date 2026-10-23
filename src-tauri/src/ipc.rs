@@ -90,6 +90,13 @@ pub fn builder() -> Builder<tauri::Wry> {
             crate::narrator::narrator_project_set,
             crate::narrator::narrator_panel,
             crate::narrator::narrator_resolve,
+            // P6 plans: persisted checklists and visible assistant messages.
+            sessions::progress::session_progress,
+            // P6 queue: durable instructions and explicit Raw draft coordination.
+            sessions::queue::session_queue,
+            sessions::queue::enqueue_instruction,
+            sessions::queue::change_queued_instruction,
+            sessions::queue::confirm_raw_prompt_empty,
         ])
         .events(collect_events![app::BackendPulse, sessions::SessionUpdated, fleet::FleetClick])
 }

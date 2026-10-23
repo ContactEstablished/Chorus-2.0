@@ -135,11 +135,26 @@ pub fn panel(store: &Store, session_id: u32, unavailable: Option<String>) -> Res
             Some((id,status,reason,summary)) => (Some(id), status, reason, summary.and_then(|s|serde_json::from_str(&s).ok()).unwrap_or_else(chorus_core::narrator::fallback)),
             None => (None,"fallback".into(),Some("No completed turn has been summarised yet.".into()),chorus_core::narrator::fallback()),
         };
-        let fallback = unavailable.is_some() || status != "ready";
+        // A completed summary is history once another turn starts or a run restarts,
+        // including when its HTTP response arrives after that change. Keep its cost and
+        // resolved actions, but never offer the old model's instructions as current work.
+        let applicable = match turn_id {
+            Some(turn) => c.query_row(
+                "SELECT EXISTS(SELECT 1 FROM turns t WHERE t.id=?1 AND t.session_id=?2
+                 AND t.end_reason='done' AND t.id=(SELECT MAX(id) FROM turns WHERE session_id=?2)
+                 AND t.run_id IS (SELECT MAX(id) FROM runs WHERE session_id=?2))",
+                params![turn,session_id], |r| r.get::<_,bool>(0),
+            )?,
+            None => true,
+        };
+        let historical = !applicable;
+        let historical_reason = historical.then(|| "The previous summary is historical: a newer turn or run superseded it. Continue and Review are generic drafts.".to_owned());
+        let fallback = unavailable.is_some() || historical || status != "ready";
         let summary = if fallback { chorus_core::narrator::fallback() } else { summary };
-        if fallback { put_actions(c,session_id,turn_id,&summary.actions)?; }
+        let action_turn = if historical { None } else { turn_id };
+        if fallback { put_actions(c,session_id,action_turn,&summary.actions)?; }
         let mut stmt = c.prepare("SELECT id,suggestion,status FROM narrator_actions WHERE session_id=?1 AND (status!='open' OR turn_id IS ?2) ORDER BY status='open' DESC,updated_at DESC,id DESC LIMIT 40")?;
-        let mut actions = stmt.query_map(params![session_id,turn_id], |r| {
+        let mut actions = stmt.query_map(params![session_id,action_turn], |r| {
             let data: String = r.get(1)?;
             let suggestion = serde_json::from_str(&data).map_err(|e|rusqlite::Error::FromSqlConversionFailure(1,rusqlite::types::Type::Text,Box::new(e)))?;
             Ok(Action{id:r.get(0)?,suggestion,status:r.get(2)?})
@@ -148,7 +163,7 @@ pub fn panel(store: &Store, session_id: u32, unavailable: Option<String>) -> Res
         let allowed: Vec<String> = summary.actions.iter().map(|a|signature(&a.sends)).collect();
         actions.retain(|a|a.status!="open" || allowed.contains(&signature(&a.suggestion.sends)));
         let (known_cost_usd,unknown_cost_calls) = c.query_row("SELECT COALESCE(SUM(cost_usd),0),COALESCE(SUM(requested=1 AND cost_usd IS NULL),0) FROM narrator_jobs WHERE session_id=?1", [session_id],|r|Ok((r.get(0)?,r.get(1)?)))?;
-        Ok(Panel{turn_id,summary,status:if unavailable.is_some(){"fallback".into()}else{status},reason:unavailable.or(reason),actions,known_cost_usd,unknown_cost_calls})
+        Ok(Panel{turn_id,summary,status:if unavailable.is_some() || historical {"fallback".into()}else{status},reason:unavailable.or(historical_reason).or(reason),actions,known_cost_usd,unknown_cost_calls})
     })
 }
 
@@ -159,6 +174,7 @@ mod tests {
         let s = Store::in_memory();
         s.with(|c|c.execute("INSERT INTO sessions(id,name,agent,cwd,state,cols,rows,created_at) VALUES(1,'test','claude','scratch','exited',80,24,1)",[])).unwrap();
         let turn = super::super::history::open_turn(&s, 1, None, None, None).unwrap() as u32;
+        super::super::history::close_turn(&s, turn.into(), "done", Some("Done.")).unwrap();
         (s, 1, turn)
     }
     #[test]
@@ -212,4 +228,88 @@ mod tests {
                 .any(|a| a.suggestion.sends == "A specific model suggestion")
         );
     }
+
+    fn model_summary() -> Summary {
+        let mut summary = chorus_core::narrator::fallback();
+        summary.now = "An old model summary".into();
+        summary.actions[0].sends = "A previous model instruction".into();
+        summary.actions[1].sends = "A resolved model instruction".into();
+        summary
+    }
+
+    fn assert_historical(panel: &Panel, cost: f64) {
+        assert_eq!(panel.status, "fallback");
+        assert!(panel.reason.as_deref().unwrap().contains("historical"));
+        assert_ne!(panel.summary.now, "An old model summary");
+        let generic = chorus_core::narrator::fallback();
+        assert!(panel.actions.iter().filter(|a| a.status == "open")
+            .all(|a| generic.actions.iter().any(|g| g.sends == a.suggestion.sends)));
+        assert_eq!(panel.known_cost_usd, cost);
+    }
+
+    #[test]
+    fn newer_turn_hides_old_summary_and_keeps_cost_and_resolved_history() {
+        let (s, id, turn) = fixture();
+        enqueue(&s, id, turn.into()).unwrap();
+        finish(&s, id, turn, &model_summary(), None, Some(0.002)).unwrap();
+        let current = panel(&s, id, None).unwrap();
+        let resolved = current.actions.iter().find(|a| a.suggestion.sends == "A resolved model instruction").unwrap().id;
+        resolve(&s, id, resolved, Disposition::Done).unwrap();
+        super::super::history::open_turn(&s, id, None, None, None).unwrap();
+        let historical = panel(&s, id, None).unwrap();
+        assert_historical(&historical, 0.002);
+        assert!(historical.actions.iter().any(|a| a.id == resolved && a.status == "done"));
+        let stored: String = s.with(|c| c.query_row("SELECT summary FROM narrator_jobs WHERE turn_id=?1", [turn], |r| r.get(0))).unwrap();
+        assert!(stored.contains("An old model summary"), "historical evidence remains stored");
+    }
+
+    #[test]
+    fn late_summary_completion_is_inapplicable_after_new_turn() {
+        let (s, id, turn) = fixture();
+        enqueue(&s, id, turn.into()).unwrap();
+        claim(&s).unwrap();
+        requested(&s, turn, "fixture/model").unwrap();
+        // A transport can finish after another turn starts; that response still records cost.
+        super::super::history::open_turn(&s, id, None, None, None).unwrap();
+        finish(&s, id, turn, &model_summary(), None, Some(0.003)).unwrap();
+        assert_historical(&panel(&s, id, None).unwrap(), 0.003);
+    }
+
+    #[test]
+    fn restarted_run_hides_old_summary_before_any_new_turn() {
+        let (s, id, turn) = fixture();
+        s.with(|c| {
+            c.execute("INSERT INTO runs(id,session_id,program,args,started_at) VALUES(1,?1,'fixture','[]',1)", [id])?;
+            c.execute("UPDATE turns SET run_id=1 WHERE id=?1", [turn])?;
+            Ok(())
+        }).unwrap();
+        enqueue(&s, id, turn.into()).unwrap();
+        finish(&s, id, turn, &model_summary(), None, Some(0.004)).unwrap();
+        assert_eq!(panel(&s, id, None).unwrap().status, "ready");
+        s.with(|c| c.execute("INSERT INTO runs(id,session_id,program,args,started_at) VALUES(2,?1,'fixture','[]',2)", [id])).unwrap();
+        assert_historical(&panel(&s, id, None).unwrap(), 0.004);
+    }
+
+    #[test]
+    fn distinct_case_and_literal_whitespace_actions_are_not_suppressed() {
+        for (first, second) in [
+            ("Rename foo to Foo", "Rename Foo to foo"),
+            ("Replace \"a  b\"", "Replace \"a b\""),
+        ] {
+            let (s, id, turn) = fixture();
+            enqueue(&s, id, turn.into()).unwrap();
+            let mut summary = model_summary();
+            summary.actions.truncate(1);
+            summary.actions[0].sends = first.into();
+            finish(&s, id, turn, &summary, None, None).unwrap();
+            let first_id = panel(&s, id, None).unwrap().actions[0].id;
+            resolve(&s, id, first_id, Disposition::Done).unwrap();
+            summary.actions[0].sends = second.into();
+            finish(&s, id, turn, &summary, None, None).unwrap();
+            let shown = panel(&s, id, None).unwrap();
+            assert!(shown.actions.iter().any(|a| a.suggestion.sends == second && a.status == "open"));
+            assert!(shown.actions.iter().any(|a| a.id == first_id && a.status == "done"));
+        }
+    }
+
 }

@@ -50,6 +50,8 @@ pub fn begin(store: &Store, session: u32, run: u32, request: &str, text: &str, s
         let prompt_id: u32 = tx.query_row("SELECT last_insert_rowid()", [], |r| r.get(0))?;
         tx.execute("INSERT INTO prompt_deliveries (prompt_id,session_id,run_id,request_id,status,attempted_at) VALUES (?1,?2,?3,?4,'uncertain',?5)",
             params![prompt_id, session, run, request, at])?;
+        // A crash after this commit leaves both records attempted, never eligible for replay.
+        tx.execute("UPDATE instruction_queue SET status='attempted',prompt_id=?3 WHERE session_id=?1 AND request_id=?2 AND status='queued'", params![session,request,prompt_id])?;
         tx.commit()?;
         Ok(Delivered { prompt_id, run_id: run, status: DeliveryStatus::Uncertain })
     })

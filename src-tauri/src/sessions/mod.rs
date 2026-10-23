@@ -15,9 +15,11 @@
 pub mod commands;
 pub mod actions;
 pub mod delivery;
+pub mod queue;
 pub mod job;
 pub mod mirror;
 pub mod profiles;
+pub mod progress;
 pub mod workspace;
 pub mod worktrees;
 
@@ -283,7 +285,7 @@ const BOUNDARY_RESTARTED: &str = "── Restarted ──";
 /// How often an open Claude Code turn's transcript is checked for an interrupt.
 const TRANSCRIPT_POLL: Duration = Duration::from_secs(2);
 /// The most of a transcript read in one check.
-const MAX_TRANSCRIPT_READ: u64 = 4 * 1024 * 1024;
+pub(crate) const MAX_TRANSCRIPT_READ: u64 = 4 * 1024 * 1024;
 /// The most turns one history request returns.
 const MAX_HISTORY_TURNS: u32 = 500;
 /// How often "no signal" is checked.
@@ -311,7 +313,7 @@ fn random_token() -> String {
 
 /// The complete lines between `from` and `to` in a file, and how many bytes they took (a line
 /// still being written is left for next time).
-fn read_new_lines(path: &str, from: u64, to: u64) -> Option<(Vec<String>, u64)> {
+pub(crate) fn read_new_lines(path: &str, from: u64, to: u64) -> Option<(Vec<String>, u64)> {
     use std::io::{Seek, SeekFrom};
     let mut f = std::fs::File::open(path).ok()?;
     f.seek(SeekFrom::Start(from)).ok()?;
@@ -440,6 +442,9 @@ struct Run {
     id: u32,
     pid: u32,
     writer: Mutex<Box<dyn Write + Send>>,
+    /// Only an explicit user assertion can establish an empty Raw prompt.
+    raw_empty: AtomicBool,
+    queue_error: Mutex<Option<String>>,
     master: Mutex<Option<Box<dyn MasterPty + Send>>>,
     job: Job,
     /// Set before Chorus itself ends the process (Close, Restart), so the exit isn't taken for the
@@ -624,6 +629,7 @@ impl SessionManager {
                     live.values().filter_map(|l| l.current_run().map(|r| (l.id, r))).collect()
                 };
                 for (id, run) in runs {
+                    queue::tick(&m, id);
                     let stale = run.recorder.lock().expect("recorder lock").stale(crate::store::now_ms(), run.last_output_ms.load(Ordering::Relaxed));
                     if run.no_signal_shown.swap(stale, Ordering::SeqCst) != stale {
                         m.notify_id(id);
@@ -1184,6 +1190,8 @@ impl SessionManager {
             pid,
             started: Instant::now(),
             writer: Mutex::new(writer),
+            raw_empty: AtomicBool::new(false),
+            queue_error: Mutex::new(None),
             master: Mutex::new(Some(pair.master)),
             job,
             requested: Mutex::new(None),
@@ -1318,7 +1326,8 @@ impl SessionManager {
             let mut seen: Option<(String, u64)> = None;
             while !run.wait_finished(TRANSCRIPT_POLL) {
                 let (path, open) = {
-                    let r = run.recorder.lock().expect("recorder lock");
+                    let mut r = run.recorder.lock().expect("recorder lock");
+                    r.read_progress(&m.store);
                     (r.transcript_path(), r.has_open_turn())
                 };
                 let Some(path) = path else { continue };
@@ -1535,7 +1544,10 @@ impl SessionManager {
         if data.len() > MAX_WRITE_BYTES {
             return Err("write too large".into());
         }
+        let live = self.open_live(id)?;
+        let _action = live.action.lock().expect("action lock");
         let run = self.running(id)?;
+        if !data.is_empty() { run.raw_empty.store(false, Ordering::SeqCst); }
         let mut writer = run.writer.lock().expect("writer lock");
         writer.write_all(data.as_bytes()).and_then(|()| writer.flush()).map_err(|e| e.to_string())
     }

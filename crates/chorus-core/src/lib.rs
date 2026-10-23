@@ -7,6 +7,7 @@
 
 pub mod activity;
 pub mod actions;
+pub mod queue;
 pub mod replies;
 pub mod agent;
 pub mod attention;
@@ -30,6 +31,7 @@ pub mod narrator;
 pub mod opencode;
 pub mod prefs;
 pub mod projects;
+pub mod progress;
 pub mod providers;
 pub mod routing;
 pub mod scrollback;

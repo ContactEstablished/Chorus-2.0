@@ -37,6 +37,7 @@ pub enum SessionAction {
 pub enum ActionCapability {
     Pty,
     HeldHook,
+    Observed,
     Unavailable { reason: String },
 }
 
@@ -61,12 +62,15 @@ pub fn capabilities(agent: AgentKind) -> ActionCapabilities {
         },
         question: unavailable("Structured question replies are not wired yet. Answer the agent in Raw."),
         approval: unavailable("Chorus currently observes approvals only. Approve or deny in Raw."),
-        plan: unavailable(if agent == AgentKind::Codex {
+        plan: if agent == AgentKind::Claude { ActionCapability::Observed } else { unavailable(if agent == AgentKind::Codex {
             "Codex plan updates are not connected in this session. Read its plan in Raw."
         } else {
             "Plan capture is not wired yet. Read the agent's plan in Raw."
-        }),
-        queue: unavailable("The durable instruction queue is not built yet. Wait for the turn to finish."),
+        }) },
+        queue: match agent {
+            AgentKind::Claude | AgentKind::Codex => ActionCapability::Pty,
+            _ => unavailable("The queue needs a verified prompt channel. Use Raw for this agent."),
+        },
     }
 }
 
@@ -74,10 +78,10 @@ pub fn capabilities(agent: AgentKind) -> ActionCapabilities {
 pub fn prompt_blocker(locked: bool, live: bool, activity: Activity, pending_question: bool, unobserved: bool) -> Option<&'static str> {
     if locked { Some("Session is locked. Unlock it before sending an instruction.") }
     else if !live { Some("Session has no live run. Restart it first.") }
-    else if activity == Activity::AwaitingApproval { Some("Session is waiting for an approval. Answer it in Raw first.") }
-    else if pending_question { Some("Session is waiting for a structured answer. Answer it in Raw first.") }
+    else if activity == Activity::AwaitingApproval { Some("Session is waiting for an approval. Answer the active approval card in Friendly, or use Raw first.") }
+    else if pending_question { Some("Session is waiting for a structured answer. Answer the active question card in Friendly, or use Raw first.") }
     else if unobserved { Some("The previous delivery has not been observed. Check Raw before sending again.") }
-    else if activity == Activity::Working { Some("Session is busy. The instruction queue is not built yet; wait for its next pause.") }
+    else if activity == Activity::Working { Some("Session is busy. Queue the instruction for its next confirmed pause.") }
     else if !matches!(activity, Activity::Ready | Activity::NeedsAnswer) { Some("No confirmed prompt is available. Check Raw first.") }
     else { None }
 }
@@ -166,7 +170,7 @@ mod tests {
             let caps = capabilities(agent);
             assert!(matches!(caps.approval, ActionCapability::Unavailable { .. }));
             assert!(matches!(caps.question, ActionCapability::Unavailable { .. }));
-            assert!(matches!(caps.plan, ActionCapability::Unavailable { .. }));
+            assert_eq!(matches!(caps.plan, ActionCapability::Observed), agent == AgentKind::Claude);
         }
     }
 }

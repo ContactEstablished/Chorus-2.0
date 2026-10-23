@@ -30,7 +30,7 @@ const labels = { prompt: 'Instructions', question: 'Questions', approval: 'Appro
     <dl v-if="channels">
       <template v-for="(capability, key) in channels.capabilities" :key="key">
         <dt>{{ labels[key] }}</dt>
-        <dd>{{ capability.channel === 'unavailable' ? capability.reason : capability.channel === 'held-hook' ? 'Live requests can be answered in Friendly while their hook is connected. Expired or unsupported requests remain in Raw.' : 'Instructions can be delivered after a confirmed pause. The composer is not available yet.' }}</dd>
+        <dd>{{ capability.channel === 'unavailable' ? capability.reason : capability.channel === 'observed' ? 'Successful task-tool updates are recorded as a checklist in Friendly. Ordinary text plans remain in the conversation.' : capability.channel === 'held-hook' ? 'Live requests can be answered in Friendly while their hook is connected. Expired or unsupported requests remain in Raw.' : 'Instructions can be sent or queued in Friendly after a structured Ready pause and an explicit check that Raw has no draft.' }}</dd>
       </template>
     </dl>
     <p>The Raw terminal remains the control surface for this running session.</p>
