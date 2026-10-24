@@ -96,6 +96,15 @@ Exited sessions are not relaunched when Chorus starts.
 notification, because a stopped agent exits non-zero. A run Chorus closed after it finished now
 counts as done.
 
+**Found while Matthew tested, and fixed:** an automation in a folder Claude Code didn't trust yet
+started a session that stopped at Claude Code's trust question, with its prompt held behind it,
+and Friendly showed nothing about why: the session's warning was only in Raw. Now an automation
+whose Claude Code folder isn't trusted reads "can't run" with the reason, and Run now and the
+scheduler record a failed run with that reason instead of starting a session (Chorus never trusts
+a folder for the user, D55). A session's warning now shows above both Friendly and Raw. Seen in
+the review instance: a temporary automation on an untrusted folder listed the reason, Run now
+started nothing, and a closed automation session's note showed in Friendly and once in Raw.
+
 **Proposed lesson (to number):** in Tauri 2.12, once `AppManifest::commands` is set, every app
 command is checked against the calling window's capabilities, the main window's included. Each
 command's permission is `allow-<name with hyphens>`. Debug builds say where a refused command is

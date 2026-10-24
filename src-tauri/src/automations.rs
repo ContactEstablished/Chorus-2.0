@@ -89,7 +89,8 @@ pub struct Automation {
     pub next_run_at_secs: Option<u32>,
     pub last_run: Option<AutomationRun>,
     pub runs_this_week: u32,
-    /// Why it can't run now (its Bot or folder is gone), in words to show as is.
+    /// Why it can't run now (its Bot or folder is gone, or Claude Code doesn't trust the folder
+    /// yet), in words to show as is.
     pub problem: Option<String>,
 }
 
@@ -261,7 +262,17 @@ fn problem(store: &Store, a: &AutoRow) -> Option<String> {
     if !std::path::Path::new(&a.cwd).is_dir() {
         return Some(format!("The folder {} no longer exists.", a.cwd));
     }
-    None
+    let env: Vec<(String, String)> = std::env::vars().collect();
+    untrusted_folder(&env, &a.cwd)
+}
+
+/// A run in a folder Claude Code doesn't trust stops at its trust question, with nobody there to
+/// answer, and holds later runs back as still starting (D85). Chorus never trusts a folder for the
+/// user (D55), so the run isn't started and the reason is shown. An unreadable config says nothing.
+fn untrusted_folder(env: &[(String, String)], cwd: &str) -> Option<String> {
+    (crate::agents::claude_folder_trusted(env, cwd) == Some(false)).then(|| {
+        format!("Claude Code doesn't trust the folder {cwd} yet, so a run would stop at its trust question. Start a Claude Code session there once and choose Yes.")
+    })
 }
 
 /// Agents whose first prompt Chorus can pass at launch, verified. Others are refused visibly.
@@ -702,5 +713,21 @@ mod tests {
         assert!(check_prompt(&s, "update").is_err());
         assert!(check_prompt(&s, &format!("use sk-or-v1-{} now", "z9".repeat(20))).unwrap_err().contains("key"));
         assert_eq!(check_prompt(&s, "  Summarise the open issues  ").unwrap(), "Summarise the open issues");
+    }
+
+    #[test]
+    fn a_folder_claude_code_does_not_trust_is_a_problem_only_when_its_config_says_so() {
+        let dir = std::env::temp_dir().join(format!("chorus-auto-trust-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let folder = dir.join("work");
+        std::fs::create_dir_all(&folder).unwrap();
+        let env = vec![("CLAUDE_CONFIG_DIR".to_owned(), dir.display().to_string())];
+        let cwd = folder.display().to_string();
+        assert_eq!(untrusted_folder(&env, &cwd), None, "no config: Chorus can't tell, so it doesn't block");
+        std::fs::write(dir.join(".claude.json"), r#"{"projects":{}}"#).unwrap();
+        assert!(untrusted_folder(&env, &cwd).is_some_and(|p| p.contains("doesn't trust") && p.contains(&cwd)));
+        crate::agents::claude_trust_folder(&env, &cwd).unwrap();
+        assert_eq!(untrusted_folder(&env, &cwd), None);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

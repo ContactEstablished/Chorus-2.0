@@ -337,7 +337,10 @@ export type Automation = {
 	nextRunAtSecs: number | null,
 	lastRun: AutomationRun | null,
 	runsThisWeek: number,
-	/**  Why it can't run now (its Bot or folder is gone), in words to show as is. */
+	/**
+	 *  Why it can't run now (its Bot or folder is gone, or Claude Code doesn't trust the folder
+	 *  yet), in words to show as is.
+	 */
 	problem: string | null,
 };
 

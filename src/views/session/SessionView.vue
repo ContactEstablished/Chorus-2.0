@@ -268,6 +268,7 @@ async function send(bytes: string): Promise<void> {
       <button v-else class="danger" :disabled="busy" @click="close(false)">Close</button>
       <button class="quiet" @click="confirmingClose = false">Keep</button>
     </div>
+    <p v-if="s.note" class="warn run-note">{{ s.note }}</p>
 
     <div class="body" :class="{ 'details-hidden': !layout.detailsOpen }">
       <FriendlyTimeline v-if="mode === 'friendly'" :session="s" @raw="mode = 'raw'" />
@@ -284,7 +285,6 @@ async function send(bytes: string): Promise<void> {
           <button class="key" :disabled="!s.live" title="Send Escape (interrupts most agents)" @click="send('\x1b')">Esc</button>
         </div>
         <RawSearch v-if="searchOpen" ref="rawSearch" :key="`search-${s.id}`" :term="rawTerm" @close="searchOpen = false" />
-        <p v-if="s.note" class="warn">{{ s.note }}</p>
         <p v-if="s.scrollbackError" class="warn">{{ s.scrollbackError }}</p>
         <div class="term">
           <SessionTerminal
@@ -560,6 +560,9 @@ async function send(bytes: string): Promise<void> {
   background: color-mix(in srgb, var(--status-needs) 10%, transparent);
   color: var(--status-needs);
   font-size: 12.5px;
+}
+.run-note {
+  margin: 0 20px 8px;
 }
 .term {
   flex: 1;
