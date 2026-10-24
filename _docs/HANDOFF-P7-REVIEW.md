@@ -148,8 +148,8 @@ PLAN: P7 built and verified as in §6; awaiting Matthew's review.
    "Write p7.txt"; seen in the app with a question, §12), falling back to the latest message.
 2. Should `fleet_probe` stay in release builds? It is read only (rechecked on the final branch: it
    reads the open strip's rectangle, DPI and styles, and errors if the strip isn't open). Its
-   `shield` field is assumed true rather than looked up; a `FindWindowExW` check like `fit_shield`'s
-   would make it exact. *Recommendation: keep, with that check.*
+   `shield` field is now looked up among the strip's children, as `fit_shield` does, instead of
+   assumed (seen: `true` on the open strip). *Recommendation: keep.*
 
 ## 10. Risks and known issues
 

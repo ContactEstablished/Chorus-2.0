@@ -15,7 +15,7 @@ gathers them, with a recommendation each. Nothing here is decided until Matthew 
 | 5 | Codex automations | Claude Code only for now; Codex later, with the bridge sending the first prompt | P8 §9 Q5 |
 | 6 | Each window may call only its own commands (P7-D5); today the strip and splash can call all 100+ | Do it: the strip and splash need four app commands between them (checked on the final branch: the strip calls `sessionsList`, `prefsGet` and `fleetOpenSession`; the splash calls `restoreProgress`, plus Tauri's own window API) | P7 §8 |
 
-One smaller question: keeping `fleet_probe` in release builds (P7 §9 Q2, recommended keep, with its shield field looked up rather than assumed). P7 §9
+One smaller question: keeping `fleet_probe` in release builds (P7 §9 Q2, recommended keep; its shield field is now looked up, not assumed). P7 §9
 Q1 (notification bodies naming the ask) is already done. The proposed decision rows (P7-D1…D5, P8-D1…D6) and lessons (P7-L1…L4, P8-L1…L4)
 are written in DECISIONS.md and LESSONS.md style for the reviewer to number.
 

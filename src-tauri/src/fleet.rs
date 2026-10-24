@@ -393,5 +393,8 @@ pub fn fleet_open_session(app: AppHandle, state: tauri::State<'_, Arc<SessionMan
 #[specta::specta]
 pub fn fleet_probe(app: AppHandle) -> Result<FleetProbe, String> {
     let window = app.get_webview_window(LABEL).ok_or("fleet strip is not open")?;
-    Ok(probe_hwnd(window.hwnd().map_err(|e| e.to_string())?, true))
+    let hwnd = window.hwnd().map_err(|e| e.to_string())?;
+    // SAFETY: a lookup among our own window's children.
+    let shield = unsafe { FindWindowExW(Some(hwnd), None, w!("ChorusFleetShield"), None) }.is_ok();
+    Ok(probe_hwnd(hwnd, shield))
 }
