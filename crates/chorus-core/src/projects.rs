@@ -64,7 +64,17 @@ pub fn next_colour(existing: usize) -> &'static str {
 }
 
 fn norm(path: &str) -> String {
-    path.replace('/', "\\").trim_end_matches('\\').to_lowercase()
+    let path = path.replace('/', "\\").trim_end_matches('\\').to_lowercase();
+    if let Some(unc) = path.strip_prefix(r"\\?\unc\") {
+        format!(r"\\{unc}")
+    } else {
+        path.strip_prefix(r"\\?\").unwrap_or(&path).to_owned()
+    }
+}
+
+/// Windows folder identity after the IO layer resolves aliases and relative components.
+pub fn same_folder(a: &str, b: &str) -> bool {
+    norm(a) == norm(b)
 }
 
 /// The project a working folder belongs to: the one whose folder holds it most closely.
@@ -82,6 +92,15 @@ pub fn project_for_folder<'a>(projects: impl IntoIterator<Item = (u32, &'a str)>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn folder_identity_ignores_windows_spelling_but_not_nested_folders() {
+        assert!(same_folder(r"C:\Work\Ledger\", "c:/work/ledger"));
+        assert!(same_folder(r"\\?\C:\Work\Ledger", "c:/work/ledger"));
+        assert!(same_folder(r"\\?\UNC\server\share\", r"\\SERVER\share"));
+        assert!(!same_folder(r"C:\work", r"C:\work\ledger"));
+        assert!(!same_folder(r"C:\work", r"C:\workshop"));
+    }
 
     #[test]
     fn names_and_colours_are_checked() {

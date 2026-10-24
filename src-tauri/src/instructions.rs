@@ -346,8 +346,8 @@ mod tests {
     #[test]
     fn a_project_note_reaches_its_projects_claude_run_through_a_file_and_no_other() {
         let s = Store::in_memory();
-        let a = add_project(&s, &NewProject { name: "A", folder: None, colour: "#111111" }).unwrap();
-        let b = add_project(&s, &NewProject { name: "B", folder: None, colour: "#222222" }).unwrap();
+        let a = add_project(&s, &NewProject { name: "A", folder: Some(r"C:\projects\A"), colour: "#111111" }).unwrap();
+        let b = add_project(&s, &NewProject { name: "B", folder: Some(r"C:\projects\B"), colour: "#222222" }).unwrap();
         s.with(|c| {
             c.execute("INSERT INTO notes (project_id,title,body,pinned,created_at,updated_at) VALUES (?1,'Only A','alpha',0,1,1)", [a])?;
             c.execute("INSERT INTO notes (project_id,title,body,pinned,created_at,updated_at) VALUES (NULL,'Everywhere','omega',1,1,1)", [])

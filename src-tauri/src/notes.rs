@@ -154,8 +154,8 @@ mod tests {
     #[test]
     fn a_project_note_reaches_only_its_project_and_untagged_notes_reach_all() {
         let s = Store::in_memory();
-        let a = project_rows::insert(&s, &project_rows::NewProject { name: "A", folder: None, colour: "#111111" }).unwrap();
-        let b = project_rows::insert(&s, &project_rows::NewProject { name: "B", folder: None, colour: "#222222" }).unwrap();
+        let a = project_rows::insert(&s, &project_rows::NewProject { name: "A", folder: Some(r"C:\projects\A"), colour: "#111111" }).unwrap();
+        let b = project_rows::insert(&s, &project_rows::NewProject { name: "B", folder: Some(r"C:\projects\B"), colour: "#222222" }).unwrap();
         save(&s, &input(None, "Everywhere", false)).unwrap();
         save(&s, &input(Some(a), "Only A", true)).unwrap();
         let titles = |p| for_project(&s, p).unwrap().into_iter().map(|n| n.title).collect::<Vec<_>>();

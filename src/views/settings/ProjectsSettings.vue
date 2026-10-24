@@ -24,13 +24,34 @@ onMounted(async () => {
 const adding = ref(false)
 const newName = ref('')
 const newFolder = ref('')
+const saving = ref(false)
+const picking = ref(false)
+async function pickFolder(target: 'new' | 'edit'): Promise<void> {
+  if (picking.value) return
+  picking.value = true
+  const editId = editing.value
+  try {
+    const current = target === 'new' ? newFolder.value : draftFolder.value
+    const folder = await commands.folderPick(current.trim() || null)
+    if (folder !== null) {
+      if (target === 'new' && adding.value) newFolder.value = folder
+      else if (target === 'edit' && editing.value === editId) draftFolder.value = folder
+    }
+  } catch (e) {
+    notices.error("Couldn't open the folder picker.", e)
+  } finally { picking.value = false }
+}
 async function add(): Promise<void> {
-  if (await projects.save(null, { name: newName.value, folder: newFolder.value.trim() || null, colour: null })) {
-    notices.success(`Added ${newName.value.trim()}.`)
-    newName.value = ''
-    newFolder.value = ''
-    adding.value = false
-  }
+  if (saving.value || !newName.value.trim() || !newFolder.value.trim()) return
+  saving.value = true
+  try {
+    if (await projects.save(null, { name: newName.value, folder: newFolder.value.trim(), colour: null })) {
+      notices.success(`Added ${newName.value.trim()}.`)
+      newName.value = ''
+      newFolder.value = ''
+      adding.value = false
+    }
+  } finally { saving.value = false }
 }
 
 // Editing one at a time.
@@ -43,7 +64,11 @@ function edit(p: Project): void {
   draftFolder.value = p.folder ?? ''
 }
 async function saveEdit(p: Project): Promise<void> {
-  if (await projects.save(p.id, { name: draftName.value, folder: draftFolder.value.trim() || null, colour: p.colour })) editing.value = null
+  if (saving.value || !draftName.value.trim() || !draftFolder.value.trim()) return
+  saving.value = true
+  try {
+    if (await projects.save(p.id, { name: draftName.value, folder: draftFolder.value.trim(), colour: p.colour })) editing.value = null
+  } finally { saving.value = false }
 }
 
 const colouring = ref<number | null>(null)
@@ -102,10 +127,13 @@ const STATE_LABELS: Record<ProjectState, string> = { active: 'In the rail', hidd
     </div>
 
     <form v-if="adding" class="add" @submit.prevent="add">
-      <input v-model="newName" placeholder="Name" maxlength="60" autocomplete="off" aria-label="Project name" />
-      <input v-model="newFolder" placeholder="Folder (optional), e.g. C:\Projects\ledger" spellcheck="false" autocomplete="off" aria-label="Project folder" />
-      <button class="primary" type="submit" :disabled="!newName.trim()">Add</button>
-      <button type="button" class="quiet" @click="adding = false">Cancel</button>
+      <input v-model="newName" required :disabled="saving" placeholder="Name" maxlength="60" autocomplete="off" aria-label="Project name" />
+      <div class="folder-field">
+        <input v-model="newFolder" required :disabled="saving" placeholder="Folder (required)" maxlength="1024" spellcheck="false" autocomplete="off" aria-label="Project folder" />
+        <button type="button" class="browse" :disabled="picking || saving" title="Choose project folder" aria-label="Choose project folder" @click="pickFolder('new')"><Icon name="folder" :size="16" /> Browse</button>
+      </div>
+      <button class="primary" type="submit" :disabled="saving || picking || !newName.trim() || !newFolder.trim()">Add</button>
+      <button type="button" class="quiet" :disabled="saving || picking" @click="adding = false">Cancel</button>
     </form>
 
     <p v-if="!projects.list.length" class="empty">No projects yet.</p>
@@ -140,17 +168,20 @@ const STATE_LABELS: Record<ProjectState, string> = { active: 'In the rail', hidd
         </div>
 
         <form v-if="editing === p.id" class="edit" @submit.prevent="saveEdit(p)">
-          <input v-model="draftName" maxlength="60" aria-label="Name" autocomplete="off" />
-          <input v-model="draftFolder" placeholder="Folder (optional)" aria-label="Folder" spellcheck="false" autocomplete="off" />
-          <button class="primary" type="submit" :disabled="!draftName.trim()">Save</button>
-          <button type="button" class="quiet" @click="editing = null">Cancel</button>
+          <input v-model="draftName" required :disabled="saving" maxlength="60" aria-label="Name" autocomplete="off" />
+          <div class="folder-field">
+            <input v-model="draftFolder" required :disabled="saving" placeholder="Folder (required)" maxlength="1024" aria-label="Folder" spellcheck="false" autocomplete="off" />
+            <button type="button" class="browse" :disabled="picking || saving" title="Choose project folder" aria-label="Choose project folder" @click="pickFolder('edit')"><Icon name="folder" :size="16" /> Browse</button>
+          </div>
+          <button class="primary" type="submit" :disabled="saving || picking || !draftName.trim() || !draftFolder.trim()">Save</button>
+          <button type="button" class="quiet" :disabled="saving || picking" @click="editing = null">Cancel</button>
         </form>
         <div v-else class="info" @dblclick="edit(p)">
           <p class="name">
             {{ p.name }}
             <span v-if="p.state !== 'active'" class="state">{{ STATE_LABELS[p.state] }}</span>
           </p>
-          <p class="folder">{{ p.folder ?? 'No folder: sessions join it only when you choose it' }}</p>
+          <p class="folder">{{ p.folder ?? 'Folder required: edit this project to choose one' }}</p>
         </div>
 
         <span class="count" :title="`${sessionCount(p.id)} open session(s)`">{{ sessionCount(p.id) || '' }}</span>
@@ -210,16 +241,29 @@ h2 {
 .add {
   margin-bottom: 16px;
 }
-.add input:first-child,
-.edit input:first-child {
+.add > input,
+.edit > input {
   width: 180px;
 }
-.add input:nth-child(2),
-.edit input:nth-child(2) {
+.folder-field {
+  display: flex;
+  gap: 8px;
+  flex: 1 1 300px;
+  min-width: 0;
+}
+.folder-field input {
   flex: 1;
-  min-width: 200px;
+  min-width: 0;
+  width: 100%;
   font-family: var(--font-mono);
   font-size: 12.5px;
+}
+.browse {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex: none;
 }
 .empty {
   color: var(--text-muted);

@@ -50,7 +50,9 @@ fn all(store: &Store) -> Result<Vec<Project>, String> {
 }
 
 fn clean_folder(folder: Option<&str>) -> Result<Option<String>, String> {
-    let Some(f) = folder.map(str::trim).filter(|f| !f.is_empty()) else { return Ok(None) };
+    let Some(f) = folder.map(str::trim).filter(|f| !f.is_empty()) else {
+        return Err("Choose a folder for this project.".into());
+    };
     if f.chars().count() > MAX_FOLDER_CHARS || f.chars().any(char::is_control) {
         return Err("That folder path is too long or has control characters.".into());
     }
@@ -61,7 +63,16 @@ fn clean_folder(folder: Option<&str>) -> Result<Option<String>, String> {
     if !p.is_dir() {
         return Err(format!("{f} isn't a folder."));
     }
-    Ok(Some(f.trim_end_matches(['\\', '/']).to_owned()))
+    // Resolve dot segments, junctions and short Windows names before storing the folder.
+    // Keep drive roots intact and use the normal spelling for session folder matching.
+    let canonical = p.canonicalize().map_err(|e| format!("Couldn't resolve that folder: {e}"))?;
+    let canonical = canonical.to_string_lossy();
+    let display = if let Some(unc) = canonical.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{unc}")
+    } else {
+        canonical.strip_prefix(r"\\?\").unwrap_or(&canonical).to_owned()
+    };
+    Ok(Some(display))
 }
 
 fn existing(store: &Store, id: u32) -> Result<ProjectRow, String> {
@@ -155,4 +166,26 @@ pub fn project_delete(state: Manager<'_>, id: u32) -> Result<Vec<Project>, Strin
 #[specta::specta]
 pub fn session_set_project(state: Manager<'_>, session_id: u32, project_id: Option<u32>) -> Result<crate::sessions::SessionSummary, String> {
     state.set_project(session_id, project_id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn project_folder_requires_an_existing_absolute_directory() {
+        for folder in [None, Some(""), Some("  "), Some("relative"), Some("C:\\bad\npath")] {
+            assert!(clean_folder(folder).is_err());
+        }
+        let file = std::env::current_exe().unwrap();
+        assert!(clean_folder(file.to_str()).is_err());
+        assert!(clean_folder(file.join("missing-folder").to_str()).is_err());
+        let temp = std::env::temp_dir();
+        assert_eq!(clean_folder(temp.to_str()).unwrap(), clean_folder(temp.join(".").to_str()).unwrap());
+        let folder = clean_folder(temp.to_str()).unwrap().unwrap();
+        assert!(Path::new(&folder).is_absolute() && Path::new(&folder).is_dir());
+        let root = temp.ancestors().last().unwrap();
+        let root = clean_folder(root.to_str()).unwrap().unwrap();
+        assert!(Path::new(&root).is_absolute() && Path::new(&root).is_dir(), "drive root must keep its slash");
+    }
 }

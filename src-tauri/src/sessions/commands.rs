@@ -152,7 +152,7 @@ pub async fn folder_pick(app: tauri::AppHandle, start: Option<String>) -> Option
     use tauri::Manager as _;
     use tauri_plugin_dialog::DialogExt;
     tauri::async_runtime::spawn_blocking(move || {
-        let mut dialog = app.dialog().file().set_title("Choose the session's folder");
+        let mut dialog = app.dialog().file().set_title("Choose a folder");
         if let Some(start) = start.filter(|s| std::path::Path::new(s).is_dir()) {
             dialog = dialog.set_directory(start);
         }

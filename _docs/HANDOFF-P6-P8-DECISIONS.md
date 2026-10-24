@@ -128,6 +128,14 @@ The pre-merge fixes and the approved automation behavior are implemented and ver
 The narrator and opencode checks are done (above), and Matthew is testing the narrator and automations
 in the review instance. Keep automatic compaction (D86), display-scale/monitor and swapped-button
 checks (D88) and Grok's sign-in and launch (D94) tracked as deferred work;
-do not treat their deferral as successful verification. Reconcile the decision log when merging
-`evening/p6-p8` into `main` (D83 is reserved in the main checkout).
-The main checkout's uncommitted D83 work remains outside this document edit; no merge was performed.
+do not treat their deferral as successful verification.
+
+**D83 is now on this branch too.** Matthew's uncommitted D83 change in the main checkout (project
+folders required and unique, with a Browse button on Add and Edit) was copied here unchanged, at his
+request, so he can test it with P6–P8. Two P8 tests that made projects without folders now give them
+one. In the review instance: a missing or relative folder is refused; a folder is stored resolved; the
+same folder in another spelling is refused, also when its project is archived; a project keeps its
+own folder on Edit; a folderless project reads "Folder required" and can't be saved without one; Add
+stays disabled until both fields are filled. Not covered: the Windows folder dialog itself. Before
+merging into `main`, discard or stash the main checkout's uncommitted D83 copy, which this branch
+now carries. No merge was performed.

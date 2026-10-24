@@ -1,6 +1,6 @@
 //! Projects (migrations 0007 and 0008). Names and colours arrive checked (`chorus_core::projects`).
 
-use chorus_core::projects::ProjectState;
+use chorus_core::projects::{ProjectState, same_folder};
 use rusqlite::{OptionalExtension, Row, params};
 
 use super::{Store, now_ms};
@@ -33,22 +33,50 @@ pub struct NewProject<'a> {
     pub colour: &'a str,
 }
 
+/// Check under the same store lock as the write, including hidden and archived projects.
+/// Resolve older stored paths too: they may predate canonical folder storage.
+fn folder_error(c: &rusqlite::Connection, folder: Option<&str>, own_id: Option<u32>) -> rusqlite::Result<Option<String>> {
+    let Some(folder) = folder.filter(|f| !f.trim().is_empty()) else {
+        return Ok(Some("Choose a folder for this project.".into()));
+    };
+    let resolved = |path: &str| std::fs::canonicalize(path).map(|p| p.to_string_lossy().into_owned()).unwrap_or_else(|_| path.to_owned());
+    let candidate = resolved(folder);
+    let mut stmt = c.prepare("SELECT id, name, folder FROM projects WHERE folder IS NOT NULL")?;
+    let mut rows = stmt.query([])?;
+    while let Some(row) = rows.next()? {
+        let id: u32 = row.get(0)?;
+        let existing: String = row.get(2)?;
+        if Some(id) != own_id && (same_folder(folder, &existing) || same_folder(&candidate, &resolved(&existing))) {
+            let name: String = row.get(1)?;
+            return Ok(Some(format!("That folder is already tracked by project \"{name}\". Choose a different folder or edit that project.")));
+        }
+    }
+    Ok(None)
+}
+
 /// Adds an active project at the end of the rail.
 pub fn insert(store: &Store, p: &NewProject<'_>) -> Result<u32, String> {
     store.with(|c| {
+        if let Some(error) = folder_error(c, p.folder, None)? {
+            return Ok(Err(error));
+        }
         let next: i64 = c.query_row("SELECT COALESCE(MAX(position), -1) + 1 FROM projects", [], |r| r.get(0))?;
         c.execute(
             "INSERT INTO projects (name, folder, colour, position, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
             params![p.name, p.folder, p.colour, next, now_ms()],
         )?;
-        Ok(c.last_insert_rowid() as u32)
-    })
+        Ok(Ok(c.last_insert_rowid() as u32))
+    })?
 }
 
 pub fn update(store: &Store, id: u32, name: &str, folder: Option<&str>, colour: &str) -> Result<(), String> {
     store.with(|c| {
-        c.execute("UPDATE projects SET name = ?2, folder = ?3, colour = ?4 WHERE id = ?1", params![id, name, folder, colour]).map(|_| ())
-    })
+        if let Some(error) = folder_error(c, folder, Some(id))? {
+            return Ok(Err(error));
+        }
+        c.execute("UPDATE projects SET name = ?2, folder = ?3, colour = ?4 WHERE id = ?1", params![id, name, folder, colour])?;
+        Ok(Ok(()))
+    })?
 }
 
 pub fn set_state(store: &Store, id: u32, state: ProjectState) -> Result<(), String> {
@@ -94,8 +122,52 @@ pub fn count(store: &Store) -> Result<usize, String> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn folders_are_required_and_unique_for_creates_and_edits_in_every_state() {
+        let s = Store::in_memory();
+        for folder in [None, Some(""), Some("  ")] {
+            assert!(insert(&s, &NewProject { name: "Empty", folder, colour: "#f472b6" }).unwrap_err().contains("Choose a folder"));
+        }
+        let a = add(&s, "A");
+        let b = add(&s, "B");
+        for state in [ProjectState::Active, ProjectState::Hidden, ProjectState::Archived] {
+            set_state(&s, a, state).unwrap();
+            let duplicate = NewProject { name: "Duplicate", folder: Some("c:/PROJECTS/a/"), colour: "#f472b6" };
+            assert!(insert(&s, &duplicate).unwrap_err().contains("project \"A\""));
+            assert!(update(&s, b, "B", Some(r"\\?\C:\projects\A"), "#f472b6").is_err());
+        }
+        assert!(update(&s, b, "B", None, "#f472b6").is_err());
+        assert_eq!(get(&s, b).unwrap().unwrap().folder.as_deref(), Some(r"C:\projects\B"));
+        update(&s, a, "Renamed", Some(r"C:\projects\A"), "#a5b4fc").unwrap();
+        insert(&s, &NewProject { name: "Child", folder: Some(r"C:\projects\A\child"), colour: "#f472b6" }).unwrap();
+        delete(&s, a).unwrap();
+        insert(&s, &NewProject { name: "Replacement", folder: Some(r"C:\projects\A"), colour: "#f472b6" }).unwrap();
+    }
+
+    #[test]
+    fn concurrent_project_creates_cannot_claim_the_same_folder() {
+        let store = std::sync::Arc::new(Store::in_memory());
+        let threads: Vec<_> = (0..8).map(|_| {
+            let store = store.clone();
+            std::thread::spawn(move || insert(&store, &NewProject { name: "Project", folder: Some(r"C:\projects\shared"), colour: "#f472b6" }))
+        }).collect();
+        assert_eq!(threads.into_iter().filter_map(|t| t.join().unwrap().ok()).count(), 1);
+        assert_eq!(count(&store).unwrap(), 1);
+    }
+
+    #[test]
+    fn legacy_folder_aliases_are_resolved_before_comparison() {
+        let s = Store::in_memory();
+        let folder = std::env::temp_dir();
+        let alias = folder.join(".").display().to_string();
+        // Simulate a row written before canonical folder storage.
+        s.with(|c| c.execute("INSERT INTO projects (name, folder, colour, position, created_at) VALUES ('Legacy', ?1, '#f472b6', 0, 0)", [&alias])).unwrap();
+        let canonical = folder.canonicalize().unwrap().display().to_string();
+        assert!(insert(&s, &NewProject { name: "Duplicate", folder: Some(&canonical), colour: "#f472b6" }).unwrap_err().contains("Legacy"));
+    }
+
     fn add(s: &Store, name: &str) -> u32 {
-        insert(s, &NewProject { name, folder: None, colour: "#f472b6" }).unwrap()
+        insert(s, &NewProject { name, folder: Some(&format!(r"C:\projects\{name}")), colour: "#f472b6" }).unwrap()
     }
 
     #[test]
