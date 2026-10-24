@@ -4,6 +4,7 @@
 //! The fleet strip reads summaries itself, from the same `session-updated` event.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, Weak};
 
 use chorus_core::inbox::{NOTICE_KEEP_MS, NoticeFacts, notice_for};
@@ -50,8 +51,10 @@ pub struct Attention {
     manager: OnceLock<Weak<SessionManager>>,
     /// Open sessions that need you now, by id.
     waiting: Mutex<HashMap<u32, bool>>,
-    /// The count last shown, so the tray is only redrawn when it changes.
+    /// The count last asked for, so the tray is only redrawn when it changes.
     shown: Mutex<Option<u32>>,
+    /// The newest count, read by the redraw when it runs on the main thread.
+    latest: Arc<AtomicU32>,
     /// Episodes already stored this run, so a repeated summary never decrypts the vault again.
     stored: Mutex<HashSet<String>>,
 }
@@ -63,6 +66,7 @@ impl Attention {
             manager: OnceLock::new(),
             waiting: Mutex::new(HashMap::new()),
             shown: Mutex::new(None),
+            latest: Arc::new(AtomicU32::new(0)),
             stored: Mutex::new(HashSet::new()),
         })
     }
@@ -76,22 +80,30 @@ impl Attention {
 
     pub fn observe(&self, s: &SessionSummary) {
         let needs = s.attention.needs_you() && !matches!(s.status, SessionStatus::Closed);
-        let count = {
+        // Counted and compared under one lock, so the newest count is always the last one asked for.
+        let changed = {
             let mut waiting = self.waiting.lock().expect("waiting lock");
             if needs { waiting.insert(s.id, true) } else { waiting.remove(&s.id) };
-            waiting.values().filter(|w| **w).count() as u32
-        };
-        let changed = {
+            let count = waiting.values().filter(|w| **w).count() as u32;
+            self.latest.store(count, Ordering::SeqCst);
             let mut shown = self.shown.lock().expect("shown lock");
             let changed = *shown != Some(count);
             *shown = Some(count);
             changed
         };
         if changed {
-            tray::show_count(&self.app, count);
-            // For P7's exit check: when the tray changed, beside the hook's arrival in the database.
-            #[cfg(debug_assertions)]
-            eprintln!("attention: tray count {count} at {}", now_ms());
+            // The tray's setters wait for the main thread, and summaries are sent while session
+            // locks are held that main-thread commands also take (`write`), so the redraw is posted
+            // instead of waited for. It draws the newest count when it runs, so redraws can't
+            // finish out of order.
+            let (app, latest) = (self.app.clone(), Arc::clone(&self.latest));
+            let _ = self.app.run_on_main_thread(move || {
+                let count = latest.load(Ordering::SeqCst);
+                tray::show_count(&app, count);
+                // For P7's exit check: when the tray changed, beside the hook's arrival in the database.
+                #[cfg(debug_assertions)]
+                eprintln!("attention: tray count {count} at {}", now_ms());
+            });
         }
         if needs {
             self.notify(s);

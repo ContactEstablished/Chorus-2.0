@@ -15,22 +15,23 @@
 //! it. Coordinates are physical pixels throughout, so the strip is correct at any DPI.
 
 use std::sync::mpsc;
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use specta::Type;
-use tauri::{AppHandle, Manager, PhysicalPosition, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Manager, PhysicalPosition, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 use tauri_specta::Event;
 use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
-use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON};
+use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON, VK_RBUTTON};
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DefWindowProcW, GWL_EXSTYLE, GetClientRect, GetCursorPos, GetForegroundWindow, GetParent,
-    GetWindowLongPtrW, GetWindowRect, HWND_TOP, IDC_HAND, LWA_ALPHA, LoadCursorW, MA_NOACTIVATE, RegisterClassExW,
-    SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER, SetLayeredWindowAttributes, SetWindowPos, WM_LBUTTONDOWN,
-    WM_MOUSEACTIVATE, WNDCLASSEXW, WS_CHILD, WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOPMOST, WS_VISIBLE,
+    CreateWindowExW, DefWindowProcW, FindWindowExW, GWL_EXSTYLE, GetClientRect, GetCursorPos, GetForegroundWindow,
+    GetParent, GetSystemMetrics, GetWindowLongPtrW, GetWindowRect, HWND_TOP, IDC_HAND, LWA_ALPHA, LoadCursorW,
+    MA_NOACTIVATE, RegisterClassExW, SM_SWAPBUTTON, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER,
+    SetLayeredWindowAttributes, SetWindowPos, WM_LBUTTONDOWN, WM_MOUSEACTIVATE, WNDCLASSEXW, WS_CHILD, WS_EX_LAYERED,
+    WS_EX_NOACTIVATE, WS_EX_TOPMOST, WS_VISIBLE,
 };
 use windows::core::w;
 
@@ -48,6 +49,8 @@ const HEIGHT: f64 = 56.0;
 const CLICK_SLOP_PX: i32 = 4;
 
 static APP: OnceLock<AppHandle> = OnceLock::new();
+/// Held while the strip opens (see `open`).
+static OPENING: Mutex<()> = Mutex::new(());
 
 /// A click on the strip, in physical pixels from its top-left corner. The page turns it into a
 /// click on the element under that point.
@@ -108,7 +111,9 @@ fn track_press(strip: HWND, origin: (i32, i32)) {
             if GetCursorPos(&mut start).is_err() || GetWindowRect(strip, &mut rect).is_err() {
                 return;
             }
-            while GetAsyncKeyState(i32::from(VK_LBUTTON.0)) as u16 & 0x8000 != 0 {
+            // WM_LBUTTONDOWN comes from the primary button, which is the right one when swapped.
+            let button = if GetSystemMetrics(SM_SWAPBUTTON) != 0 { VK_RBUTTON } else { VK_LBUTTON };
+            while GetAsyncKeyState(i32::from(button.0)) as u16 & 0x8000 != 0 {
                 let mut now = POINT::default();
                 if GetCursorPos(&mut now).is_ok() {
                     let (dx, dy) = (now.x - start.x, now.y - start.y);
@@ -193,6 +198,21 @@ fn install_shield(strip: HWND) -> windows::core::Result<()> {
     Ok(())
 }
 
+/// Keeps the shield over the whole client area when the strip's size changes (moving it to a
+/// screen with another scale resizes it), so no click reaches WebView2 and activates the strip.
+/// Runs on the window's UI thread, from its own window events.
+fn fit_shield(strip: HWND) {
+    let mut client = RECT::default();
+    // SAFETY: queries and a resize of our own windows; the shield is found as the strip's child,
+    // so a strip without one yet is left alone.
+    unsafe {
+        let Ok(shield) = FindWindowExW(Some(strip), None, w!("ChorusFleetShield"), None) else { return };
+        if GetClientRect(strip, &mut client).is_ok() {
+            let _ = SetWindowPos(shield, Some(HWND_TOP), 0, 0, client.right, client.bottom, SWP_NOACTIVATE);
+        }
+    }
+}
+
 /// Every screen's work area, the primary first (so a strip that was never moved goes there), and
 /// the primary's scale.
 fn work_areas(app: &AppHandle) -> (Vec<chorus_core::strip::Area>, f64) {
@@ -254,6 +274,9 @@ fn keep_on_screen(app: &AppHandle) {
 /// window on the thread that runs the event loop deadlocks on Windows (L28).
 async fn open(app: AppHandle) -> Result<FleetProbe, String> {
     let _ = APP.set(app.clone());
+    // One open at a time: the window joins the app's list only once built, so two quick requests
+    // could otherwise both build one. There is no await below, so the guard never crosses one.
+    let _opening = OPENING.lock().unwrap_or_else(PoisonError::into_inner);
     if let Some(w) = app.get_webview_window(LABEL) {
         return Ok(probe_hwnd(w.hwnd().map_err(|e| e.to_string())?, true));
     }
@@ -281,6 +304,16 @@ async fn open(app: AppHandle) -> Result<FleetProbe, String> {
     .map_err(|e| e.to_string())?;
     let shield = rx.recv_timeout(Duration::from_secs(5)).map_err(|e| e.to_string())?;
     shield?;
+    window.on_window_event(move |event| {
+        if matches!(event, WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. }) {
+            fit_shield(HWND(raw as *mut _));
+        }
+    });
+    // Hidden while it was opening (the hide found no window to close): the last choice wins.
+    if app.try_state::<Arc<SessionManager>>().is_some_and(|m| !wanted(&m)) {
+        let _ = window.close();
+        return Ok(probe_hwnd(hwnd, false));
+    }
     Ok(probe_hwnd(hwnd, true))
 }
 

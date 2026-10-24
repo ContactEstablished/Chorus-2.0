@@ -202,3 +202,25 @@ search the Raw view; export the transcript; rename the session and Restart to se
   tray menu (opened with a real right click, picked with real Up and Enter; the menu's items aren't
   exposed to UI Automation) did the same, and the session came back again. No panics; the log's
   only error is WebView2's usual "Failed to unregister class" line at exit.
+- **Question notifications:** Claude Code's AskUserQuestion gave attention "input" and one
+  notification, "Question check needs your answer" with the question as its body, and a strip chip;
+  a resize and an answer attempt added none. Not settled: answering from Friendly's card several
+  minutes after the question left the session on "input" (Claude Code still showed its PreToolUse
+  hook running); the session was closed before its screen was read, so whether that is the hook's
+  wait limit or a fault is still open.
+- **Third code review (P7 back end):** five findings, all checked against the code and fixed.
+  - The tray's `set_icon`/`set_tooltip` (and the menu tick) wait for the main thread, and summaries
+    are sent while Restart, Close and Lock hold the session's action lock, which `session_write` (a
+    sync command, so on the main thread) also takes: a restart that changed the count while a
+    keystroke arrived could hang the app. The redraw is now posted to the main thread, not waited
+    for. Seen: a failed shell restarted three times with 40 writes in flight each time; every call
+    answered and the tray redrew. (The hang itself was not reproduced on the old build.)
+  - Two redraws could finish out of order and leave a stale count; the count is now taken and
+    compared under one lock and the redraw draws the newest count when it runs.
+  - The input shield kept its first size; it now follows the strip's size. Seen: the strip resized
+    from outside to 690 × 84 and back, the shield followed both times, the foreground didn't change.
+  - Show then hide at once left the strip open, and two quick shows could build two; opens are now
+    one at a time and an open that finishes after a hide closes the strip. Seen: hidden after show
+    then hide, one strip window after two shows.
+  - With the mouse buttons swapped the strip couldn't be dragged; the press loop now follows the
+    primary button. Not tried (it would change this machine's mouse setting).

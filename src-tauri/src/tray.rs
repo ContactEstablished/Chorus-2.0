@@ -52,7 +52,11 @@ pub fn install(app: &AppHandle, strip_shown: bool) -> tauri::Result<()> {
 /// Keeps the menu's tick in step when the strip is shown or hidden elsewhere.
 pub fn strip_checked(shown: bool) {
     if let Some(item) = STRIP_ITEM.get() {
-        let _ = item.set_checked(shown);
+        // Posted, not waited for: the setter waits for the main thread (see `Attention::observe`).
+        let tick = item.clone();
+        let _ = item.app_handle().run_on_main_thread(move || {
+            let _ = tick.set_checked(shown);
+        });
     }
 }
 
