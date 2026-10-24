@@ -193,12 +193,12 @@ fn install_shield(strip: HWND) -> windows::core::Result<()> {
     Ok(())
 }
 
-/// Where the strip should open, in physical pixels: the remembered place, kept on a screen.
-fn placement(app: &AppHandle) -> (PhysicalPosition<i32>, f64) {
+/// Every screen's work area, the primary first (so a strip that was never moved goes there), and
+/// the primary's scale.
+fn work_areas(app: &AppHandle) -> (Vec<chorus_core::strip::Area>, f64) {
     let monitors = app.available_monitors().unwrap_or_default();
     let primary = app.primary_monitor().ok().flatten();
     let scale = primary.as_ref().or(monitors.first()).map_or(1.0, |m| m.scale_factor());
-    // The primary screen first, so a strip that was never moved goes there.
     let mut areas: Vec<chorus_core::strip::Area> = Vec::new();
     for m in primary.iter().chain(monitors.iter()) {
         let r = m.work_area();
@@ -212,6 +212,12 @@ fn placement(app: &AppHandle) -> (PhysicalPosition<i32>, f64) {
             areas.push(area);
         }
     }
+    (areas, scale)
+}
+
+/// Where the strip should open, in physical pixels: the remembered place, kept on a screen.
+fn placement(app: &AppHandle) -> (PhysicalPosition<i32>, f64) {
+    let (areas, scale) = work_areas(app);
     let saved = app.try_state::<Arc<SessionManager>>().and_then(|m| settings::get(m.store(), POSITION_KEY).ok().flatten()).and_then(|v| {
         let (x, y) = v.split_once(',')?;
         Some((x.trim().parse().ok()?, y.trim().parse().ok()?))
@@ -219,6 +225,26 @@ fn placement(app: &AppHandle) -> (PhysicalPosition<i32>, f64) {
     let size = ((WIDTH * scale).round() as i32, (HEIGHT * scale).round() as i32);
     let (x, y) = chorus_core::strip::place(saved, size, &areas);
     (PhysicalPosition::new(x, y), scale)
+}
+
+/// How often an open strip is checked against the screens.
+const SCREEN_CHECK: Duration = Duration::from_secs(5);
+
+/// Pulls an open strip back onto a screen if it is no longer on one (a monitor was unplugged, or
+/// the resolution or taskbar changed), and remembers where it went. Never activates it.
+fn keep_on_screen(app: &AppHandle) {
+    let Some(w) = app.get_webview_window(LABEL) else { return };
+    let (Ok(at), Ok(size)) = (w.outer_position(), w.outer_size()) else { return };
+    let (areas, _) = work_areas(app);
+    if areas.is_empty() {
+        return;
+    }
+    let (x, y) = chorus_core::strip::place(Some((at.x, at.y)), (size.width as i32, size.height as i32), &areas);
+    if (x, y) != (at.x, at.y) && w.set_position(PhysicalPosition::new(x, y)).is_ok()
+        && let Some(manager) = app.try_state::<Arc<SessionManager>>()
+    {
+        let _ = settings::set(manager.store(), POSITION_KEY, &format!("{x},{y}"));
+    }
 }
 
 /// Opens the strip (or returns the open one) without activating it. Async because building a
@@ -289,6 +315,14 @@ pub fn start(app: &AppHandle, manager: &SessionManager) {
     if wanted(manager) {
         set_shown(app, true);
     }
+    // Displays change while Chorus runs; an open strip is kept on one.
+    let watching = app.clone();
+    let _ = std::thread::Builder::new().name("fleet-screens".into()).spawn(move || {
+        loop {
+            std::thread::sleep(SCREEN_CHECK);
+            keep_on_screen(&watching);
+        }
+    });
 }
 
 /// Whether the strip is shown, for Settings.

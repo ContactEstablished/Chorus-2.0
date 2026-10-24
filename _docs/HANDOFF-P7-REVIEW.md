@@ -166,3 +166,7 @@ search the Raw view; export the transcript; rename the session and Restart to se
   that commit and checked in the app.
 - A test-method lesson for later runs: tapping Alt to bring a window forward opens its system menu,
   which stalls the WebView's events until it closes; click the window instead.
+- **Strip after a display change:** besides the clamp at open, an open strip is now checked every
+  5 s against the screens' work areas and pulled back if it is off them. Seen: moved by a program to
+  (6000, 3000), it was back at the nearest corner of the primary work area within 7 s, without
+  activating anything. A real monitor unplug or a DPI change still wasn't tried (one monitor).
