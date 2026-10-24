@@ -343,3 +343,8 @@ Checked again after merging with P7 (`evening/p6-p8`), in an isolated instance:
 - **Exit check through the screens on the merged build:** Bots → Start session → New session → Start
   made a session with the Bot's options (Fast, Manual, haiku), its instructions given, and Claude
   answered with the Bot's canary word.
+- **Third and front-end reviews:** New session says when an agent change or an archive leaves the
+  chosen Bot out; a failed launch's instruction file is swept at the next launch; the Bot editor's
+  Tags field no longer drops the first tag when clicked; session facts don't show the previous
+  session's Bot; Archive/Restore failures, a failed run-history load and an empty time of day are
+  said visibly; repeated polling failures are said once.

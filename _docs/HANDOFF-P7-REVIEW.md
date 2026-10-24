@@ -187,3 +187,6 @@ search the Raw view; export the transcript; rename the session and Restart to se
   and to Codex (with P8's bridge change), recorded as `composer`.
 - **Exit gate again on the final merged build:** an approval recorded at …001449 ms showed on the
   strip at …001451 and in the tray at …001453.
+- **Front-end review:** search refocuses when reopened and Escape closes it from its buttons; j/k
+  don't move the board behind the open notification panel; the strip's "!" clears after a later
+  successful click; a live notification after a failed first load reads the history again.
