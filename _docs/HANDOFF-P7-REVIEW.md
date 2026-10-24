@@ -143,8 +143,9 @@ PLAN: P7 built and verified as in §6; awaiting Matthew's review.
 
 ## 9. Questions for Matthew
 
-1. Notification bodies show the latest prompt or message; for approvals the ask's own subject (for
-   example "Write p7.txt") would be more useful. Change it? *Recommendation: yes, a small follow-up.*
+1. ~~Notification bodies show the latest prompt or message; the ask's own subject would be more
+   useful.~~ Done on the integration branch: the body is the open ask's subject (unit-tested with
+   "Write p7.txt"; seen in the app with a question, §12), falling back to the latest message.
 2. Should `fleet_probe` stay in release builds? It is read only. *Recommendation: keep.*
 
 ## 10. Risks and known issues
