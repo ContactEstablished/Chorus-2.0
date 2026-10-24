@@ -22,8 +22,13 @@ use crate::store::sessions::SessionRow;
 
 type Manager<'a> = State<'a, Arc<SessionManager>>;
 
-const FILE_NAME: &str = "instructions.md";
+/// Instruction files are `instructions-<n>.md`, one per run, so a slow-exiting old run can't
+/// delete the file a Restart has just written for the new one.
+const FILE_PREFIX: &str = "instructions";
 const MAX_SKILL_FILE_BYTES: u64 = 64 * 1024;
+
+/// Each live run's instruction file, by run id, deleted when that run ends.
+static RUN_FILES: std::sync::Mutex<std::collections::BTreeMap<u32, PathBuf>> = std::sync::Mutex::new(std::collections::BTreeMap::new());
 
 /// What `start_run` adds for the run's instructions.
 pub struct Prepared {
@@ -35,10 +40,20 @@ pub struct Prepared {
     pub first_prompt: Option<crate::automations::Staged>,
     /// The scrubbed text for the run's Codex bridge to inject.
     pub codex: Option<String>,
+    /// The file this run's instructions were written to, if any.
+    pub file: Option<PathBuf>,
 }
 
-fn file_in(state_dir: &Path) -> PathBuf {
-    state_dir.join(FILE_NAME)
+/// A new, unique instruction file name in the session's state folder.
+fn new_file_in(state_dir: &Path) -> PathBuf {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    state_dir.join(format!("{FILE_PREFIX}-{}-{n}.md", crate::store::now_ms()))
+}
+
+fn is_instruction_file(path: &Path) -> bool {
+    path.extension().is_some_and(|e| e == "md")
+        && path.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with(FILE_PREFIX))
 }
 
 fn read_skill(folder: &str) -> Result<Skill, String> {
@@ -73,8 +88,8 @@ fn conversation_hash(store: &Store, session_id: u32) -> Option<String> {
 /// Composes and writes the run's instructions. Never fails the launch: a problem launches without
 /// instructions and says so (D19).
 pub fn prepare(store: &Store, row: &SessionRow, state_dir: &Path, redact: &[Vec<u8>], parent: &[(String, String)]) -> Prepared {
-    let file = file_in(state_dir);
-    let _ = std::fs::remove_file(&file);
+    let file = new_file_in(state_dir);
+    let mut written = None;
     let mut facts = RunInstructions::default();
     let bot = crate::bots::of_session(store, row.id).unwrap_or(None);
     let notes = match crate::notes::for_project(store, row.project_id) {
@@ -104,7 +119,11 @@ pub fn prepare(store: &Store, row: &SessionRow, state_dir: &Path, redact: &[Vec<
         match carrier(row.agent) {
             Carrier::Unsupported(reason) => {
                 facts.reason = Some(reason.to_owned());
-                note = Some(reason.to_owned());
+                // Nobody expects a plain shell to take instructions, so it gets no warning on every
+                // launch; its facts still say why.
+                if row.agent != AgentKind::Shell {
+                    note = Some(reason.to_owned());
+                }
             }
             Carrier::CodexDeveloperInstructions => {
                 // Given by the run's Codex bridge once its thread appears (`record`, `codex_injected`).
@@ -123,6 +142,7 @@ pub fn prepare(store: &Store, row: &SessionRow, state_dir: &Path, redact: &[Vec<
                         facts.bytes = u32::try_from(text.len()).unwrap_or(u32::MAX);
                         facts.hash = Some(text_hash(&text));
                         given_text = Some(text);
+                        written = Some(file.clone());
                     }
                     Err(e) => {
                         let why = format!("Chorus couldn't write this run's instructions ({e}), so it started without them.");
@@ -150,7 +170,7 @@ pub fn prepare(store: &Store, row: &SessionRow, state_dir: &Path, redact: &[Vec<
     if let Some(p) = &first_prompt {
         args.extend(["--".to_owned(), p.text.clone()]);
     }
-    Prepared { args, facts, note, first_prompt, codex }
+    Prepared { args, facts, note, first_prompt, codex, file: written }
 }
 
 const CODEX_WAITING: &str = "Given when Codex's conversation starts.";
@@ -181,6 +201,9 @@ fn last_given_hash(store: &Store, session_id: u32, before_run: u32) -> Option<St
 /// bridge, and links an automation's first prompt to the run so the agent's own report of it is
 /// matched, not recorded again. Returns a note for the session when something wasn't given.
 pub fn record(store: &Store, session_id: u32, run_id: u32, prepared: &Prepared, bridge: Option<&Arc<crate::sessions::codex_bridge::Bridge>>) -> Option<String> {
+    if let Some(file) = &prepared.file {
+        RUN_FILES.lock().unwrap_or_else(std::sync::PoisonError::into_inner).insert(run_id, file.clone());
+    }
     let mut facts = prepared.facts.clone();
     let mut note = None;
     if let Some(text) = &prepared.codex {
@@ -226,9 +249,11 @@ pub fn codex_injected(store: &Store, session_id: u32, run_id: u32, result: Resul
     save_facts(store, run_id, &facts);
 }
 
-/// The run ended: its instructions file goes.
-pub fn run_ended(state_dir: &Path) {
-    let _ = std::fs::remove_file(file_in(state_dir));
+/// The run ended: its own instructions file goes, never a newer run's.
+pub fn run_ended(run_id: u32) {
+    if let Some(file) = RUN_FILES.lock().unwrap_or_else(std::sync::PoisonError::into_inner).remove(&run_id) {
+        let _ = std::fs::remove_file(file);
+    }
 }
 
 /// At start-up, before any session relaunches: files left by runs that ended with an earlier
@@ -236,7 +261,10 @@ pub fn run_ended(state_dir: &Path) {
 pub fn start(manager: &SessionManager) {
     let Ok(dirs) = std::fs::read_dir(manager.data_dir().join("state")) else { return };
     for dir in dirs.flatten() {
-        run_ended(&dir.path());
+        let Ok(files) = std::fs::read_dir(dir.path()) else { continue };
+        for f in files.flatten().map(|f| f.path()).filter(|p| is_instruction_file(p)) {
+            let _ = std::fs::remove_file(f);
+        }
     }
 }
 
@@ -318,20 +346,26 @@ mod tests {
         std::fs::create_dir_all(&in_a).unwrap();
         std::fs::create_dir_all(&in_b).unwrap();
         let secret = format!("sk-ant-{}", "q".repeat(30));
-        let p = prepare(&s, &session(&s, 1, "claude", Some(a)), &in_a, &[secret.clone().into_bytes()], &[]);
-        assert_eq!(p.args[0], "--append-system-prompt-file");
-        let text = std::fs::read_to_string(&p.args[1]).unwrap();
+        let row_a = session(&s, 1, "claude", Some(a));
+        let pa = prepare(&s, &row_a, &in_a, &[secret.clone().into_bytes()], &[]);
+        assert_eq!(pa.args[0], "--append-system-prompt-file");
+        let text = std::fs::read_to_string(&pa.args[1]).unwrap();
         assert!(text.contains("alpha") && text.contains("omega"));
-        assert!(p.facts.given && p.facts.notes.len() == 2 && p.facts.notes[0].title == "Everywhere");
+        assert!(pa.facts.given && pa.facts.notes.len() == 2 && pa.facts.notes[0].title == "Everywhere");
         let p = prepare(&s, &session(&s, 2, "claude", Some(b)), &in_b, &[], &[]);
         let text = std::fs::read_to_string(&p.args[1]).unwrap();
         assert!(!text.contains("alpha") && text.contains("omega"));
         // Grok gets nothing, and says why.
         let p = prepare(&s, &session(&s, 3, "grok", Some(a)), &in_b, &[], &[]);
-        assert!(p.args.is_empty() && !p.facts.given && p.note.is_some_and(|n| n.contains("Grok")));
-        assert!(!file_in(&in_b).exists());
-        run_ended(&in_a);
-        assert!(!file_in(&in_a).exists());
+        assert!(p.args.is_empty() && !p.facts.given && p.note.is_some_and(|n| n.contains("Grok")) && p.file.is_none());
+        // A run's end removes its own file only: a Restart's newer file stays.
+        let (old, newer) = (pa.file.clone().unwrap(), prepare(&s, &row_a, &in_a, &[], &[]).file.unwrap());
+        assert_ne!(old, newer);
+        RUN_FILES.lock().unwrap().extend([(901, old.clone()), (902, newer.clone())]);
+        run_ended(901);
+        assert!(!old.exists() && newer.exists());
+        run_ended(902);
+        assert!(!newer.exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -382,7 +416,7 @@ mod codex_tests {
         let row = crate::store::sessions::get(&s, 1).unwrap().unwrap();
         let p = prepare(&s, &row, &dir, &[], &[]);
         // Nothing in argv or on disk: the text waits for the bridge.
-        assert!(p.args.is_empty() && !file_in(&dir).exists());
+        assert!(p.args.is_empty() && p.file.is_none());
         assert!(p.codex.as_deref().is_some_and(|t| t.contains("body")));
         let note = record(&s, 1, 7, &p, None);
         assert!(note.is_some_and(|n| n.contains("0.163.0")));

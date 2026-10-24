@@ -41,9 +41,29 @@ pub fn remember(recent: &[String], folder: &str) -> Vec<String> {
     std::iter::once(folder.clone()).chain(recent.iter().filter(|r| !same(r, &folder)).cloned()).take(MAX_RECENT).collect()
 }
 
+/// A folder without trailing separators, except a drive root, which keeps its own (`D:\`): `D:`
+/// alone means the current folder on drive D.
+pub fn trim_trailing_separators(path: &str) -> String {
+    let t = path.trim_end_matches(['\\', '/']);
+    if t.len() == 2 && t.ends_with(':') && t.as_bytes()[0].is_ascii_alphabetic() {
+        format!("{t}\\")
+    } else {
+        t.to_owned()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn trailing_separators_go_but_a_drive_root_keeps_its_own() {
+        assert_eq!(trim_trailing_separators(r"C:\work\"), r"C:\work");
+        assert_eq!(trim_trailing_separators("C:/work//"), "C:/work");
+        assert_eq!(trim_trailing_separators(r"D:\"), r"D:\");
+        assert_eq!(trim_trailing_separators("D:/"), r"D:\");
+        assert_eq!(trim_trailing_separators("D:"), r"D:\");
+    }
 
     #[test]
     fn paths_compare_as_windows_does() {

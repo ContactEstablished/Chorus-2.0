@@ -99,6 +99,9 @@ impl Bridge {
                         if loaded["data"].as_array().is_some_and(|a|a.iter().any(|t|t.as_str()==Some(id))) { bridge.inject_instructions(&manager,session,id); }
                         bridge.ready.store(true,Ordering::SeqCst);
                         if let Ok(resumed) = bridge.rpc("thread/resume",json!({"threadId":id})) {
+                            // A resumed thread the TUI hadn't loaded yet at the first poll is loaded
+                            // now; give it what is still pending (a no-op once given).
+                            bridge.inject_instructions(&manager,session,id);
                             let _=crate::store::sessions::set_agent_session_id(&manager.store,session,id);
                             manager.notify_id(session);
                             break (id.to_owned(),chorus_core::codex_stream::hydrate(id,&resumed,bridge.resume.is_none()));

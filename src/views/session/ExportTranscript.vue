@@ -36,8 +36,20 @@ async function run(): Promise<void> {
 function onDocument(e: Event): void {
   if (open.value && root.value && e.target instanceof Node && !root.value.contains(e.target)) open.value = false
 }
-onMounted(() => document.addEventListener('pointerdown', onDocument, true))
-onBeforeUnmount(() => document.removeEventListener('pointerdown', onDocument, true))
+function onKey(e: KeyboardEvent): void {
+  if (open.value && e.key === 'Escape') {
+    open.value = false
+    e.stopPropagation()
+  }
+}
+onMounted(() => {
+  document.addEventListener('pointerdown', onDocument, true)
+  document.addEventListener('keydown', onKey, true)
+})
+onBeforeUnmount(() => {
+  document.removeEventListener('pointerdown', onDocument, true)
+  document.removeEventListener('keydown', onKey, true)
+})
 </script>
 
 <template>

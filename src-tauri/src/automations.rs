@@ -324,7 +324,7 @@ fn save(m: &SessionManager, input: &AutomationSave) -> Result<Automation, String
     }
     let prompt = check_prompt(store, &input.prompt)?;
     let schedule = sched::check(&input.schedule)?;
-    let cwd = input.cwd.trim().trim_matches('"').trim().trim_end_matches(['\\', '/']).to_owned();
+    let cwd = chorus_core::folders::trim_trailing_separators(input.cwd.trim().trim_matches('"').trim());
     let path = std::path::Path::new(&cwd);
     if cwd.is_empty() || cwd.len() > 1024 || !path.is_absolute() || !path.is_dir() {
         return Err(format!("{cwd} is not a folder that exists."));
@@ -399,6 +399,10 @@ fn busy_session(m: &SessionManager, automation: u32) -> Option<String> {
 
 /// Starts one run of an automation now and records it. Never panics; every outcome has a row.
 fn fire(m: &Arc<SessionManager>, a: &AutoRow, trigger: Trigger, due_at: i64) -> Result<u32, String> {
+    // Run now and the scheduler can fire the same automation together; one at a time, so the
+    // second sees the first's session as busy and is skipped rather than starting a twin.
+    static FIRING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _one = FIRING.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let store = m.store();
     if let Some(p) = problem(store, a) {
         return record_run(store, a.id, trigger, due_at, Outcome::Failed, None, Some(&p));

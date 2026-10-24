@@ -33,6 +33,8 @@ pub enum AgentEvent {
 
 /// Where a tool call points, short enough for a list: a file, a command, a pattern or an address.
 pub const MAX_TARGET_CHARS: usize = 160;
+/// Longest file path kept whole as a target.
+pub const MAX_PATH_CHARS: usize = 1024;
 
 /// The most telling field of a tool's input, on one line.
 pub fn tool_target(input: &Value) -> Option<String> {
@@ -41,6 +43,16 @@ pub fn tool_target(input: &Value) -> Option<String> {
         Value::String(s) => serde_json::from_str::<Value>(s).unwrap_or(Value::String(s.clone())),
         v => v.clone(),
     };
+    // A file path is kept exactly (Documents opens it), within a path's length; other targets
+    // are shortened to one line for display.
+    if let Value::Object(o) = &input
+        && let Some(path) = ["file_path", "path", "filePath"].iter().find_map(|k| o.get(*k).and_then(Value::as_str))
+    {
+        let path = path.trim();
+        if !path.is_empty() && path.chars().count() <= MAX_PATH_CHARS && !path.contains(['\n', '\r']) {
+            return Some(path.to_owned());
+        }
+    }
     let text = match &input {
         Value::String(s) => Some(s.clone()),
         Value::Object(o) => ["file_path", "path", "filePath", "command", "cmd", "pattern", "url", "query", "description"]
@@ -249,6 +261,9 @@ mod tests {
     fn tool_targets_are_short_single_lines() {
         assert_eq!(tool_target(&json!({"command": "a\n b"})).as_deref(), Some("a b"));
         assert_eq!(tool_target(&json!("{\"file_path\":\"x.rs\"}")).as_deref(), Some("x.rs"));
+        // Paths are kept whole: long ones and ones with double spaces still name the file.
+        let deep = format!("C:\\{}_docs\\PLAN  draft.md", "nested\\".repeat(30));
+        assert_eq!(tool_target(&json!({"file_path": deep})).as_deref(), Some(deep.as_str()));
         let long = tool_target(&json!({"command": "x".repeat(400)})).unwrap();
         assert_eq!(long.chars().count(), MAX_TARGET_CHARS + 1);
         assert_eq!(tool_target(&json!({"other": 1})), None);

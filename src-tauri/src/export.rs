@@ -32,7 +32,7 @@ pub struct ExportResult {
     pub transcript_note: Option<String>,
 }
 
-fn scrubber(manager: &SessionManager) -> Result<impl Fn(&[u8]) -> Vec<u8>, String> {
+fn scrubber(manager: &SessionManager) -> Result<impl Fn(&[u8]) -> Vec<u8> + Send + 'static, String> {
     let (keys, unreadable) = crate::vault::all_for_scrubbing(manager.store());
     if unreadable != 0 {
         return Err("A vault key could not be read for scrubbing, so nothing was exported.".into());
@@ -93,35 +93,44 @@ pub async fn session_export(app: AppHandle, state: ManagerState<'_>, session_id:
     if !path.is_absolute() || !path.parent().is_some_and(Path::is_dir) {
         return Err(format!("{} isn't in a folder that exists.", path.display()));
     }
-    std::fs::write(&path, &text).map_err(|e| format!("Couldn't write {}: {e}", path.display()))?;
+    let turns = rendered.len() as u32;
+    let transcript = if include_transcript { Some(history::session_transcript(manager.store(), session_id)?) } else { None };
+    // Reading and scrubbing a transcript of tens of MB mustn't hold up an async worker.
+    tauri::async_runtime::spawn_blocking(move || write_files(&path, &text, transcript, &scrub, turns))
+        .await
+        .map_err(|e| e.to_string())?
+        .map(Some)
+}
 
+/// Writes the export and, when asked (`transcript` is `Some`), the scrubbed agent transcript.
+fn write_files(path: &Path, text: &[u8], transcript: Option<Option<String>>, scrub: &dyn Fn(&[u8]) -> Vec<u8>, turns: u32) -> Result<ExportResult, String> {
+    std::fs::write(path, text).map_err(|e| format!("Couldn't write {}: {e}", path.display()))?;
     let (mut transcript_path, mut transcript_note) = (None, None);
-    if include_transcript {
-        match history::session_transcript(manager.store(), session_id)? {
-            None => transcript_note = Some("This session has no agent transcript on record.".into()),
-            Some(source) => {
-                let source = PathBuf::from(source);
-                let target = transcript_target(&path, &source);
-                match std::fs::metadata(&source) {
-                    Err(e) => transcript_note = Some(format!("The agent's transcript couldn't be read: {e}")),
-                    Ok(m) if m.len() > MAX_TRANSCRIPT_BYTES => {
-                        transcript_note = Some(format!("The agent's transcript is larger than {} MB, so it wasn't copied.", MAX_TRANSCRIPT_BYTES >> 20));
-                    }
-                    Ok(_) if target.exists() => {
-                        transcript_note = Some(format!("{} already exists, so the agent's transcript wasn't written.", target.display()));
-                    }
-                    Ok(_) => match std::fs::read(&source) {
-                        Err(e) => transcript_note = Some(format!("The agent's transcript couldn't be read: {e}")),
-                        Ok(bytes) => {
-                            std::fs::write(&target, scrub(&bytes)).map_err(|e| format!("Couldn't write {}: {e}", target.display()))?;
-                            transcript_path = Some(target.display().to_string());
-                        }
-                    },
+    match transcript {
+        None => {}
+        Some(None) => transcript_note = Some("This session has no agent transcript on record.".into()),
+        Some(Some(source)) => {
+            let source = PathBuf::from(source);
+            let target = transcript_target(path, &source);
+            match std::fs::metadata(&source) {
+                Err(e) => transcript_note = Some(format!("The agent's transcript couldn't be read: {e}")),
+                Ok(m) if m.len() > MAX_TRANSCRIPT_BYTES => {
+                    transcript_note = Some(format!("The agent's transcript is larger than {} MB, so it wasn't copied.", MAX_TRANSCRIPT_BYTES >> 20));
                 }
+                Ok(_) if target.exists() => {
+                    transcript_note = Some(format!("{} already exists, so the agent's transcript wasn't written.", target.display()));
+                }
+                Ok(_) => match std::fs::read(&source) {
+                    Err(e) => transcript_note = Some(format!("The agent's transcript couldn't be read: {e}")),
+                    Ok(bytes) => {
+                        std::fs::write(&target, scrub(&bytes)).map_err(|e| format!("Couldn't write {}: {e}", target.display()))?;
+                        transcript_path = Some(target.display().to_string());
+                    }
+                },
             }
         }
     }
-    Ok(Some(ExportResult { path: path.display().to_string(), turns: rendered.len() as u32, transcript_path, transcript_note }))
+    Ok(ExportResult { path: path.display().to_string(), turns, transcript_path, transcript_note })
 }
 
 #[cfg(test)]

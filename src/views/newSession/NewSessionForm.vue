@@ -350,6 +350,11 @@ watch(
 const profileName = ref('')
 // P8: the Bot the session starts from, whose instructions it copies.
 const botId = ref<number | null>(null)
+const botAgent = ref<AgentKind | null>(null)
+// A Bot belongs to its agent: choosing another agent leaves the Bot behind.
+watch(agent, (a) => {
+  if (botId.value !== null && a !== botAgent.value) botId.value = null
+})
 const savedNote = ref('')
 async function applyProfile(p: ProfileSummary): Promise<void> {
   agent.value = p.agent
@@ -362,6 +367,7 @@ async function applyProfile(p: ProfileSummary): Promise<void> {
   envVar.value = p.credential?.envVar ?? ''
   profileName.value = p.name
   botId.value = p.id
+  botAgent.value = p.agent
   if (p.providerId !== null || p.credential) runsOnOpen.value = true
   savedNote.value = p.providerName === '(deleted provider)' ? 'Its provider was deleted: choose another.' : `Filled from ${p.name}.`
 }

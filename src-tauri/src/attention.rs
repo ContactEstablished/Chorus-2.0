@@ -100,6 +100,22 @@ impl Attention {
 
     fn notify(&self, s: &SessionSummary) {
         let Some(manager) = self.manager.get().and_then(Weak::upgrade) else { return };
+        let fallback = s.run_started_at_secs.unwrap_or(s.created_at_secs);
+        let mut facts = NoticeFacts {
+            session: s.id,
+            name: &s.name,
+            attention: s.attention,
+            since_ms: s.needs_you_since.map(|at| at as i64),
+            fallback_at: i64::from(fallback) * 1000,
+            now_ms: now_ms(),
+            detail: None,
+        };
+        // The episode's key doesn't depend on the body, so a repeated summary stops here, before
+        // any query.
+        let Some(first) = notice_for(&facts) else { return };
+        if !self.stored.lock().expect("stored lock").insert(first.dedupe_key) {
+            return;
+        }
         // What it is waiting on: the request itself for an approval or a question, else the last
         // message; for a failure, why it stopped.
         let kind = match s.attention {
@@ -108,25 +124,12 @@ impl Attention {
             _ => None,
         };
         let ask = kind.and_then(|k| crate::store::attention::open_ask_subject(manager.store(), s.id, k).ok().flatten());
-        let detail = if matches!(s.attention, chorus_core::attention::Attention::Failed) {
+        facts.detail = if matches!(s.attention, chorus_core::attention::Attention::Failed) {
             s.note.as_deref().or(s.latest.as_deref())
         } else {
             ask.as_deref().or(s.latest.as_deref())
         };
-        let fallback = s.run_started_at_secs.unwrap_or(s.created_at_secs);
-        let facts = NoticeFacts {
-            session: s.id,
-            name: &s.name,
-            attention: s.attention,
-            since_ms: s.needs_you_since.map(|at| at as i64),
-            fallback_at: i64::from(fallback) * 1000,
-            now_ms: now_ms(),
-            detail,
-        };
         let Some(mut notice) = notice_for(&facts) else { return };
-        if !self.stored.lock().expect("stored lock").insert(notice.dedupe_key.clone()) {
-            return;
-        }
         // The body comes from scrubbed history or Chorus's own note; scrub it again anyway, with
         // every vault key, because it is shown outside the session.
         let (keys, _) = crate::vault::all_for_scrubbing(manager.store());

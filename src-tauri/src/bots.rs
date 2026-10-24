@@ -173,7 +173,7 @@ fn check_skills(skills: &[String]) -> Result<Vec<String>, String> {
         if !p.join("SKILL.md").is_file() {
             return Err(format!("{s} has no SKILL.md."));
         }
-        let s = s.trim_end_matches(['\\', '/']).to_owned();
+        let s = chorus_core::folders::trim_trailing_separators(s);
         if !out.contains(&s) {
             out.push(s);
         }
@@ -245,11 +245,16 @@ pub fn save(m: &SessionManager, input: &BotSave) -> Result<Bot, String> {
 
 /// The Bot a new session starts from, checked before the session is made: it exists and isn't
 /// archived. Returns what the session copies.
-pub fn for_launch(store: &Store, bot_id: Option<u32>) -> Result<Option<(u32, Snapshot)>, String> {
+/// A Bot belongs to its own agent: a session of another agent (a Pair's reviewer, or a form whose
+/// agent was changed after choosing the Bot) doesn't carry it.
+pub fn for_launch(store: &Store, bot_id: Option<u32>, agent: AgentKind) -> Result<Option<(u32, Snapshot)>, String> {
     let Some(id) = bot_id else { return Ok(None) };
     let bot = get(store, id)?.ok_or("That Bot no longer exists.")?;
     if bot.archived {
         return Err(format!("{} is archived. Restore it on the Bots screen to start it.", bot.name));
+    }
+    if bot.agent != agent {
+        return Ok(None);
     }
     Ok(Some((id, Snapshot { name: bot.name, instructions: bot.instructions, skills: bot.skills })))
 }
@@ -306,12 +311,14 @@ mod tests {
             )
         })
         .unwrap();
-        let (id, snap) = for_launch(&s, Some(1)).unwrap().unwrap();
+        let (id, snap) = for_launch(&s, Some(1), AgentKind::Claude).unwrap().unwrap();
         assert_eq!((id, snap.instructions.as_str()), (1, "Review only."));
-        assert_eq!(for_launch(&s, None).unwrap(), None);
-        assert!(for_launch(&s, Some(9)).is_err());
+        assert_eq!(for_launch(&s, None, AgentKind::Claude).unwrap(), None);
+        // A Claude Bot doesn't come along to a Codex session.
+        assert_eq!(for_launch(&s, Some(1), AgentKind::Codex).unwrap(), None);
+        assert!(for_launch(&s, Some(9), AgentKind::Claude).is_err());
         s.with(|c| c.execute("UPDATE bots SET archived_at = 5 WHERE id = 1", [])).unwrap();
-        assert!(for_launch(&s, Some(1)).unwrap_err().contains("archived"));
+        assert!(for_launch(&s, Some(1), AgentKind::Claude).unwrap_err().contains("archived"));
         let bot = get(&s, 1).unwrap().unwrap();
         assert!(bot.archived && bot.tags.is_empty() && bot.preset.is_none());
     }

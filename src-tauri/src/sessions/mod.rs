@@ -878,7 +878,7 @@ impl SessionManager {
         let description = launch_rules::clean_description(req.description.as_deref())?;
         let tags = chorus_core::tags::clean_tags(&req.tags)?;
         let routing = routing::for_launch(&self.store, req.agent, req.provider_id, req.routing, &options)?;
-        let bot = crate::bots::for_launch(&self.store, req.bot_id)?;
+        let bot = crate::bots::for_launch(&self.store, req.bot_id, req.agent)?;
         let spec = req.agent.spec();
         // Chorus names the conversation up front where the agent lets it, so every later run can
         // resume it.
@@ -1550,7 +1550,7 @@ impl SessionManager {
                 let cause = classify_exit(requested, m.quitting.load(Ordering::SeqCst), system_shutting_down());
                 let (end, state) = after_exit(cause);
                 let _ = rows::end_run(&m.store, run.id, end, Some(code));
-                crate::instructions::run_ended(&m.state_dir(live.id));
+                crate::instructions::run_ended(run.id);
                 run.recorder.lock().expect("recorder lock").run_ended(&m.store);
                 if state == Some(SessionState::Exited) {
                     let note = m.exit_note(live.id, code, run.started.elapsed()).unwrap_or_else(|| format!("Exited with code {code}."));
@@ -1828,7 +1828,7 @@ impl SessionManager {
         for live in self.live.lock().expect("live lock").values() {
             if let Some(run) = live.current_run() {
                 let _ = rows::end_run(&self.store, run.id, chorus_core::session::RunEnd::ChorusClosed, None);
-                crate::instructions::run_ended(&self.state_dir(live.id));
+                crate::instructions::run_ended(run.id);
                 capped.extend(run.capped);
             }
         }
