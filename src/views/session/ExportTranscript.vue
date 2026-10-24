@@ -4,7 +4,7 @@
  * picks in Windows' save dialog (opened by the back end). Optionally the agent's own transcript
  * file goes beside it, scrubbed. Both are redacted of secrets.
  */
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { commands } from '../../ipc'
 import { useNoticesStore } from '../../stores/notices'
 
@@ -14,6 +14,14 @@ const open = ref(false)
 const withTranscript = ref(false)
 const busy = ref(false)
 const root = ref<HTMLElement | null>(null)
+const opener = ref<HTMLButtonElement | null>(null)
+
+// Keyboard users land on the popover's first choice when it opens.
+watch(open, async (isOpen) => {
+  if (!isOpen) return
+  await nextTick()
+  root.value?.querySelector<HTMLElement>('.pop input, .pop button')?.focus()
+})
 
 async function run(): Promise<void> {
   busy.value = true
@@ -40,6 +48,7 @@ function onKey(e: KeyboardEvent): void {
   if (open.value && e.key === 'Escape') {
     open.value = false
     e.stopPropagation()
+    opener.value?.focus()
   }
 }
 onMounted(() => {
@@ -54,7 +63,7 @@ onBeforeUnmount(() => {
 
 <template>
   <span ref="root" class="export">
-    <button class="quiet" :aria-expanded="open" title="Save this session's prompts, tool calls, questions and final messages as Markdown" @click="open = !open">
+    <button ref="opener" class="quiet" :aria-expanded="open" title="Save this session's prompts, tool calls, questions and final messages as Markdown" @click="open = !open">
       Export…
     </button>
     <div v-if="open" class="pop" role="dialog" aria-label="Export transcript">

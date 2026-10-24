@@ -4,7 +4,7 @@
  * buttons where it is always visible, and a panel of approvals, questions and failures, newest
  * first. A click opens the session and marks it read. In-app only (D15).
  */
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import Icon from '../components/Icon.vue'
 import type { Notification } from '../ipc'
 import { useNotificationsStore } from '../stores/notifications'
@@ -21,6 +21,15 @@ const notices = useNoticesStore()
 const now = useNow()
 const open = ref(false)
 const root = ref<HTMLElement | null>(null)
+const bell = ref<HTMLButtonElement | null>(null)
+
+// Keyboard users land in the panel when it opens: on the newest notification, else Mark all read.
+watch(open, async (isOpen) => {
+  if (!isOpen) return
+  await nextTick()
+  const panel = root.value
+  ;(panel?.querySelector<HTMLElement>('.panel .item') ?? panel?.querySelector<HTMLElement>('.panel button:not(:disabled)'))?.focus()
+})
 
 const badge = computed(() => (store.unread > 99 ? '99+' : String(store.unread)))
 const KIND_LABEL: Record<string, string> = { approval: 'Approval', input: 'Question', failed: 'Failed' }
@@ -51,6 +60,7 @@ function onKey(e: KeyboardEvent): void {
   if (open.value && e.key === 'Escape') {
     open.value = false
     e.stopPropagation()
+    bell.value?.focus()
   }
 }
 
@@ -69,6 +79,7 @@ onUnmounted(() => {
 <template>
   <div ref="root" class="centre">
     <button
+      ref="bell"
       class="bell"
       :class="{ on: open }"
       :title="store.unread ? `${store.unread} unread notifications` : 'Notifications'"
