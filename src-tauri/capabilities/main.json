@@ -1,10 +1,11 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main",
-  "description": "The main window: core IPC and events, and its own title bar's buttons (it draws its own, P4).",
+  "description": "The main window: core IPC and events, every app command (D92), and its own title bar's buttons (it draws its own, P4).",
   "windows": ["main"],
   "permissions": [
     "core:default",
+    "main-window",
     "core:window:allow-minimize",
     "core:window:allow-toggle-maximize",
     "core:window:allow-close",

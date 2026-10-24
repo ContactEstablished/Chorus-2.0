@@ -169,4 +169,43 @@ mod tests {
             }
         }
     }
+
+    mod command_list {
+        include!(concat!(env!("CARGO_MANIFEST_DIR"), "/command_list.rs"));
+    }
+
+    /// D92: the app manifest `build.rs` reads from `collect_commands!` is exactly what the builder
+    /// registers (the bindings are generated from it), and each window is granted only its commands.
+    #[test]
+    fn command_permissions_match_registration() {
+        use std::collections::BTreeSet;
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let read = |path: &str| std::fs::read_to_string(root.join(path)).expect(path);
+        let registered = command_list::registered_commands(&read("src/ipc.rs"));
+        let bindings = read(BINDINGS_FILE);
+        let invoked: BTreeSet<String> = bindings
+            .split("__TAURI_INVOKE")
+            .skip(1)
+            .filter_map(|call| {
+                let call = &call[..call.find('\n')?];
+                let name = &call[call.find("(\"")? + 2..];
+                Some(name[..name.find('"')?].to_owned())
+            })
+            .collect();
+        let unique: BTreeSet<String> = registered.iter().cloned().collect();
+        assert_eq!(unique.len(), registered.len(), "a command is registered twice");
+        assert_eq!(unique, invoked, "build.rs's reading of collect_commands! differs from the bindings");
+
+        let grants = |window: &str| -> BTreeSet<String> {
+            let capability: serde_json::Value = serde_json::from_str(&read(&format!("capabilities/{window}.json"))).expect(window);
+            capability["permissions"].as_array().expect("permissions").iter()
+                .filter_map(serde_json::Value::as_str).filter(|p| !p.contains(':')).map(str::to_owned).collect()
+        };
+        let named = |commands: &[&str]| commands.iter().map(|c| command_list::allow(c)).collect::<BTreeSet<_>>();
+        assert_eq!(grants("main"), BTreeSet::from(["main-window".to_owned()]));
+        assert_eq!(grants("fleet"), named(&["sessions_list", "prefs_get", "fleet_open_session"]));
+        assert_eq!(grants("splash"), named(&["restore_progress"]));
+        let set = command_list::main_window_set(&registered);
+        assert!(registered.iter().all(|c| set.contains(&format!("\"{}\"", command_list::allow(c)))));
+    }
 }
