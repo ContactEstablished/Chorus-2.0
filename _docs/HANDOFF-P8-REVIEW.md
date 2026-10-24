@@ -335,3 +335,8 @@ Checked again after merging with P7 (`evening/p6-p8`), in an isolated instance:
   can't be tied to its run is unstaged so a restart can't repeat the task; skill descriptions are
   bounded and YAML block descriptions read; one file is one document whatever its path spelling.
   Left for Matthew: an idle automation session isn't closed (decision 2).
+- **Through the screens' own forms:** a note saved, refused with a key in it (text kept) and pinned
+  first; a Codex Bot made, a bad skill folder refused, Start session opened New session filled from
+  it; a weekday automation saved with a "- " prompt, resumed (next Monday 09:30) and paused. Fixed on
+  the way: deleting a note or an automation now asks first, and a Bot chip's × archives (restorable)
+  instead of deleting.

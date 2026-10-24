@@ -177,3 +177,6 @@ search the Raw view; export the transcript; rename the session and Restart to se
   dialog). Kept as a trade-off: whole file paths show in tool lists, where they wrap.
 - **Front-end tests:** notification store, fleet roster store and the search count wording (41 → 52
   tests with P8's).
+- **Through the UI:** Settings → Appearance's strip switch hid and reshowed the strip; Mark all read
+  took the unread count from 9 to 0 and cleared the bell's badge; with one failed session the main
+  window's taskbar button showed the red "1" overlay (screen capture before and after).
