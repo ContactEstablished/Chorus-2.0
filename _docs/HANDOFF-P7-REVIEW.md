@@ -5,8 +5,10 @@
 Built: every P7 task. Seen working in isolated dev instances (Claude Code 2.1.308): the 2 s exit
 gate, chip-click navigation, the D23 focus check with real OS input, the tray icon's left click with
 real input, approval and failure notifications, search, export with a planted fake key, and fleet
-addressing. Not verified: the tray menu, other DPI scales and monitors, and opencode's shortcut
-bindings (not installed here). P7 is ready for Matthew's review, not closed.
+addressing. The tray menu, quitting, question notifications and a third review's fixes were seen
+later (§12). Not verified: other DPI scales and monitors, swapped mouse buttons, and opencode's
+shortcut bindings (not installed here). P7 is ready for Matthew's review, not closed. Everything
+waiting for Matthew across P6–P8 is gathered in [HANDOFF-P6-P8-DECISIONS](HANDOFF-P6-P8-DECISIONS.md).
 
 ## 2. Branch
 
