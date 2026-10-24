@@ -120,6 +120,11 @@ model of that family, a full model id only itself. Seen in the review instance: 
 read "claude-haiku-5-5 · medium effort" while it ran and after Chorus closed it; the Opus run before
 it was `claude-opus-5-5` at `xhigh` in its transcript.
 
+**Added at Matthew's request: a proposed fix is offered (D95).** The narrator's instructions now say
+a change the agent proposed but didn't make is remaining work, to offer as a fix suggestion. Seen in
+the review instance: Tip script review on Opus got "Fix tip calculation bug", whose prompt asks the
+agent to make the change it proposed; the Haiku canary reply still got none.
+
 **Proposed lessons (to number), Claude Code 2.1.308:** every reply line in its transcript records
 `message.model`, `requestedModel` and `effort` (a subagent's lines say `isSidechain: true`); and
 it turns on any-motion mouse tracking (`?1003h` with SGR `?1006h`), so a terminal showing it sends
