@@ -312,7 +312,6 @@ async fn open(app: AppHandle) -> Result<FleetProbe, String> {
     // Hidden while it was opening (the hide found no window to close): the last choice wins.
     if app.try_state::<Arc<SessionManager>>().is_some_and(|m| !wanted(&m)) {
         let _ = window.close();
-        return Ok(probe_hwnd(hwnd, false));
     }
     Ok(probe_hwnd(hwnd, true))
 }
