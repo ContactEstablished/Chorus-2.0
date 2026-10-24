@@ -41,7 +41,7 @@ pub fn carrier(agent: AgentKind) -> Carrier {
         // Codex 0.163.0's app-server; canary in P8's review file. Without it, CODEX_UNSUPPORTED.
         AgentKind::Codex => Carrier::CodexDeveloperInstructions,
         AgentKind::Opencode => Carrier::Unsupported(
-            "opencode instructions aren't verified yet: its `instructions` setting hasn't been measured, and opencode ignores settings it rejects (LESSONS L5).",
+            "opencode instructions aren't verified yet: its instructions setting hasn't been measured, and opencode quietly ignores settings it rejects.",
         ),
         AgentKind::Grok => Carrier::Unsupported("Grok has no verified way to take instructions from Chorus."),
         _ => Carrier::Unsupported("This agent has no verified way to take instructions from Chorus."),
