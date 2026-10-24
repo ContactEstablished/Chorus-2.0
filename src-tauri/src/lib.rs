@@ -16,6 +16,13 @@ mod sessions;
 mod splash;
 mod store;
 mod vault;
+// P8: Bots, notes, instructions, documents and automations.
+mod automations;
+mod bots;
+mod documents;
+mod instructions;
+mod notes;
+mod p8;
 
 use std::sync::Arc;
 
@@ -83,6 +90,7 @@ pub fn run() {
             manager.watch_signals();
             sessions::composer::start(&manager)?;
             narrator::start(&manager)?;
+            p8::start(&manager)?;
             let relaunch = manager.reopen()?;
             // Revoke OpenRouter keys an earlier Chorus minted and couldn't revoke. Only keys from
             // before this start are touched, so it can run beside the relaunches, which mint new ones.

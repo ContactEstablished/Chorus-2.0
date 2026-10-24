@@ -46,7 +46,7 @@ fn profile_from(r: &Row<'_>) -> rusqlite::Result<ProfileRow> {
 }
 
 fn unique(e: String, name: &str) -> String {
-    if e.contains("UNIQUE") { format!("a profile named {name:?} already exists") } else { e }
+    if e.contains("UNIQUE") { format!("a Bot named {name:?} already exists") } else { e }
 }
 
 pub fn insert(store: &Store, p: &ProfileInput<'_>) -> Result<u32, String> {
@@ -55,7 +55,7 @@ pub fn insert(store: &Store, p: &ProfileInput<'_>) -> Result<u32, String> {
     store
         .with(|c| {
             c.execute(
-                "INSERT INTO launch_profiles (name, agent, options, provider_id, credential_id, credential_env, created_at, updated_at)
+                "INSERT INTO bots (name, agent, options, provider_id, credential_id, credential_env, created_at, updated_at)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)",
                 params![p.name, p.agent.as_str(), options, p.provider_id, p.credential_id, p.credential_env, now],
             )?;
@@ -69,7 +69,7 @@ pub fn update(store: &Store, id: u32, p: &ProfileInput<'_>) -> Result<(), String
     store
         .with(|c| {
             c.execute(
-                "UPDATE launch_profiles SET name = ?2, agent = ?3, options = ?4, provider_id = ?5, credential_id = ?6,
+                "UPDATE bots SET name = ?2, agent = ?3, options = ?4, provider_id = ?5, credential_id = ?6,
                         credential_env = ?7, updated_at = ?8
                  WHERE id = ?1",
                 params![id, p.name, p.agent.as_str(), options, p.provider_id, p.credential_id, p.credential_env, now_ms()],
@@ -80,18 +80,18 @@ pub fn update(store: &Store, id: u32, p: &ProfileInput<'_>) -> Result<(), String
 }
 
 pub fn get(store: &Store, id: u32) -> Result<Option<ProfileRow>, String> {
-    store.with(|c| c.query_row(&format!("SELECT {COLUMNS} FROM launch_profiles WHERE id = ?1"), [id], profile_from).optional())
+    store.with(|c| c.query_row(&format!("SELECT {COLUMNS} FROM bots WHERE id = ?1"), [id], profile_from).optional())
 }
 
 pub fn list(store: &Store) -> Result<Vec<ProfileRow>, String> {
     store.with(|c| {
-        let mut stmt = c.prepare(&format!("SELECT {COLUMNS} FROM launch_profiles ORDER BY name"))?;
+        let mut stmt = c.prepare(&format!("SELECT {COLUMNS} FROM bots WHERE archived_at IS NULL ORDER BY name"))?;
         stmt.query_map([], profile_from)?.collect()
     })
 }
 
 pub fn delete(store: &Store, id: u32) -> Result<bool, String> {
-    store.with(|c| c.execute("DELETE FROM launch_profiles WHERE id = ?1", [id]).map(|n| n > 0))
+    store.with(|c| c.execute("DELETE FROM bots WHERE id = ?1", [id]).map(|n| n > 0))
 }
 
 #[cfg(test)]

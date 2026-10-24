@@ -22,6 +22,8 @@ import SessionsView from '../views/SessionsView.vue'
 import SessionView from '../views/session/SessionView.vue'
 
 const SettingsView = defineAsyncComponent(() => import('../views/SettingsView.vue'))
+// P8's screens.
+const NotesView = defineAsyncComponent(() => import('../views/NotesView.vue'))
 const NewSessionDialog = defineAsyncComponent(() => import('../views/NewSessionDialog.vue'))
 const CommandPalette = defineAsyncComponent(() => import('../shell/CommandPalette.vue'))
 
@@ -101,13 +103,7 @@ watch(
           phase="Phase 8"
           what="Documents your sessions produce, tagged by project and linked to the session that wrote each one."
         />
-        <PhasePlaceholder
-          v-else-if="view.name === 'notes'"
-          title="Notes"
-          icon="notes"
-          phase="Phase 8"
-          what="Project or global notes that are added to agents' instructions, with pinned notes first."
-        />
+        <NotesView v-else-if="view.name === 'notes'" />
         <OverviewView v-else />
       </main>
       <StatusBar />

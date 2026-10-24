@@ -67,7 +67,7 @@ pub fn profiles_list(state: Manager<'_>) -> Result<Vec<ProfileSummary>, String> 
 #[specta::specta]
 pub fn profile_save(state: Manager<'_>, input: ProfileSave) -> Result<ProfileSummary, String> {
     if input.name.trim().is_empty() {
-        return Err("A profile needs a name.".into());
+        return Err("A Bot needs a name.".into());
     }
     let name = clean_name(Some(&input.name), "")?;
     // Stored as chosen, not with defaults filled in, so a later default change still reaches it.
@@ -82,13 +82,13 @@ pub fn profile_save(state: Manager<'_>, input: ProfileSave) -> Result<ProfileSum
     };
     let id = match input.id {
         Some(id) => {
-            rows::get(state.store(), id)?.ok_or("That profile no longer exists.")?;
+            rows::get(state.store(), id)?.ok_or("That Bot no longer exists.")?;
             rows::update(state.store(), id, &fields)?;
             id
         }
         None => rows::insert(state.store(), &fields)?,
     };
-    let row = rows::get(state.store(), id)?.ok_or("That profile no longer exists.")?;
+    let row = rows::get(state.store(), id)?.ok_or("That Bot no longer exists.")?;
     Ok(summary(&state, &row))
 }
 

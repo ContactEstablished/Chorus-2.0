@@ -39,6 +39,8 @@ impl Fixture {
             tags: Vec::new(),
             workspace: Default::default(),
             routing: None,
+            bot_id: None,
+            first_prompt: None,
         };
         let s = self.manager.create(req).unwrap();
         assert!(s.live, "shell should be running: {:?}", s.note);
@@ -636,6 +638,8 @@ fn bad_input_is_refused_at_the_boundary() {
         tags: Vec::new(),
         workspace: Default::default(),
         routing: None,
+        bot_id: None,
+        first_prompt: None,
     };
     assert!(f.manager.create(req.clone()).unwrap_err().contains("full path"));
     req.cwd = f.dir.join("missing").display().to_string();
@@ -668,6 +672,8 @@ fn a_preset_launch_names_and_notes_its_sessions() {
         tags: Vec::new(),
         workspace: Default::default(),
         routing: None,
+        bot_id: None,
+        first_prompt: None,
     };
     // A shell can't build: Workbench and Pair say so, and nothing starts.
     let refused = f.manager.launch(LaunchRequest { preset: Preset::Workbench, session: session.clone(), count: None }).unwrap_err();
@@ -713,7 +719,7 @@ fn worktree_request(f: &Fixture) -> CreateSession {
     CreateSession {
         agent: AgentKind::Shell, cwd: repo.display().to_string(), name: None, credential: None,
         cols: 100, rows: 30, options: Default::default(), provider_id: None, description: None,
-        project_id: None, tags: Vec::new(), workspace: Workspace::NewWorktree, routing: None,
+        project_id: None, tags: Vec::new(), workspace: Workspace::NewWorktree, routing: None, bot_id: None, first_prompt: None,
     }
 }
 
@@ -886,6 +892,8 @@ fn a_session_can_work_in_a_worktree_of_its_own() {
         tags: vec!["Spike".into(), "spike".into(), "review".into()],
         workspace: Workspace::Here,
         routing: None,
+        bot_id: None,
+        first_prompt: None,
     };
     let first = f.manager.create(request.clone()).unwrap();
     assert_eq!(first.tags, ["spike", "review"]);
@@ -960,6 +968,8 @@ fn a_worktree_git_removed_only_in_part_is_reported_so() {
             tags: Vec::new(),
             workspace: Workspace::NewWorktree,
             routing: None,
+            bot_id: None,
+            first_prompt: None,
         })
         .unwrap();
     let wt = s.worktree.clone().unwrap();

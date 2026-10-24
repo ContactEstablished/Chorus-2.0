@@ -8,6 +8,7 @@ import { computed, onMounted, ref } from 'vue'
 import { commands, type SessionSummary } from '../../ipc'
 import TagInput from '../../components/TagInput.vue'
 import SessionGitFacts from './SessionGitFacts.vue'
+import SessionInstructionsFacts from './SessionInstructionsFacts.vue'
 import { useProjectsStore } from '../../stores/projects'
 import { useSessionsStore } from '../../stores/sessions'
 import { useAgentsStore } from '../../stores/agents'
@@ -61,6 +62,7 @@ async function retag(tags: string[]): Promise<void> {
       <dd class="tags"><TagInput :model-value="s.tags" :known="knownTags" @update:model-value="retag" /></dd>
       <dt>Agent</dt>
       <dd>{{ AGENT_LABELS[s.agent] }}</dd>
+      <SessionInstructionsFacts :session="s" />
       <template v-if="s.agent !== 'shell'">
         <dt>Options</dt>
         <dd>{{ optionsText(s) || 'the agent\'s defaults' }}</dd>
