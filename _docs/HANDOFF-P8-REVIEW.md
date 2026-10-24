@@ -340,3 +340,6 @@ Checked again after merging with P7 (`evening/p6-p8`), in an isolated instance:
   it; a weekday automation saved with a "- " prompt, resumed (next Monday 09:30) and paused. Fixed on
   the way: deleting a note or an automation now asks first, and a Bot chip's × archives (restorable)
   instead of deleting.
+- **Exit check through the screens on the merged build:** Bots → Start session → New session → Start
+  made a session with the Bot's options (Fast, Manual, haiku), its instructions given, and Claude
+  answered with the Bot's canary word.

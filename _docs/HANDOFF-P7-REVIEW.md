@@ -185,3 +185,5 @@ search the Raw view; export the transcript; rename the session and Restart to se
   strip's screen check leaves a strip placed across monitors or a little over an edge alone.
 - **P6 in the merged build:** Friendly's Send and Queue each delivered once, in order, to Claude Code
   and to Codex (with P8's bridge change), recorded as `composer`.
+- **Exit gate again on the final merged build:** an approval recorded at …001449 ms showed on the
+  strip at …001451 and in the tray at …001453.
