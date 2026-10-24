@@ -122,12 +122,6 @@ export const commands = {
 	 *  its WAL, scrollback files).
 	 */
 	devLeakCheck: (id: number, text: string) => typedError<LeakReport, string>(__TAURI_INVOKE("dev_leak_check", { id, text })),
-	/**
-	 *  Opens the strip (or returns the open one) without activating it. Async because building a window
-	 *  inside a synchronous command deadlocks on Windows.
-	 */
-	spikeFleetOpen: () => typedError<FleetProbe, string>(__TAURI_INVOKE("spike_fleet_open")),
-	spikeFleetProbe: () => typedError<FleetProbe, string>(__TAURI_INVOKE("spike_fleet_probe")),
 	/**  How far the restore at start has got: the splash asks as it plays. */
 	restoreProgress: () => __TAURI_INVOKE<RestoreProgress>("restore_progress"),
 	/**
@@ -147,12 +141,38 @@ export const commands = {
 	sessionImageAdd: (sessionId: number, revision: number, name: string, png: number[]) => typedError<Draft, string>(__TAURI_INVOKE("session_image_add", { sessionId, revision, name, png })),
 	sessionImageRemove: (sessionId: number, revision: number, imageId: number) => typedError<Draft, string>(__TAURI_INVOKE("session_image_remove", { sessionId, revision, imageId })),
 	sessionImageRead: (sessionId: number, imageId: number) => typedError<number[], string>(__TAURI_INVOKE("session_image_read", { sessionId, imageId })),
+	notificationsList: () => typedError<NotificationsPage, string>(__TAURI_INVOKE("notifications_list")),
+	/**  Marks one notification read and returns the unread count. */
+	notificationRead: (id: number) => typedError<number, string>(__TAURI_INVOKE("notification_read", { id })),
+	notificationsReadAll: () => typedError<null, string>(__TAURI_INVOKE("notifications_read_all")),
+	fleetShown: () => __TAURI_INVOKE<boolean>("fleet_shown"),
+	fleetSetShown: (shown: boolean) => __TAURI_INVOKE<void>("fleet_set_shown", { shown }),
+	/**  A chip on the strip was clicked: bring the main window forward on that session. */
+	fleetOpenSession: (sessionId: number) => typedError<null, string>(__TAURI_INVOKE("fleet_open_session", { sessionId })),
+	/**  The strip's geometry, styles and the foreground window, for runtime checks (D23). */
+	fleetProbe: () => typedError<FleetProbe, string>(__TAURI_INVOKE("fleet_probe")),
+	/**  Exports a session's history. Returns none when the save dialog is cancelled. */
+	sessionExport: (sessionId: number, includeTranscript: boolean) => typedError<{
+	path: string,
+	turns: number,
+	/**  Where the scrubbed copy of the agent's transcript went, if it was asked for and written. */
+	transcriptPath: string | null,
+	/**  Why the agent's transcript wasn't copied, when it was asked for. */
+	transcriptNote: string | null,
+} | null, string>(__TAURI_INVOKE("session_export", { sessionId, includeTranscript })),
+	fleetRoster: () => __TAURI_INVOKE<FleetRoster>("fleet_roster"),
+	/**  The user has seen a changed address: the next poll shows the current state. */
+	fleetAcknowledge: (sessionId: number) => __TAURI_INVOKE<void>("fleet_acknowledge", { sessionId }),
 };
 
 /** Events */
 export const events = {
+	attentionNavigate: makeEvent<AttentionNavigate>("attention-navigate"),
 	backendPulse: makeEvent<BackendPulse>("backend-pulse"),
 	fleetClick: makeEvent<FleetClick>("fleet-click"),
+	fleetRosterChanged: makeEvent<FleetRosterChanged>("fleet-roster-changed"),
+	fleetShown: makeEvent<FleetShown>("fleet-shown"),
+	notificationAdded: makeEvent<NotificationAdded>("notification-added"),
 	sessionUpdated: makeEvent<SessionUpdated>("session-updated"),
 };
 
@@ -191,6 +211,12 @@ export type Activity =
 "ready" | 
 /**  The turn ended in an error. */
 "failed";
+
+/**
+ *  What Chorus can say about a session's address: exactly three states. A collision is a cause
+ *  on `changed`, given only when another live session holds the requested name.
+ */
+export type AddressState = { kind: "verified"; address: string } | { kind: "changed"; requested: string; current: string; collision: boolean } | { kind: "unknown"; reason: string };
 
 export type AgentInfo = {
 	kind: AgentKind,
@@ -266,6 +292,11 @@ export type Attention =
 "running" | 
 /**  Exited cleanly, or closed. */
 "done";
+
+/**  Asks the main window to show a session, or the Overview's Needs you (the tray, a strip chip). */
+export type AttentionNavigate = {
+	sessionId: number | null,
+};
 
 /**
  *  Emitted once a second so the window can show the back end is alive. It also proves the typed
@@ -495,6 +526,15 @@ export type EffortChoice = {
 	args: string,
 };
 
+export type ExportResult = {
+	path: string,
+	turns: number,
+	/**  Where the scrubbed copy of the agent's transcript went, if it was asked for and written. */
+	transcriptPath: string | null,
+	/**  Why the agent's transcript wasn't copied, when it was asked for. */
+	transcriptNote: string | null,
+};
+
 export type FileLeak = {
 	path: string,
 	longest: number,
@@ -523,6 +563,23 @@ export type FleetProbe = {
 	topmost: boolean,
 	shield: boolean,
 	foregroundHwnd: string,
+};
+
+export type FleetRoster = {
+	/**  Why the registry couldn't be read; the addresses are then unknown. */
+	unreadable: string | null,
+	rows: RosterRow[],
+	/**  Live Claude Code sessions Chorus didn't start, by name. Listed only; no actions. */
+	others: string[],
+};
+
+export type FleetRosterChanged = {
+	roster: FleetRoster,
+};
+
+/**  Whether the strip is shown, for Settings. */
+export type FleetShown = {
+	shown: boolean,
 };
 
 /**  What New session learns about a folder as it's typed or picked. */
@@ -683,6 +740,30 @@ export type NitroSelection_Serialize = {
 	likely: NitroLikely | null,
 	/**  The reliability and precision rules the likely endpoint fails. */
 	likelyFailsRules: string[],
+};
+
+export type Notification = {
+	id: number,
+	sessionId: number,
+	/**  `approval`, `input` or `failed`. */
+	kind: string,
+	title: string,
+	body: string,
+	/**  Unix milliseconds. */
+	createdAt: number | null,
+	readAt: number | null,
+};
+
+/**  A notification was stored; the centre adds it and the bell shows the new unread count. */
+export type NotificationAdded = {
+	notification: Notification,
+	unread: number,
+};
+
+export type NotificationsPage = {
+	/**  Newest first. */
+	items: Notification[],
+	unread: number,
 };
 
 /**  What a turn really ran with. */
@@ -1016,6 +1097,16 @@ export type ResumeKind =
 /**  What a session in a launch is for. A label, not a limit: a reviewer can write files too. */
 export type Role = "builder" | "reviewer" | "shell";
 
+/**  One open Chorus session in the roster. */
+export type RosterRow = {
+	sessionId: number,
+	name: string,
+	/**  The address state, for Claude Code sessions. */
+	address: AddressState | null,
+	/**  The address in words (Chorus 1's), or why the session has none. */
+	described: string,
+};
+
 /**
  *  What a launch can remember per model (K8): a tier, or `Default` for an eligible launch that
  *  sent none.
@@ -1103,6 +1194,8 @@ export type SessionSummary = {
 	noSignal: boolean,
 	/**  Whether it needs you, is busy or is finished, in the design's words (`chorus_core::attention`). */
 	attention: Attention,
+	/**  Start of this waiting episode, Unix milliseconds; null when no reliable evidence exists. */
+	needsYouSince: number | null,
 	/**  What the running agent's newest turn really used, read back from the agent (opencode). */
 	observed: Observed | null,
 	/**  How that turn differs from `options`, one phrase each; empty when it matches. */

@@ -78,6 +78,15 @@ export type {
   WorktreeInfo,
   WorktreeEntry,
   Snapshot,
+  Notification,
+  NotificationsPage,
+  NotificationAdded,
+  AttentionNavigate,
+  FleetShown,
+  FleetRoster,
+  RosterRow,
+  AddressState,
+  ExportResult,
 } from './bindings'
 
 /** The result shape of every fallible generated command. */

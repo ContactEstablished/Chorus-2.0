@@ -474,6 +474,16 @@ impl Spec {
         out
     }
 
+    /// The arguments that set the session's address in the agent's own peer fleet (P7): Claude
+    /// Code's `-n <name>` (checked on 2.1.308), on fresh launches and resumes alike, because Claude
+    /// Code doesn't keep the name across `--resume`. Other agents have no fleet.
+    pub fn name_args(&self, name: &str) -> Vec<String> {
+        match self.kind {
+            AgentKind::Claude if !name.trim().is_empty() => vec!["-n".to_owned(), name.trim().to_owned()],
+            _ => Vec::new(),
+        }
+    }
+
     /// The arguments that start or continue the agent's conversation. `id` is the conversation id
     /// Chorus holds (chosen at launch for [`Resume::Assigned`], found later for
     /// [`Resume::Discovered`]); `exists` says the agent has recorded that conversation. Ids that
@@ -686,6 +696,11 @@ mod tests {
         let id = "0f8fad5b-d9cb-469f-a165-70867728950e";
         let claude = AgentKind::Claude.spec();
         assert_eq!(claude.conversation_args(Some(id), false), ["--session-id", id]);
+        assert_eq!(claude.name_args(" Ada "), ["-n", "Ada"]);
+        assert!(claude.name_args("  ").is_empty());
+        for kind in AgentKind::ALL.iter().filter(|k| **k != AgentKind::Claude) {
+            assert!(kind.spec().name_args("Ada").is_empty(), "{kind:?} has no peer fleet");
+        }
         assert_eq!(claude.conversation_args(Some(id), true), ["--resume", id]);
         // Gemini CLI takes an id to create and the same one to resume; it refuses an id that exists.
         let gemini = AgentKind::Gemini.spec();

@@ -16,6 +16,8 @@ export const PATHS = {
   chevronDown: 'M6 9l6 6l6-6',
   chevronRight: 'M9 6l6 6l-6 6',
   search: 'M10.5 4a6.5 6.5 0 1 0 0 13a6.5 6.5 0 1 0 0-13M15.5 15.5L20 20',
+  bell: 'M6 16.5V11a6 6 0 0 1 12 0v5.5l1.5 2h-15zM10 20.5a2.2 2.2 0 0 0 4 0',
+  download: 'M12 4v11M7.5 10.5L12 15l4.5-4.5M5 19.5h14',
   minimize: 'M6 12h12',
   maximize: 'M6.5 6.5h11v11h-11z',
   restore: 'M8.5 8.5h9v9h-9zM6.5 15.5V6.5h9',

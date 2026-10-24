@@ -3,7 +3,10 @@
  * The Overview (glacier-overview.png): a headline, status filters, project chips, and session cards
  * grouped by status (or project, or not at all).
  */
-import { computed, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, watch } from 'vue'
+import { storeToRefs } from 'pinia'
+import { useInboxStore } from '../stores/inbox'
+import { inboxKey } from '../shell/inbox'
 import Icon from '../components/Icon.vue'
 import SessionCard from './SessionCard.vue'
 import type { GroupBy } from '../ipc'
@@ -20,9 +23,10 @@ const projects = useProjectsStore()
 const prefs = usePrefsStore()
 const view = useViewStore()
 const app = useAppStore()
-const now = useNow()
+const now = useNow(1000)
+const inbox = useInboxStore()
 
-const filter = ref<StatusFilter>('all')
+const { filter } = storeToRefs(inbox)
 
 /** Sessions in the chosen project (or all). */
 const inProject = computed(() =>
@@ -31,6 +35,48 @@ const inProject = computed(() =>
 const c = computed(() => counts(inProject.value))
 const shown = computed(() => inProject.value.filter((s) => matchesFilter(s, filter.value)))
 const groups = computed(() => groupSessions(shown.value, prefs.prefs.groupBy, projects.list))
+const waitingIds = computed(() => groups.value.flatMap((g) => g.sessions).filter((s) => needsYou(s.attention)).map((s) => s.id))
+
+function openCard(id: number): void {
+  if (waitingIds.value.includes(id)) inbox.open(id, waitingIds.value)
+  else inbox.returning = null
+  view.openSession(id)
+}
+
+async function focusSelected(): Promise<void> {
+  await nextTick()
+  const card = document.querySelector<HTMLElement>(`[data-inbox-id="${inbox.selectedId}"]`)
+  card?.focus({ preventScroll: true })
+  card?.scrollIntoView({ block: 'nearest' })
+}
+
+function onInboxKey(e: KeyboardEvent): void {
+  if (view.palette || view.newSessionOpen || document.querySelector('[aria-modal="true"], [role="alertdialog"], dialog[open]')) return
+  const target = e.target instanceof Element ? e.target : null
+  const protectedTarget = !!target?.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"], .xterm')
+  const action = inboxKey(e, protectedTarget)
+  // A button or a card keeps its own Enter handler; only the empty board opens the selection.
+  if (action === 'open' && target?.closest('button, a, [role="button"]')) return
+  if (action === 'next' || action === 'previous') {
+    if (!waitingIds.value.length) return
+    inbox.move(waitingIds.value, action === 'next' ? 1 : -1)
+    void focusSelected()
+  } else if (action === 'open' && inbox.selectedId !== null && waitingIds.value.includes(inbox.selectedId)) {
+    openCard(inbox.selectedId)
+  } else return
+  e.preventDefault()
+  e.stopPropagation()
+}
+
+watch(waitingIds, (ids) => {
+  if (inbox.selectedId !== null && !ids.includes(inbox.selectedId)) inbox.selectedId = ids[0] ?? null
+})
+onMounted(() => {
+  inbox.returned(waitingIds.value)
+  window.addEventListener('keydown', onInboxKey)
+})
+onUnmounted(() => window.removeEventListener('keydown', onInboxKey))
+
 const chosenProject = computed(() => (view.projectFilter === null ? null : (projects.byId.get(view.projectFilter) ?? null)))
 
 const PILLS: { key: StatusFilter; label: string; st: string | null }[] = [
@@ -124,6 +170,8 @@ function groupTone(key: string): string {
     </div>
     <p v-else-if="!shown.length" class="none">No sessions match. <button class="quiet link" @click="filter = 'all'; view.projectFilter = null">Show all</button></p>
 
+    <p v-if="waitingIds.length" class="inbox-help">j / k select waiting session · Enter open · Esc back</p>
+
     <section v-for="g in groups" :key="g.key" class="group">
       <h2 class="gtitle" :class="groupTone(g.key)">
         <span v-if="g.colour" class="sq" :style="{ background: g.colour }" />
@@ -135,10 +183,14 @@ function groupTone(key: string): string {
           v-for="s in g.sessions"
           :key="s.id"
           :session="s"
+          :data-inbox-id="needsYou(s.attention) ? s.id : undefined"
+          :class="{ 'inbox-selected': inbox.selectedId === s.id }"
+          :aria-current="inbox.selectedId === s.id ? 'true' : undefined"
+          @focus="inbox.selectedId = needsYou(s.attention) ? s.id : null"
           :project="s.projectId === null ? null : (projects.byId.get(s.projectId) ?? null)"
           :home="app.info?.homeDir ?? null"
           :now="now"
-          @open="view.openSession(s.id)"
+          @open="openCard(s.id)"
         />
       </div>
     </section>
@@ -146,6 +198,7 @@ function groupTone(key: string): string {
 </template>
 
 <style scoped>
+.inbox-help { color: var(--text-muted); font-size: 12px; margin: 0 0 16px; }
 .overview {
   padding: 28px 40px 48px;
 }

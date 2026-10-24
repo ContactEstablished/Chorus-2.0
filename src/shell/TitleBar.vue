@@ -1,11 +1,12 @@
 <script setup lang="ts">
 /**
  * The window's own title bar (the native one is off): a drag area, the command palette's button,
- * the dev badge, and Windows' three buttons. Double-click maximises, as on any Windows title bar.
+ * the dev badge, the notification bell (P7), and Windows' three buttons. Double-click maximises, as on any Windows title bar.
  */
 import { onMounted, onUnmounted, ref } from 'vue'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import Icon from '../components/Icon.vue'
+import NotificationCentre from './NotificationCentre.vue'
 import { useAppStore } from '../stores/app'
 
 defineEmits<{ palette: [] }>()
@@ -35,6 +36,7 @@ onUnmounted(() => unlisten?.())
       <kbd>Ctrl K</kbd>
     </button>
     <div class="right" data-tauri-drag-region>
+      <NotificationCentre />
       <button class="win" title="Minimise" aria-label="Minimise" @click="win.minimize()"><Icon name="minimize" :size="16" :stroke="1.25" /></button>
       <button class="win" :title="maximized ? 'Restore' : 'Maximise'" :aria-label="maximized ? 'Restore' : 'Maximise'" @click="win.toggleMaximize()">
         <Icon :name="maximized ? 'restore' : 'maximize'" :size="14" :stroke="1.25" />

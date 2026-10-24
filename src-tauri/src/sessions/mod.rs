@@ -150,6 +150,8 @@ pub struct SessionSummary {
     pub no_signal: bool,
     /// Whether it needs you, is busy or is finished, in the design's words (`chorus_core::attention`).
     pub attention: Attention,
+    /// Start of this waiting episode, Unix milliseconds; null when no reliable evidence exists.
+    pub needs_you_since: Option<f64>,
     /// What the running agent's newest turn really used, read back from the agent (opencode).
     pub observed: Option<Observed>,
     /// How that turn differs from `options`, one phrase each; empty when it matches.
@@ -701,6 +703,9 @@ impl SessionManager {
         let credential_label =
             row.credential_id.and_then(|id| credentials::get(&self.store, id).ok().flatten()).map(|c| c.label);
         let latest = history::latest(&self.store, row.id).ok().flatten();
+        let activity = run.as_ref().map_or(Activity::Unknown, |r| r.recorder.lock().expect("recorder lock").activity());
+        let current_attention = attention(row.state, run.is_some(), activity,
+            last.as_ref().and_then(|r| r.end_reason), last.as_ref().and_then(|r| r.exit_code));
         SessionSummary {
             id: row.id,
             name: row.name.clone(),
@@ -727,15 +732,11 @@ impl SessionManager {
             }),
             cli_version: last.as_ref().and_then(|r| r.cli_version.clone()),
             resumed: last.as_ref().is_some_and(|r| r.resumed),
-            activity: run.as_ref().map_or(Activity::Unknown, |r| r.recorder.lock().expect("recorder lock").activity()),
+            activity,
             no_signal: run.as_ref().is_some_and(|r| r.no_signal_shown.load(Ordering::SeqCst)),
-            attention: attention(
-                row.state,
-                run.is_some(),
-                run.as_ref().map_or(Activity::Unknown, |r| r.recorder.lock().expect("recorder lock").activity()),
-                last.as_ref().and_then(|r| r.end_reason),
-                last.as_ref().and_then(|r| r.exit_code),
-            ),
+            attention: current_attention,
+            needs_you_since: crate::store::attention::waiting_since(&self.store, row.id, current_attention, last.as_ref())
+                .ok().flatten().map(|at| at as f64),
             observed_differs: match (&observed, &run) {
                 (Some(o), Some(r)) => oc::differences(row.agent.spec(), &r.asked, o),
                 _ => Vec::new(),
@@ -1141,6 +1142,7 @@ impl SessionManager {
             let conversation = renewed.as_deref().or(row.agent_session_id.as_deref());
             let exists = conversation.is_some_and(|id| agents::conversation_exists(row.agent, id, &parent));
             args.extend(spec.conversation_args(conversation, exists));
+            args.extend(spec.name_args(&row.name));
             (None, exists && spec.resume.kind() != ResumeKind::None)
         };
         let detected = self.agents.get(row.agent);

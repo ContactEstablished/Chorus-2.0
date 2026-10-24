@@ -9,7 +9,7 @@ const view = new URLSearchParams(window.location.search).get('view')
 async function mount(): Promise<void> {
   if (view === 'fleet') {
     document.documentElement.classList.add('fleet')
-    const { default: FleetStrip } = await import('./spikes/FleetStrip.vue')
+    const { default: FleetStrip } = await import('./fleet/FleetStrip.vue')
     createApp(FleetStrip as Component).mount('#app')
   } else if (view === 'splash') {
     const { default: SplashView } = await import('./splash/SplashView.vue')

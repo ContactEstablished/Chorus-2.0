@@ -11,7 +11,7 @@ publish = false
 
 [workspace.dependencies]
 # Tauri is pinned to 2.x (D4); 3.0 is in alpha.
-tauri = "2.12"
+tauri = { version = "2.12", features = ["tray-icon"] }
 tauri-build = "2.7"
 # tauri-specta and specta are release candidates; pin them exactly, as their docs require.
 specta = { version = "=2.0.0-rc.25", features = ["derive"] }

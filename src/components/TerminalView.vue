@@ -4,23 +4,31 @@
  * tile on the Wall.
  * Output arrives as raw bytes and is handed to xterm unchanged, so its UTF-8 decoder keeps state
  * across chunks. Input goes back as typed text; resizes follow the element's size.
+ * With `searchable` (the session view's terminal, not Wall tiles), it can search its buffer (P7),
+ * and Ctrl+Shift+F asks the view to open its search bar; agents and shells don't bind that key.
  */
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebglAddon } from '@xterm/addon-webgl'
+import { SearchAddon } from '@xterm/addon-search'
 import '@xterm/xterm/css/xterm.css'
 import { TERMINAL_OPTIONS, themeFromTokens } from './terminal'
 
+const props = defineProps<{ searchable?: boolean }>()
 const emit = defineEmits<{
   input: [data: string]
   resize: [cols: number, rows: number]
+  search: []
 }>()
 
 const host = ref<HTMLDivElement | null>(null)
 const renderer = ref<'webgl' | 'dom'>('dom')
 let term: Terminal | null = null
 let fit: FitAddon | null = null
+let search: SearchAddon | null = null
+/** The current search's matches: the active one (0-based, -1 past the highlight limit) and the total. */
+const results = ref<{ index: number; count: number } | null>(null)
 let observer: ResizeObserver | null = null
 // Follows the theme: Settings switches it by changing `data-theme` on the root element.
 const themeWatch = new MutationObserver(() => {
@@ -28,7 +36,8 @@ const themeWatch = new MutationObserver(() => {
 })
 
 onMounted(() => {
-  term = new Terminal({ ...TERMINAL_OPTIONS, theme: themeFromTokens() })
+  // Search's match highlights and count use decorations, which xterm 6 still calls proposed API.
+  term = new Terminal({ ...TERMINAL_OPTIONS, allowProposedApi: !!props.searchable, theme: themeFromTokens() })
   themeWatch.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
   fit = new FitAddon()
   term.loadAddon(fit)
@@ -46,6 +55,19 @@ onMounted(() => {
     renderer.value = 'dom'
   }
   fit.fit()
+  if (props.searchable) {
+    search = new SearchAddon()
+    term.loadAddon(search)
+    search.onDidChangeResults(({ resultIndex, resultCount }) => (results.value = { index: resultIndex, count: resultCount }))
+    term.attachCustomKeyEventHandler((e) => {
+      if (e.type === 'keydown' && e.ctrlKey && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'f') {
+        e.preventDefault()
+        emit('search')
+        return false
+      }
+      return true
+    })
+  }
   // Before xterm's own paste handling (an ancestor's capture listener runs first).
   host.value!.addEventListener('paste', onPaste, { capture: true })
   term.onData((data) => emit('input', data))
@@ -108,7 +130,29 @@ function bufferText(): string {
   return lines.join('\n')
 }
 
-defineExpose({ write, size, focus, screenText, bufferText, renderer })
+// The addon takes #RRGGBB backgrounds only (no alpha).
+const MATCH = { matchBackground: '#5c4a12', matchOverviewRuler: '#ffc400', activeMatchBackground: '#136b80', activeMatchColorOverviewRuler: '#1ec8f0' }
+
+/** Finds `text` in the buffer, scrollback included, forwards or backwards from the last match. */
+function find(text: string, backwards = false, caseSensitive = false): boolean {
+  if (!search) return false
+  if (!text) {
+    clearSearch()
+    return false
+  }
+  const options = { caseSensitive, decorations: MATCH }
+  const found = backwards ? search.findPrevious(text, options) : search.findNext(text, options)
+  if (!found) results.value = { index: -1, count: 0 }
+  return found
+}
+
+function clearSearch(): void {
+  search?.clearDecorations()
+  term?.clearSelection()
+  results.value = null
+}
+
+defineExpose({ write, size, focus, screenText, bufferText, renderer, find, clearSearch, results })
 </script>
 
 <template>

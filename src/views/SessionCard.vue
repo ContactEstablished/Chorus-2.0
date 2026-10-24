@@ -10,12 +10,15 @@ import { compactPath } from '../shell/compactPath'
 import { useNoticesStore } from '../stores/notices'
 import { AGENT_LABELS } from '../raw/labels'
 import AgentLogo from '../components/AgentLogo.vue'
-import { ATTENTION, ago, shortDuration, shortPath } from '../shell/status'
+import { ageLabel, attentionTier, waitingSeconds } from '../shell/inbox'
+import { ATTENTION, ago, needsYou, shortDuration, shortPath } from '../shell/status'
 
 const props = defineProps<{ session: SessionSummary; project: Project | null; home: string | null; now: number }>()
 defineEmits<{ open: [] }>()
 
 const s = computed(() => props.session)
+const waiting = computed(() => waitingSeconds(s.value.needsYouSince, props.now))
+const tier = computed(() => waiting.value === null ? null : attentionTier(waiting.value))
 const notices = useNoticesStore()
 const openingFolder = ref(false)
 async function openFolder(): Promise<void> {
@@ -83,6 +86,9 @@ const timing = computed(() => {
       </span>
     </p>
     <p class="body">{{ body }}</p>
+    <p v-if="needsYou(s.attention)" class="waiting" :class="tier ? `waiting-${tier}` : ''">
+      {{ waiting === null ? 'Waiting · start time unavailable' : `Waiting ${ageLabel(waiting)}` }}
+    </p>
     <footer class="foot">
       <span>{{ timing }}</span>
       <span class="cta">{{ ATTENTION[s.attention].cta }} →</span>
@@ -91,6 +97,14 @@ const timing = computed(() => {
 </template>
 
 <style scoped>
+.waiting { margin: 0; color: var(--text-2); font-size: 12px; font-variant-numeric: tabular-nums; }
+.waiting-pulse { color: var(--status-needs); }
+.waiting-pulse::before { content: '• '; animation: waiting-pulse 1.6s ease-in-out infinite; }
+.waiting-urgent { color: var(--status-needs); font-weight: 700; }
+.waiting-stale { color: var(--status-failed); font-weight: 700; }
+@keyframes waiting-pulse { 50% { opacity: .4; } }
+@media (prefers-reduced-motion: reduce) { .waiting-pulse::before { animation: none; } }
+
 .card {
   display: flex;
   flex-direction: column;
@@ -111,6 +125,7 @@ const timing = computed(() => {
 .card:hover {
   background: var(--surface-raised);
 }
+.card.inbox-selected,
 .card:focus-visible {
   outline: 2px solid var(--accent-line);
   outline-offset: 2px;

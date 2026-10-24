@@ -16,6 +16,9 @@ import { usePrefsStore } from '../stores/prefs'
 import { useViewStore } from '../stores/view'
 import { useNoticesStore } from '../stores/notices'
 import { installDevApi } from './devApi'
+import { useInboxStore } from '../stores/inbox'
+import { inboxKey } from '../shell/inbox'
+import { events } from '../ipc'
 
 import OverviewView from '../views/OverviewView.vue'
 import SessionsView from '../views/SessionsView.vue'
@@ -31,8 +34,19 @@ const projects = useProjectsStore()
 const prefs = usePrefsStore()
 const view = useViewStore()
 const notices = useNoticesStore()
+const inbox = useInboxStore()
 
 function onKey(e: KeyboardEvent): void {
+  const target = e.target instanceof Element ? e.target : null
+  const protectedTarget = !!target?.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"], .xterm')
+  if (view.name === 'session' && inbox.returning?.opened === view.sessionId
+      && !view.palette && !view.newSessionOpen && !document.querySelector('[aria-modal="true"], [role="alertdialog"], dialog[open]')
+      && inboxKey(e, protectedTarget) === 'back') {
+    view.goBack()
+    e.preventDefault()
+    e.stopPropagation()
+    return
+  }
   if (!e.ctrlKey || e.altKey || e.metaKey) return
   // A focused terminal keeps them: there they belong to its shell or agent (D49).
   if (e.target instanceof Element && e.target.closest('.xterm')) return
@@ -50,14 +64,30 @@ function onKey(e: KeyboardEvent): void {
   e.stopPropagation()
 }
 
+// The tray and the fleet strip bring the window forward on a session, or on Needs you (P7).
+let unlistenNavigate: (() => void) | null = null
+async function listenNavigate(): Promise<void> {
+  unlistenNavigate = await events.attentionNavigate.listen(({ payload }) => {
+    view.palette = null
+    if (payload.sessionId !== null) {
+      view.openSession(payload.sessionId)
+    } else {
+      inbox.filter = 'needs'
+      view.go('overview')
+    }
+  })
+}
+
 onMounted(async () => {
   window.addEventListener('keydown', onKey, { capture: true })
+  void listenNavigate()
   await app.init()
   await Promise.all([prefs.load(), sessions.init(), projects.load()])
   if (app.info?.flavor === 'dev') installDevApi()
 })
 onUnmounted(() => {
   window.removeEventListener('keydown', onKey, { capture: true })
+  unlistenNavigate?.()
   sessions.dispose()
   app.dispose()
 })

@@ -11,8 +11,8 @@ import { registerTerminal } from '../components/terminals'
 import { commands } from '../ipc'
 
 // `autofocus` is off where several terminals mount at once (the Wall), so none takes focus.
-const props = withDefaults(defineProps<{ sessionId: number; live: boolean; autofocus?: boolean }>(), { autofocus: true })
-const emit = defineEmits<{ error: [message: string]; attached: [attached: boolean]; size: [cols: number, rows: number] }>()
+const props = withDefaults(defineProps<{ sessionId: number; live: boolean; autofocus?: boolean; searchable?: boolean }>(), { autofocus: true, searchable: false })
+const emit = defineEmits<{ error: [message: string]; attached: [attached: boolean]; size: [cols: number, rows: number]; search: [] }>()
 
 const term = ref<InstanceType<typeof TerminalView> | null>(null)
 let viewId: number | null = null
@@ -65,9 +65,16 @@ function screenText(): string {
   return term.value?.screenText() ?? ''
 }
 
-defineExpose({ screenText, bufferText: () => term.value?.bufferText() ?? '', focus: () => term.value?.focus() })
+defineExpose({
+  screenText,
+  bufferText: () => term.value?.bufferText() ?? '',
+  focus: () => term.value?.focus(),
+  find: (text: string, backwards = false, caseSensitive = false) => term.value?.find(text, backwards, caseSensitive) ?? false,
+  clearSearch: () => term.value?.clearSearch(),
+  results: () => term.value?.results ?? null,
+})
 </script>
 
 <template>
-  <TerminalView ref="term" @input="input" @resize="resize" />
+  <TerminalView ref="term" :searchable="searchable" @input="input" @resize="resize" @search="emit('search')" />
 </template>

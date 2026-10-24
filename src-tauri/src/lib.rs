@@ -2,8 +2,11 @@
 
 mod agents;
 mod app;
+mod attention;
 mod events;
+mod export;
 mod fleet;
+mod fleet_registry;
 mod git;
 mod ipc;
 mod lock;
@@ -15,6 +18,7 @@ mod routing;
 mod sessions;
 mod splash;
 mod store;
+mod tray;
 mod vault;
 
 use std::sync::Arc;
@@ -69,13 +73,32 @@ pub fn run() {
 
             let store = store::Store::open(&data_dir.join("chorus.db"))?;
             let handle = app.handle().clone();
+            // P7: the tray count and the notification centre see every summary the views see.
+            let attention = attention::Attention::new(app.handle().clone());
+            let watching = attention.clone();
             let manager = SessionManager::new(
                 store,
                 data_dir,
                 Box::new(move |session| {
-                    let _ = SessionUpdated { session }.emit(&handle);
+                    let _ = SessionUpdated { session: session.clone() }.emit(&handle);
+                    watching.observe(&session);
                 }),
             );
+            attention.bind(&manager);
+            app.manage(attention);
+            if let Err(e) = tray::install(app.handle(), fleet::wanted(&manager)) {
+                eprintln!("tray: {e}");
+            }
+            // The strip and the tray mustn't keep Chorus running: closing the main window quits,
+            // as it did before they existed.
+            if let Some(main) = app.get_webview_window("main") {
+                let quitting = app.handle().clone();
+                main.on_window_event(move |event| {
+                    if let tauri::WindowEvent::Destroyed = event {
+                        quitting.exit(0);
+                    }
+                });
+            }
             // Sessions open now, so views can attach; they relaunch off this thread, because an
             // opencode session waits for its server.
             // The listener agent hooks post to, before any session launches (P3).
@@ -117,7 +140,10 @@ pub fn run() {
             let routing = std::sync::Arc::new(routing::Routing::default());
             routing::start_observer(manager.clone(), routing.clone());
             app.manage(routing);
+            let strip = manager.clone();
             app.manage(manager);
+            fleet::start(app.handle(), &strip);
+            app.manage(fleet_registry::start(app.handle(), &strip));
             app::start_pulse(app.handle().clone());
             Ok(())
         })
