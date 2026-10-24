@@ -37,6 +37,15 @@ watch(
   },
   { immediate: true },
 )
+// Codex's instructions are given once its conversation starts, after the run began; the back end
+// sends a summary then, so while they are still pending each summary reads the facts again.
+watch(
+  () => props.session,
+  () => {
+    const run = facts.value?.run
+    if (run && !run.given && run.reason?.startsWith('Given when')) void load()
+  },
+)
 
 const summary = computed(() => {
   const run = facts.value?.run
