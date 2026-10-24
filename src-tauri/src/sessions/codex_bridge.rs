@@ -14,6 +14,8 @@ pub struct Bridge {
     events: Mutex<Option<mpsc::Receiver<(i64,Value)>>>, sequence: AtomicU64,
     pub connected: Arc<AtomicBool>, pub ready: AtomicBool, pub resume: Option<String>, pub url: String,
     failure: Arc<Mutex<Option<String>>>,
+    /// P8: the run's instructions and run id, injected once into its thread as a developer message.
+    instructions: Mutex<Option<(String,u32)>>,
 }
 impl Drop for Bridge { fn drop(&mut self) { self.socket.close(); } }
 impl Bridge {
@@ -60,7 +62,7 @@ impl Bridge {
             for (_,reply) in pending_reader.lock().expect("rpc pending").drain() { let _=reply.send(Err("Codex controller disconnected; no request was retried.".into())); }
             reader.close();
         });
-        let bridge=Self { _process:Mutex::new(process),socket,pending,events:Mutex::new(Some(events_rx)),sequence:AtomicU64::new(0),connected,ready:AtomicBool::new(false),resume:resume.map(str::to_owned),url,failure };
+        let bridge=Self { _process:Mutex::new(process),socket,pending,events:Mutex::new(Some(events_rx)),sequence:AtomicU64::new(0),connected,ready:AtomicBool::new(false),resume:resume.map(str::to_owned),url,failure,instructions:Mutex::new(None) };
         bridge.rpc("initialize",json!({"clientInfo":{"name":"chorus_v2","version":"0.1.0"},"capabilities":{"experimentalApi":true}}))?;
         bridge.socket.send(&json!({"method":"initialized"}))?;
         Ok(Arc::new(bridge))
@@ -71,7 +73,17 @@ impl Bridge {
         let result=self.socket.send(&json!({"id":id,"method":method,"params":params})).and_then(|()|rx.recv_timeout(Duration::from_secs(15)).map_err(|_|"Codex request timed out; it was not retried.".to_owned())?);
         self.pending.lock().expect("rpc pending").remove(&id); result
     }
-    pub fn bind(self:&Arc<Self>, manager:&Arc<SessionManager>, session:u32, run:&Arc<Run>) {
+    /// P8: instructions for this run, given once its thread is loaded (`thread/inject_items`,
+    /// verified with Codex 0.163.0), so the text never travels in argv.
+    pub fn set_instructions(&self, text:String, run_id:u32) { *self.instructions.lock().expect("bridge instructions")=Some((text,run_id)); }
+    fn inject_instructions(&self, manager:&SessionManager, session:u32, thread:&str) {
+        let Some((text,run_id))=self.instructions.lock().expect("bridge instructions").take() else { return };
+        let items=json!([{"type":"message","role":"developer","content":[{"type":"input_text","text":text}]}]);
+        let result=self.rpc("thread/inject_items",json!({"threadId":thread,"items":items})).map(|_|());
+        crate::instructions::codex_injected(&manager.store,session,run_id,result);
+        manager.notify_id(session);
+    }
+    pub(super) fn bind(self:&Arc<Self>, manager:&Arc<SessionManager>, session:u32, run:&Arc<Run>) {
         let Some(events)=self.events.lock().expect("bridge events").take() else { return };
         let (manager,run,bridge)=(Arc::downgrade(manager),Arc::downgrade(run),Arc::downgrade(self));
         std::thread::spawn(move|| {
@@ -83,6 +95,8 @@ impl Bridge {
                 if let Ok(loaded) = bridge.rpc("thread/loaded/list",json!({})) {
                     let id = bridge.resume.as_deref().or_else(|| loaded["data"].as_array().filter(|a|a.len()==1).and_then(|a|a[0].as_str()));
                     if let Some(id) = id.filter(|id|chorus_core::agent::is_uuid(id)) {
+                        // P8: once the TUI has the thread loaded, before its first prompt where possible.
+                        if loaded["data"].as_array().is_some_and(|a|a.iter().any(|t|t.as_str()==Some(id))) { bridge.inject_instructions(&manager,session,id); }
                         bridge.ready.store(true,Ordering::SeqCst);
                         if let Ok(resumed) = bridge.rpc("thread/resume",json!({"threadId":id})) {
                             let _=crate::store::sessions::set_agent_session_id(&manager.store,session,id);

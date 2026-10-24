@@ -1193,7 +1193,7 @@ impl SessionManager {
                 resumed,
             },
         )?;
-        crate::instructions::record(&self.store, row.id, run_id, &p8);
+        notes.extend(crate::instructions::record(&self.store, row.id, run_id, &p8, codex_bridge.as_ref()));
         if let Some(cid) = row.credential_id {
             let _ = credentials::touch(&self.store, cid);
         }
@@ -1892,4 +1892,4 @@ impl Drop for CappedGuard {
 
 #[cfg(test)]
 mod tests;
-mod codex_bridge;
+pub(crate) mod codex_bridge;

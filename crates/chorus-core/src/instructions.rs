@@ -24,8 +24,8 @@ pub enum Carrier {
     /// `flag <file>`: the text in a per-run file, never in argv (Claude Code's
     /// `--append-system-prompt-file`).
     AppendFile(&'static str),
-    /// Codex's app-server: `developerInstructions` on the thread the bridge resumes, so the text
-    /// stays out of argv.
+    /// Codex's private app-server (0.163.0): a developer message injected into the run's thread
+    /// (`thread/inject_items`) by Chorus's bridge, so the text stays out of argv.
     CodexDeveloperInstructions,
     /// Nothing verified: the reason is shown on the session and in Settings.
     Unsupported(&'static str),
@@ -38,7 +38,8 @@ pub fn carrier(agent: AgentKind) -> Carrier {
         // Claude Code 2.1.308 `--help`; canary in P8's review file.
         AgentKind::Claude => Carrier::AppendFile("--append-system-prompt-file"),
         AgentKind::Shell => Carrier::Unsupported("A shell has no agent instructions."),
-        AgentKind::Codex => Carrier::Unsupported(CODEX_UNSUPPORTED),
+        // Codex 0.163.0's app-server; canary in P8's review file. Without it, CODEX_UNSUPPORTED.
+        AgentKind::Codex => Carrier::CodexDeveloperInstructions,
         AgentKind::Opencode => Carrier::Unsupported(
             "opencode instructions aren't verified yet: its `instructions` setting hasn't been measured, and opencode ignores settings it rejects (LESSONS L5).",
         ),
@@ -47,10 +48,14 @@ pub fn carrier(agent: AgentKind) -> Carrier {
     }
 }
 
-/// Codex 0.163.0: `-c developer_instructions` would put the text in argv and `runs.args`, and
-/// `model_instructions_file` replaces Codex's own instructions. The app-server's
-/// `thread/inject_items` worked in a canary but isn't built (P8 review, a decision for Matthew).
-pub const CODEX_UNSUPPORTED: &str = "Codex doesn't get instructions from Chorus yet: the only built-in way puts them on the command line, where other programs can read them.";
+/// A Codex run without Chorus's private app-server. `-c developer_instructions` would put the text
+/// in argv and `runs.args`, and `model_instructions_file` replaces Codex's own instructions, so
+/// neither is used (P8 review).
+pub const CODEX_UNSUPPORTED: &str = "Codex gets instructions only through Chorus's private Codex server, which needs Codex 0.163.0. The other ways put them on the command line, where other programs can read them.";
+
+/// Starts a Codex developer message that replaces one an earlier run of the conversation got: an
+/// injected message stays in the conversation, so a second one adds to it.
+pub const CODEX_REPLACES: &str = "These instructions from Chorus replace any earlier instructions from Chorus in this conversation.\n\n";
 
 /// A note as composition needs it. `project` is false for a note that applies everywhere.
 #[derive(Debug, Clone, PartialEq, Eq)]

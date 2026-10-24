@@ -37,7 +37,7 @@ const instructionsNote = computed(() => {
     case 'claude':
       return 'Claude Code gets these with each run, from a file in Chorus’s own data folder.'
     case 'codex':
-      return 'Codex doesn’t get instructions from Chorus yet: the only built-in way puts them on the command line, where other programs can read them.'
+      return 'Codex 0.163.0 gets these through Chorus’s private Codex server, as a developer message at the start of the conversation. Other Codex versions don’t get them: the other ways put them on the command line.'
     case 'shell':
       return 'A shell has no agent instructions.'
     default:

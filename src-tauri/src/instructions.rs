@@ -33,6 +33,8 @@ pub struct Prepared {
     pub note: Option<String>,
     /// An automation's first prompt, already persisted, passed last on the command line.
     pub first_prompt: Option<crate::automations::Staged>,
+    /// The scrubbed text for the run's Codex bridge to inject.
+    pub codex: Option<String>,
 }
 
 fn file_in(state_dir: &Path) -> PathBuf {
@@ -95,6 +97,7 @@ pub fn prepare(store: &Store, row: &SessionRow, state_dir: &Path, redact: &[Vec<
     let mut args = Vec::new();
     let mut note = None;
     let mut given_text: Option<String> = None;
+    let mut codex: Option<String> = None;
     if let Some(c) = composed {
         facts.notes = c.notes.clone();
         facts.left_out = c.left_out;
@@ -104,8 +107,12 @@ pub fn prepare(store: &Store, row: &SessionRow, state_dir: &Path, redact: &[Vec<
                 note = Some(reason.to_owned());
             }
             Carrier::CodexDeveloperInstructions => {
-                facts.reason = Some(chorus_core::instructions::CODEX_UNSUPPORTED.to_owned());
-                note = facts.reason.clone();
+                // Given by the run's Codex bridge once its thread appears (`record`, `codex_injected`).
+                let text = String::from_utf8_lossy(&scrub_all(c.text.as_bytes(), redact, &builtin_patterns())).into_owned();
+                facts.bytes = u32::try_from(text.len()).unwrap_or(u32::MAX);
+                facts.hash = Some(text_hash(&text));
+                facts.reason = Some(CODEX_WAITING.into());
+                codex = Some(text);
             }
             Carrier::AppendFile(flag) => {
                 let text = String::from_utf8_lossy(&scrub_all(c.text.as_bytes(), redact, &builtin_patterns())).into_owned();
@@ -142,18 +149,80 @@ pub fn prepare(store: &Store, row: &SessionRow, state_dir: &Path, redact: &[Vec<
     if let Some(p) = &first_prompt {
         args.push(p.text.clone());
     }
-    Prepared { args, facts, note, first_prompt }
+    Prepared { args, facts, note, first_prompt, codex }
 }
 
-/// After the run's row exists: keeps what its instructions held, and links an automation's
-/// first prompt to the run so the agent's own report of it is matched, not recorded again.
-pub fn record(store: &Store, session_id: u32, run_id: u32, prepared: &Prepared) {
-    if let Ok(json) = serde_json::to_string(&prepared.facts) {
+const CODEX_WAITING: &str = "Given when Codex's conversation starts.";
+
+fn save_facts(store: &Store, run_id: u32, facts: &RunInstructions) {
+    if let Ok(json) = serde_json::to_string(facts) {
         let _ = store.with(|c| c.execute("UPDATE runs SET instructions = ?2 WHERE id = ?1", params![run_id, json]));
     }
+}
+
+fn facts_of(store: &Store, run_id: u32) -> Option<RunInstructions> {
+    let json: Option<String> = store.with(|c| c.query_row("SELECT instructions FROM runs WHERE id = ?1", [run_id], |r| r.get(0)).optional()).ok()??;
+    serde_json::from_str(&json?).ok()
+}
+
+/// The hash of the newest text an earlier run of the session was given.
+fn last_given_hash(store: &Store, session_id: u32, before_run: u32) -> Option<String> {
+    let rows: Vec<String> = store
+        .with(|c| {
+            let mut stmt = c.prepare("SELECT instructions FROM runs WHERE session_id = ?1 AND id < ?2 AND instructions IS NOT NULL ORDER BY id DESC")?;
+            stmt.query_map(params![session_id, before_run], |r| r.get(0))?.collect()
+        })
+        .unwrap_or_default();
+    rows.iter().filter_map(|j| serde_json::from_str::<RunInstructions>(j).ok()).find(|f| f.given).and_then(|f| f.hash)
+}
+
+/// After the run's row exists: keeps what its instructions held, hands Codex's text to the run's
+/// bridge, and links an automation's first prompt to the run so the agent's own report of it is
+/// matched, not recorded again. Returns a note for the session when something wasn't given.
+pub fn record(store: &Store, session_id: u32, run_id: u32, prepared: &Prepared, bridge: Option<&Arc<crate::sessions::codex_bridge::Bridge>>) -> Option<String> {
+    let mut facts = prepared.facts.clone();
+    let mut note = None;
+    if let Some(text) = &prepared.codex {
+        match bridge {
+            None => {
+                facts.reason = Some(chorus_core::instructions::CODEX_UNSUPPORTED.into());
+                note = facts.reason.clone();
+            }
+            // A resumed conversation keeps the developer message an earlier run injected.
+            Some(b) if b.resume.is_some() && last_given_hash(store, session_id, run_id) == facts.hash => {
+                facts.given = true;
+                facts.reason = None;
+            }
+            Some(b) => {
+                let replaces = b.resume.is_some() && last_given_hash(store, session_id, run_id).is_some();
+                let text = if replaces { format!("{}{text}", chorus_core::instructions::CODEX_REPLACES) } else { text.clone() };
+                b.set_instructions(text, run_id);
+            }
+        }
+    }
+    save_facts(store, run_id, &facts);
     if let Some(p) = &prepared.first_prompt {
         crate::automations::launched(store, session_id, run_id, p);
     }
+    note
+}
+
+/// The Codex bridge injected the run's instructions, or couldn't.
+pub fn codex_injected(store: &Store, session_id: u32, run_id: u32, result: Result<(), String>) {
+    let Some(mut facts) = facts_of(store, run_id) else { return };
+    match result {
+        Ok(()) => {
+            facts.given = true;
+            facts.reason = None;
+        }
+        Err(e) => {
+            let why = format!("Codex didn't take this run's instructions ({e}), so it runs without them.");
+            facts.given = false;
+            facts.reason = Some(why.clone());
+            let _ = crate::store::sessions::set_note(store, session_id, Some(&why));
+        }
+    }
+    save_facts(store, run_id, &facts);
 }
 
 /// The run ended: its instructions file goes.
@@ -203,7 +272,8 @@ pub fn of_session(store: &Store, session_id: u32, agent: AgentKind) -> Result<Se
         .flatten();
     let unsupported = match carrier(agent) {
         Carrier::Unsupported(r) => Some(r.to_owned()),
-        Carrier::CodexDeveloperInstructions => Some(chorus_core::instructions::CODEX_UNSUPPORTED.to_owned()),
+        // Codex depends on the run (its private server), so the run's facts say.
+        Carrier::CodexDeveloperInstructions => None,
         Carrier::AppendFile(_) => None,
     };
     Ok(SessionInstructions { bot, run: json.and_then(|j| serde_json::from_str(&j).ok()), unsupported })
@@ -276,6 +346,36 @@ mod tests {
         let p = prepare(&s, &session(&s, 1, "claude", None), &dir, &[key.as_bytes().to_vec()], &[]);
         let text = std::fs::read_to_string(&p.args[1]).unwrap();
         assert!(!text.contains(key));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod codex_tests {
+    use super::*;
+
+    #[test]
+    fn codex_without_its_private_server_gets_nothing_and_says_why() {
+        let s = Store::in_memory();
+        s.with(|c| {
+            c.execute("INSERT INTO sessions (id,name,agent,cwd,state,cols,rows,created_at) VALUES (1,'s','codex','C:/w','running',80,24,1)", [])?;
+            c.execute("INSERT INTO runs (id,session_id,program,args,started_at) VALUES (7,1,'codex','[]',1)", [])?;
+            c.execute("INSERT INTO notes (project_id,title,body,pinned,created_at,updated_at) VALUES (NULL,'N','body',0,1,1)", [])
+        })
+        .unwrap();
+        let dir = std::env::temp_dir().join(format!("chorus-instr-codex-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let row = crate::store::sessions::get(&s, 1).unwrap().unwrap();
+        let p = prepare(&s, &row, &dir, &[], &[]);
+        // Nothing in argv or on disk: the text waits for the bridge.
+        assert!(p.args.is_empty() && !file_in(&dir).exists());
+        assert!(p.codex.as_deref().is_some_and(|t| t.contains("body")));
+        let note = record(&s, 1, 7, &p, None);
+        assert!(note.is_some_and(|n| n.contains("0.163.0")));
+        let facts = facts_of(&s, 7).unwrap();
+        assert!(!facts.given && facts.reason.is_some_and(|r| r.contains("0.163.0")));
+        codex_injected(&s, 1, 7, Ok(()));
+        assert!(facts_of(&s, 7).unwrap().given);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
