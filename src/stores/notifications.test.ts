@@ -60,6 +60,17 @@ describe('notification centre store', () => {
     expect(s.error).toBe('database: locked')
   })
 
+  it('reads the history again when the back end answers after a failed load', async () => {
+    ipc.notificationsList.mockResolvedValueOnce({ status: 'error', error: 'busy' })
+    ipc.notificationsList.mockResolvedValueOnce({ status: 'ok', data: { items: [note(1)], unread: 1 } })
+    const s = useNotificationsStore()
+    await s.init()
+    expect(s.error).toBe('busy')
+    ipc.added!({ payload: { notification: note(2), unread: 2 } })
+    await vi.waitFor(() => expect(s.error).toBeNull())
+    expect(ipc.notificationsList).toHaveBeenCalledTimes(2)
+  })
+
   it('puts a new notification first, once, with the back end unread count', async () => {
     ipc.notificationsList.mockResolvedValue({ status: 'ok', data: { items: [note(1)], unread: 1 } })
     const s = useNotificationsStore()

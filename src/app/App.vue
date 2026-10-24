@@ -42,7 +42,7 @@ const inbox = useInboxStore()
 
 function onKey(e: KeyboardEvent): void {
   const target = e.target instanceof Element ? e.target : null
-  const protectedTarget = !!target?.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"], .xterm')
+  const protectedTarget = !!target?.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"], [role="search"], .xterm')
   if (view.name === 'session' && inbox.returning?.opened === view.sessionId
       && !view.palette && !view.newSessionOpen && !document.querySelector('[aria-modal="true"], [role="alertdialog"], [role="dialog"], dialog[open]')
       && inboxKey(e, protectedTarget) === 'back') {

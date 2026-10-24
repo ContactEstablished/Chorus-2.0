@@ -20,6 +20,8 @@ export const useNotificationsStore = defineStore('notifications', () => {
       unlisten = await events.notificationAdded.listen(({ payload }) => {
         items.value = [payload.notification, ...items.value.filter((n) => n.id !== payload.notification.id)].slice(0, MAX_SHOWN)
         unread.value = payload.unread
+        // The back end answers again: a list that failed to load is read again.
+        if (error.value) void init()
       })
     }
     try {

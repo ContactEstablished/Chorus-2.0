@@ -20,8 +20,12 @@ const v = computed(() => stripView([...sessions.value.values()], now.value))
 
 async function openSession(id: number): Promise<void> {
   const result = await commands.fleetOpenSession(id)
-  if (result.status === 'error') error.value = result.error
-  else opened.value++
+  if (result.status === 'error') {
+    error.value = result.error
+  } else {
+    error.value = null
+    opened.value++
+  }
 }
 
 // For runtime checks: what the strip shows, and how many chips were acted on.

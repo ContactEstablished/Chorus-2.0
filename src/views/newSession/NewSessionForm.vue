@@ -361,7 +361,10 @@ watch(agent, (a) => {
 })
 /** Archives a Bot from its chip; if it was the one applied, the session no longer uses it. */
 async function archiveBot(p: ProfileSummary): Promise<void> {
-  await profiles.archive(p.id)
+  if (!(await profiles.archive(p.id))) {
+    savedNote.value = `${p.name} couldn't be archived: ${profiles.error ?? 'unknown error'}`
+    return
+  }
   if (botId.value === p.id) {
     botId.value = null
     savedNote.value = `${p.name} was archived, so this session won't use it.`

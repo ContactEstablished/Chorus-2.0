@@ -21,11 +21,15 @@ let timer: ReturnType<typeof setInterval> | null = null
 
 const KIND: Record<DocKind, string> = { plan: 'Plan', spec: 'Spec', report: 'Report', review: 'Review report', decision: 'Decision record' }
 
+// The list is polled; a lasting failure is said once, not every 10 s.
+let failing = false
 async function load(): Promise<void> {
   try {
     list.value = await unwrap(commands.documentsList())
+    failing = false
   } catch (e) {
-    notices.error("Couldn't load documents.", e)
+    if (!failing) notices.error("Couldn't load documents.", e)
+    failing = true
   }
 }
 onMounted(() => {
@@ -104,7 +108,7 @@ function edited(d: ChorusDocument): string {
     </div>
     <p v-else class="empty">
       No documents yet. When a session writes a Markdown plan, spec, review or report at the top of its folder or under _docs/ or docs/,
-      it appears here. Claude Code sessions are covered; other agents' file writes aren't reported to Chorus yet.
+      it appears here. Files Claude Code writes, and Codex's patches, are covered; files written by shell commands, or by other agents, aren't reported to Chorus yet.
     </p>
   </section>
 </template>

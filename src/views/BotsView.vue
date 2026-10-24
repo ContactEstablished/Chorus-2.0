@@ -11,9 +11,11 @@ import { useBotsStore } from '../stores/bots'
 import { useAgentsStore } from '../stores/agents'
 import { AGENT_CHIPS } from '../shell/status'
 import { botUsage } from './botText'
+import { useNoticesStore } from '../stores/notices'
 import { AGENT_LABELS, EFFORT_LABELS, PERMISSION_LABELS } from '../raw/labels'
 
 const bots = useBotsStore()
+const notices = useNoticesStore()
 const agents = useAgentsStore()
 
 const editing = ref<BotSave | null>(null)
@@ -120,7 +122,8 @@ async function setArchived(b: Bot, value: boolean): Promise<void> {
     if (editing.value?.id === b.id) editing.value = null
     await bots.load()
   } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e)
+    // Archive and Restore are also on cards and the Archived list, outside the editor: say it there.
+    notices.error(value ? `Could not archive ${b.name}.` : `Could not restore ${b.name}.`, e)
   }
 }
 
@@ -179,7 +182,8 @@ function onAgent(): void {
         </label>
       </div>
       <label>Description <input v-model="editing.description" placeholder="What it is for" maxlength="2000" autocomplete="off" /></label>
-      <label>Tags <TagInput v-model="editing.tags" :known="knownTags" label="Tags" /></label>
+      <!-- Not a <label>: it would forward clicks to the first tag's remove button. -->
+      <div class="field">Tags <TagInput v-model="editing.tags" :known="knownTags" label="Tags" /></div>
       <label>
         Instructions (Markdown)
         <textarea v-model="editing.instructions" rows="7" placeholder="How this Bot should work. Added to the agent's instructions at each run." />
@@ -269,7 +273,8 @@ h1 {
   background: var(--surface-raised);
   margin-bottom: 22px;
 }
-.editor label {
+.editor label,
+.editor .field {
   display: grid;
   gap: 4px;
   font-size: 12.5px;

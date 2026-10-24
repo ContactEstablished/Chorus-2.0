@@ -40,7 +40,11 @@ function onKey(e: KeyboardEvent): void {
   if (e.key === 'Enter') {
     e.preventDefault()
     find(e.shiftKey)
-  } else if (e.key === 'Escape') {
+  }
+}
+// Escape closes the bar from any of its controls, not only the field.
+function onBarKey(e: KeyboardEvent): void {
+  if (e.key === 'Escape') {
     e.preventDefault()
     e.stopPropagation()
     close()
@@ -54,7 +58,7 @@ defineExpose({ focus: () => input.value?.focus() })
 </script>
 
 <template>
-  <div class="search" role="search">
+  <div class="search" role="search" @keydown="onBarKey">
     <Icon name="search" :size="14" />
     <input
       ref="input"

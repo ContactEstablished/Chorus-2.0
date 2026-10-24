@@ -51,7 +51,7 @@ async function focusSelected(): Promise<void> {
 }
 
 function onInboxKey(e: KeyboardEvent): void {
-  if (view.palette || view.newSessionOpen || document.querySelector('[aria-modal="true"], [role="alertdialog"], dialog[open]')) return
+  if (view.palette || view.newSessionOpen || document.querySelector('[aria-modal="true"], [role="alertdialog"], [role="dialog"], dialog[open]')) return
   const target = e.target instanceof Element ? e.target : null
   const protectedTarget = !!target?.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"], .xterm')
   const action = inboxKey(e, protectedTarget)

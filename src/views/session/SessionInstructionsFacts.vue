@@ -11,16 +11,32 @@ const props = defineProps<{ session: SessionSummary }>()
 const facts = ref<SessionInstructions | null>(null)
 const failed = ref<string | null>(null)
 
+let asked = 0
 async function load(): Promise<void> {
+  // Only the newest request's answer counts: switching sessions mustn't show the last one's facts.
+  const mine = ++asked
+  const id = props.session.id
   try {
-    facts.value = await unwrap(commands.sessionInstructions(props.session.id))
+    const got = await unwrap(commands.sessionInstructions(id))
+    if (mine !== asked) return
+    facts.value = got
     failed.value = null
   } catch (e) {
+    if (mine !== asked) return
+    facts.value = null
     failed.value = e instanceof Error ? e.message : String(e)
   }
 }
-// A new run reads notes afresh (decision 2), so its facts are read again.
-watch(() => [props.session.id, props.session.runStartedAtSecs, props.session.live], load, { immediate: true })
+// A new run reads notes afresh (decision 2), so its facts are read again. The key is a string, so
+// an ordinary summary update (a new array each time) doesn't refetch.
+watch(
+  () => `${props.session.id}:${props.session.runStartedAtSecs ?? ''}:${props.session.live}`,
+  (now, before) => {
+    if (before && now.split(':')[0] !== before.split(':')[0]) facts.value = null
+    void load()
+  },
+  { immediate: true },
+)
 
 const summary = computed(() => {
   const run = facts.value?.run

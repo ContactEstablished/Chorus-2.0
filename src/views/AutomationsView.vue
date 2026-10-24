@@ -34,12 +34,16 @@ let timer: ReturnType<typeof setInterval> | null = null
 
 const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
+// The list is polled; a lasting failure is said once, not every 10 s.
+let failing = false
 async function load(): Promise<void> {
   try {
     list.value = await unwrap(commands.automationsList())
     if (open.value !== null) runs.value = await unwrap(commands.automationRuns(open.value))
+    failing = false
   } catch (e) {
-    notices.error("Couldn't load automations.", e)
+    if (!failing) notices.error("Couldn't load automations.", e)
+    failing = true
   }
 }
 onMounted(() => {
@@ -89,6 +93,7 @@ async function save(): Promise<void> {
   busy.value = true
   error.value = null
   try {
+    if (kind.value !== 'every' && !/^\d{1,2}:\d{2}$/.test(time.value)) throw new Error('Choose a time of day.')
     await unwrap(commands.automationSave({ ...editing.value, schedule: schedule() }))
     editing.value = null
     await load()
@@ -142,7 +147,12 @@ async function runNow(a: Automation): Promise<void> {
 async function toggleOpen(a: Automation): Promise<void> {
   open.value = open.value === a.id ? null : a.id
   runs.value = []
-  if (open.value !== null) runs.value = await unwrap(commands.automationRuns(a.id)).catch(() => [])
+  if (open.value === null) return
+  try {
+    runs.value = await unwrap(commands.automationRuns(a.id))
+  } catch (e) {
+    notices.error(`Couldn't load ${a.name}'s run history.`, e)
+  }
 }
 
 function at(secs: number | null): string {
