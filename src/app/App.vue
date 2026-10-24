@@ -25,6 +25,7 @@ const SettingsView = defineAsyncComponent(() => import('../views/SettingsView.vu
 // P8's screens.
 const NotesView = defineAsyncComponent(() => import('../views/NotesView.vue'))
 const BotsView = defineAsyncComponent(() => import('../views/BotsView.vue'))
+const DocumentsView = defineAsyncComponent(() => import('../views/DocumentsView.vue'))
 const NewSessionDialog = defineAsyncComponent(() => import('../views/NewSessionDialog.vue'))
 const CommandPalette = defineAsyncComponent(() => import('../shell/CommandPalette.vue'))
 
@@ -91,13 +92,7 @@ watch(
           phase="Phase 8"
           what="Run a Bot on a schedule, or later on a GitHub trigger. Each run is an ordinary session you can open."
         />
-        <PhasePlaceholder
-          v-else-if="view.name === 'documents'"
-          title="Documents"
-          icon="documents"
-          phase="Phase 8"
-          what="Documents your sessions produce, tagged by project and linked to the session that wrote each one."
-        />
+        <DocumentsView v-else-if="view.name === 'documents'" />
         <NotesView v-else-if="view.name === 'notes'" />
         <OverviewView v-else />
       </main>
