@@ -39,6 +39,9 @@ async function move(value: string): Promise<void> {
 
 const knownTags = ref<string[]>([])
 onMounted(async () => {
+  // The CLI line names the version Chorus checked, which the agents list holds; it is otherwise
+  // only loaded by New session and Settings.
+  if (!agents.list.length) void agents.load(false)
   const r = await commands.tagsKnown().catch(() => null)
   if (r?.status === 'ok') knownTags.value = r.data.map((t) => t.tag)
 })

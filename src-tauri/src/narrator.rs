@@ -143,7 +143,11 @@ pub fn view(store: &Store, id: u32) -> Result<NarratorView, String> {
                     .as_ref()
                     .is_none_or(|j| j.turn_id != t || j.status == "skipped")
         });
-    db::ensure_fallback(store, id)?;
+    // Generic next steps only make sense once a turn has ended (D82: turn-scoped); a new session
+    // has nothing to continue or review yet.
+    if latest.is_some_and(|(_, ended)| ended) {
+        db::ensure_fallback(store, id)?;
+    }
     Ok(NarratorView {
         enabled: db::enabled(store, s.project_id)?,
         reason,
@@ -333,4 +337,23 @@ pub fn start(manager: &Arc<SessionManager>) -> Result<(), String> {
             let _=m.store().with(|c|c.execute("UPDATE narrator_jobs SET status='failed',note='Narrator could not store or prepare this summary.' WHERE turn_id=?1 AND status IN ('queued','attempting')",[t]));
         }
     }).map(|_|()).map_err(|e|format!("Could not start narrator: {e}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn generic_next_steps_wait_for_an_ended_turn() {
+        let store = Store::in_memory();
+        store
+            .with(|c| c.execute_batch("INSERT INTO sessions(id,name,agent,cwd,state,cols,rows,created_at) VALUES(1,'n','claude','.','running',80,24,1);
+                INSERT INTO runs(id,session_id,program,args,started_at) VALUES(1,1,'claude','[]',1);"))
+            .unwrap();
+        assert!(view(&store, 1).unwrap().actions.is_empty(), "a new session has nothing to continue");
+        store.with(|c| c.execute_batch("INSERT INTO turns(id,session_id,run_id,started_at) VALUES(1,1,1,2);")).unwrap();
+        assert!(view(&store, 1).unwrap().actions.is_empty(), "a turn still running has no next steps yet");
+        store.with(|c| c.execute_batch("UPDATE turns SET ended_at=3,end_reason='done' WHERE id=1;")).unwrap();
+        assert!(!view(&store, 1).unwrap().actions.is_empty());
+    }
 }

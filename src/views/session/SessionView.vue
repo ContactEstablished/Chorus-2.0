@@ -79,6 +79,11 @@ const readiness = computed(() => {
     return { title: 'Running.', text: `${AGENT_LABELS[x.agent]} has no event channel, so Chorus can't tell whether it's busy. Watch the terminal.` }
   }
   if (x.attention === 'working' && x.noSignal) return { title: 'No signal.', text: 'Working, but neither an event nor any output for a while. It may be stuck, or thinking.' }
+  // Claude Code and Codex take instructions from Friendly's composer (D78); the rest only in Raw.
+  if (x.agent === 'claude' || x.agent === 'codex') {
+    if (x.attention === 'ready') return { title: r.title, text: 'The last turn is finished. Send your next instruction from Friendly, or type it in Raw.' }
+    if (x.attention === 'working') return { title: r.title, text: 'It is working on a turn. Instructions you queue in Friendly are sent when it pauses.' }
+  }
   return r
 })
 
