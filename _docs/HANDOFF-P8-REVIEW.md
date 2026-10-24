@@ -343,3 +343,8 @@ Checked again after merging with P7 (`evening/p6-p8`), in an isolated instance:
   Tags field no longer drops the first tag when clicked; session facts don't show the previous
   session's Bot; Archive/Restore failures, a failed run-history load and an empty time of day are
   said visibly; repeated polling failures are said once.
+- **Codex instructions through a compaction (§9 Q1), Codex 0.163.0:** a new Codex session got the
+  global canary note; its first turn was a neutral "Reply with only the word OK.", so the canary
+  never entered the conversation. After `/compact` (recorded as a turn with no prompt), asked for
+  the canary word, it answered "marigold": the injected instructions survived. Not measured: an
+  automatic compaction late in a long session.
