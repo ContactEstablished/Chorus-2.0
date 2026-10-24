@@ -8,7 +8,6 @@ import Rail from '../shell/Rail.vue'
 import TitleBar from '../shell/TitleBar.vue'
 import StatusBar from '../shell/StatusBar.vue'
 import Notices from '../shell/Notices.vue'
-import PhasePlaceholder from '../shell/PhasePlaceholder.vue'
 import { useAppStore } from '../stores/app'
 import { useSessionsStore } from '../stores/sessions'
 import { useProjectsStore } from '../stores/projects'
@@ -25,6 +24,11 @@ import SessionsView from '../views/SessionsView.vue'
 import SessionView from '../views/session/SessionView.vue'
 
 const SettingsView = defineAsyncComponent(() => import('../views/SettingsView.vue'))
+// P8's screens.
+const NotesView = defineAsyncComponent(() => import('../views/NotesView.vue'))
+const BotsView = defineAsyncComponent(() => import('../views/BotsView.vue'))
+const DocumentsView = defineAsyncComponent(() => import('../views/DocumentsView.vue'))
+const AutomationsView = defineAsyncComponent(() => import('../views/AutomationsView.vue'))
 const NewSessionDialog = defineAsyncComponent(() => import('../views/NewSessionDialog.vue'))
 const CommandPalette = defineAsyncComponent(() => import('../shell/CommandPalette.vue'))
 
@@ -110,34 +114,10 @@ watch(
         <SettingsView v-if="view.name === 'settings'" />
         <SessionView v-else-if="view.name === 'session' && view.sessionId !== null" :session-id="view.sessionId" />
         <SessionsView v-else-if="view.name === 'sessions'" />
-        <PhasePlaceholder
-          v-else-if="view.name === 'bots'"
-          title="Bots"
-          icon="bots"
-          phase="Phase 8"
-          what="Reusable agents: agent, model, effort, permissions and instructions, started as a session in one click. They grow out of launch profiles."
-        />
-        <PhasePlaceholder
-          v-else-if="view.name === 'automations'"
-          title="Automations"
-          icon="automations"
-          phase="Phase 8"
-          what="Run a Bot on a schedule, or later on a GitHub trigger. Each run is an ordinary session you can open."
-        />
-        <PhasePlaceholder
-          v-else-if="view.name === 'documents'"
-          title="Documents"
-          icon="documents"
-          phase="Phase 8"
-          what="Documents your sessions produce, tagged by project and linked to the session that wrote each one."
-        />
-        <PhasePlaceholder
-          v-else-if="view.name === 'notes'"
-          title="Notes"
-          icon="notes"
-          phase="Phase 8"
-          what="Project or global notes that are added to agents' instructions, with pinned notes first."
-        />
+        <BotsView v-else-if="view.name === 'bots'" />
+        <AutomationsView v-else-if="view.name === 'automations'" />
+        <DocumentsView v-else-if="view.name === 'documents'" />
+        <NotesView v-else-if="view.name === 'notes'" />
         <OverviewView v-else />
       </main>
       <StatusBar />

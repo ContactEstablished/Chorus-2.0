@@ -163,6 +163,28 @@ export const commands = {
 	fleetRoster: () => __TAURI_INVOKE<FleetRoster>("fleet_roster"),
 	/**  The user has seen a changed address: the next poll shows the current state. */
 	fleetAcknowledge: (sessionId: number) => __TAURI_INVOKE<void>("fleet_acknowledge", { sessionId }),
+	botsList: () => typedError<Bot[], string>(__TAURI_INVOKE("bots_list")),
+	botSave: (input: BotSave) => typedError<Bot, string>(__TAURI_INVOKE("bot_save", { input })),
+	/**
+	 *  Archives a Bot (hidden from New session, can't be started) or restores it. Its sessions keep
+	 *  running either way.
+	 */
+	botSetArchived: (id: number, archived: boolean) => typedError<Bot, string>(__TAURI_INVOKE("bot_set_archived", { id, archived })),
+	notesList: () => typedError<Note[], string>(__TAURI_INVOKE("notes_list")),
+	noteSave: (input: NoteSave) => typedError<Note, string>(__TAURI_INVOKE("note_save", { input })),
+	noteDelete: (id: number) => typedError<boolean, string>(__TAURI_INVOKE("note_delete", { id })),
+	sessionInstructions: (sessionId: number) => typedError<SessionInstructions, string>(__TAURI_INVOKE("session_instructions", { sessionId })),
+	instructionsSupport: () => __TAURI_INVOKE<InstructionSupport[]>("instructions_support"),
+	documentsList: () => typedError<Document[], string>(__TAURI_INVOKE("documents_list")),
+	/**  Opens a document in the application Windows associates with it. */
+	documentOpen: (id: number) => typedError<null, string>(__TAURI_INVOKE("document_open", { id })),
+	automationsList: () => typedError<Automation[], string>(__TAURI_INVOKE("automations_list")),
+	automationSave: (input: AutomationSave) => typedError<Automation, string>(__TAURI_INVOKE("automation_save", { input })),
+	automationSetEnabled: (id: number, enabled: boolean) => typedError<Automation, string>(__TAURI_INVOKE("automation_set_enabled", { id, enabled })),
+	automationDelete: (id: number) => typedError<boolean, string>(__TAURI_INVOKE("automation_delete", { id })),
+	/**  Runs an automation now, whether it is paused or not, and returns the run's row. */
+	automationRunNow: (id: number) => typedError<AutomationRun, string>(__TAURI_INVOKE("automation_run_now", { id })),
+	automationRuns: (id: number) => typedError<AutomationRun[], string>(__TAURI_INVOKE("automation_runs", { id })),
 };
 
 /** Events */
@@ -298,6 +320,48 @@ export type AttentionNavigate = {
 	sessionId: number | null,
 };
 
+export type Automation = {
+	id: number,
+	name: string,
+	botId: number | null,
+	botName: string | null,
+	prompt: string,
+	schedule: Schedule,
+	scheduleText: string,
+	cwd: string,
+	projectId: number | null,
+	enabled: boolean,
+	nextRunAtSecs: number | null,
+	lastRun: AutomationRun | null,
+	runsThisWeek: number,
+	/**  Why it can't run now (its Bot or folder is gone), in words to show as is. */
+	problem: string | null,
+};
+
+export type AutomationRun = {
+	id: number,
+	automationId: number,
+	sessionId: number | null,
+	trigger: Trigger,
+	dueAtSecs: number,
+	startedAtSecs: number | null,
+	outcome: Outcome,
+	note: string | null,
+	/**  For a started run: how its session is now, from its state and how its run ended. */
+	sessionStatus: string | null,
+};
+
+export type AutomationSave = {
+	id: number | null,
+	name: string,
+	botId: number,
+	prompt: string,
+	schedule: Schedule,
+	cwd: string,
+	projectId: number | null,
+	enabled: boolean,
+};
+
 /**
  *  Emitted once a second so the window can show the back end is alive. It also proves the typed
  *  event path end to end.
@@ -305,6 +369,43 @@ export type AttentionNavigate = {
 export type BackendPulse = {
 	seq: number,
 	uptimeSecs: number,
+};
+
+export type Bot = {
+	id: number,
+	name: string,
+	agent: AgentKind,
+	options: LaunchOptions,
+	providerId: number | null,
+	providerName: string | null,
+	credential: CredentialUse | null,
+	description: string | null,
+	instructions: string,
+	tags: string[],
+	skills: string[],
+	preset: Preset | null,
+	archived: boolean,
+	/**  Sessions started from it that aren't closed, and all of them. */
+	openSessions: number,
+	sessions: number,
+	/**  Automations that run it. */
+	automations: number,
+	updatedAtSecs: number,
+};
+
+export type BotSave = {
+	/**  None adds one. */
+	id: number | null,
+	name: string,
+	agent: AgentKind,
+	options: LaunchOptions,
+	providerId: number | null,
+	credential: CredentialUse | null,
+	description: string | null,
+	instructions: string,
+	tags: string[],
+	skills: string[],
+	preset: Preset | null,
 };
 
 /**  A candidate's blended price at the profile's token mix, in USD per million tokens. */
@@ -465,6 +566,8 @@ export type CreateSession = {
 	workspace?: Workspace,
 	/**  opencode on OpenRouter: a routing tier, or `default` for none (D57). Absent elsewhere. */
 	routing?: RoutingLaunchChoice | null,
+	/**  P8: the Bot it starts from; its instructions and skills are copied at create. */
+	botId?: number | null,
 };
 
 export type CredentialSummary = {
@@ -506,6 +609,24 @@ export type Diff = {
 	additions: number,
 	deletions: number,
 	binary: number,
+};
+
+export type DocKind = "plan" | "spec" | "report" | "review" | "decision";
+
+export type Document = {
+	id: number,
+	path: string,
+	/**  The file's name, for a document without a heading. */
+	fileName: string,
+	title: string | null,
+	kind: DocKind,
+	sessionId: number | null,
+	sessionName: string | null,
+	projectId: number | null,
+	firstSeenAtSecs: number,
+	/**  The file's own modified time, while it exists. */
+	editedAtSecs: number | null,
+	missing: boolean,
 };
 
 export type Draft = {
@@ -611,6 +732,13 @@ export type GitFolder = {
 };
 
 export type GroupBy = "status" | "project" | "none";
+
+/**  How each agent takes instructions, for Settings → Agents (D19: an unsupported one says why). */
+export type InstructionSupport = {
+	agent: AgentKind,
+	supported: boolean,
+	text: string,
+};
 
 /**
  *  What a session asks for. An empty field means the agent's declared default, or for the model,
@@ -742,6 +870,35 @@ export type NitroSelection_Serialize = {
 	likelyFailsRules: string[],
 };
 
+export type Note = {
+	id: number,
+	/**  None: the note applies to every project. */
+	projectId: number | null,
+	title: string,
+	body: string,
+	pinned: boolean,
+	createdAtSecs: number,
+	updatedAtSecs: number,
+};
+
+/**  A note a run received, for session facts. */
+export type NoteRef = {
+	id: number,
+	title: string,
+	pinned: boolean,
+	/**  Tagged with the session's project, rather than applying everywhere. */
+	project: boolean,
+};
+
+export type NoteSave = {
+	/**  None adds one. */
+	id: number | null,
+	projectId: number | null,
+	title: string,
+	body: string,
+	pinned: boolean,
+};
+
 export type Notification = {
 	id: number,
 	sessionId: number,
@@ -809,6 +966,16 @@ export type OpenRouterProviderPrefs_Serialize = {
 	quantizations?: Quantization[] | null,
 	data_collection?: ProviderDataCollection | null,
 };
+
+export type Outcome = 
+/**  A session was started. */
+"started" | 
+/**  Nothing started, and the note says why. */
+"failed" | 
+/**  It was due while Chorus was closed. */
+"missed" | 
+/**  The previous run's session was still busy. */
+"skipped";
 
 export type PendingReply = {
 	askId: number,
@@ -1123,7 +1290,47 @@ export type RoutingProfileId =
  */
 "helper";
 
+/**  What a run's instructions held, kept on the run and shown in session facts. */
+export type RunInstructions = {
+	/**  The text reached the agent's launch (it was written and passed on). */
+	given: boolean,
+	/**  Why nothing was given, or what went wrong, in words to show as is. */
+	reason: string | null,
+	/**  The Bot whose instructions were included. */
+	bot: string | null,
+	notes: NoteRef[],
+	/**  Notes that applied but didn't fit under the cap. */
+	leftOut: number,
+	skills: string[],
+	/**  Skill folders that couldn't be read, with why. */
+	skillProblems: string[],
+	bytes: number,
+	/**  [`text_hash`] of the text given, to tell whether a resumed conversation has it already. */
+	hash: string | null,
+	/**
+	 *  Claude Code was told to render its system prompt afresh (`--system-prompt-snapshot off`),
+	 *  because the conversation recorded different instructions when it started.
+	 */
+	freshPrompt: boolean,
+};
+
+export type Schedule = 
+/**  Every `minutes` (at least [`MIN_EVERY_MINUTES`]), counted from when it was set up. */
+{ kind: "every"; minutes: number } | 
+/**  Each day at `hour:minute` local time. */
+{ kind: "daily"; hour: number; minute: number } | 
+/**  On `days` (0 is Monday … 6 is Sunday) at `hour:minute` local time. */
+{ kind: "weekdays"; days: number[]; hour: number; minute: number };
+
 export type SessionAction = { kind: "prompt"; text: string; source: PromptSource } | { kind: "answer"; ask_id: number; answers: string[] } | { kind: "approval"; ask_id: number; decision: ApprovalDecision; message: string | null } | { kind: "release"; ask_id: number };
+
+export type SessionBot = {
+	/**  None once the Bot is deleted; the session keeps its copy. */
+	id: number | null,
+	name: string,
+	hasInstructions: boolean,
+	skills: number,
+};
 
 export type SessionCapabilities = {
 	runId: number | null,
@@ -1141,6 +1348,15 @@ export type SessionHistory = {
 	withPrompt: number,
 	/**  Where the agent keeps the full transcript (Claude Code's JSONL, Codex's rollout). */
 	transcriptPath: string | null,
+};
+
+/**  What session facts show about instructions. */
+export type SessionInstructions = {
+	bot: SessionBot | null,
+	/**  The newest run's; None before the first run with P8, or for a run before P8. */
+	run: RunInstructions | null,
+	/**  Why this agent gets no instructions, whatever the session holds. */
+	unsupported: string | null,
 };
 
 export type SessionStatus = "running" | "exited" | "closed";
@@ -1406,6 +1622,8 @@ export type ToolEntry = {
 	failed: boolean,
 	finished: boolean,
 };
+
+export type Trigger = "schedule" | "manual";
 
 /**  A turn as the session's history shows it. */
 export type TurnEntry = {

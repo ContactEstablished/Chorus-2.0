@@ -222,6 +222,13 @@ pub struct CreateSession {
     /// opencode on OpenRouter: a routing tier, or `default` for none (D57). Absent elsewhere.
     #[serde(default)]
     pub routing: Option<RoutingLaunchChoice>,
+    /// P8: the Bot it starts from; its instructions and skills are copied at create.
+    #[serde(default)]
+    pub bot_id: Option<u32>,
+    /// P8: an automation's first prompt, persisted at create and passed at launch. Never from IPC.
+    #[serde(skip)]
+    #[specta(skip)]
+    pub first_prompt: Option<String>,
 }
 
 /// Starts the sessions a preset makes. `session` is the first; the others are derived from it.
@@ -871,6 +878,7 @@ impl SessionManager {
         let description = launch_rules::clean_description(req.description.as_deref())?;
         let tags = chorus_core::tags::clean_tags(&req.tags)?;
         let routing = routing::for_launch(&self.store, req.agent, req.provider_id, req.routing, &options)?;
+        let bot = crate::bots::for_launch(&self.store, req.bot_id)?;
         let spec = req.agent.spec();
         // Chorus names the conversation up front where the agent lets it, so every later run can
         // resume it.
@@ -922,6 +930,8 @@ impl SessionManager {
         };
         drop(workspace_guard);
         tag_rows::set(&self.store, id, &tags)?;
+        crate::bots::attach(&self.store, id, bot.as_ref())?;
+        crate::automations::stage_prompt(&self.store, id, req.first_prompt.as_deref())?;
         if join.is_none() {
             self.remember_folder(&asked);
         }
@@ -1103,6 +1113,8 @@ impl SessionManager {
         let (mut redact, unreadable) = vault::all_for_scrubbing(&self.store);
         redact.extend(secrets.iter().map(|(_, v)| v.clone().into_bytes()));
         let history_redact = Arc::new(redact.clone());
+        let p8 = crate::instructions::prepare(&self.store, &row, &state_dir, &redact, &parent);
+        notes.extend(p8.note.clone());
         let additions: Vec<(&str, &str)> = launch.additions.iter().map(|(k, v)| (*k, v.as_str())).collect();
         let env = compose_child_env(&ChildEnvInput { parent: &parent, required: &[], additions: &additions, secrets: &secrets });
 
@@ -1143,6 +1155,7 @@ impl SessionManager {
             let exists = conversation.is_some_and(|id| agents::conversation_exists(row.agent, id, &parent));
             args.extend(spec.conversation_args(conversation, exists));
             args.extend(spec.name_args(&row.name));
+            args.extend(p8.args.iter().cloned());
             (None, exists && spec.resume.kind() != ResumeKind::None)
         };
         let detected = self.agents.get(row.agent);
@@ -1182,6 +1195,7 @@ impl SessionManager {
                 resumed,
             },
         )?;
+        notes.extend(crate::instructions::record(&self.store, row.id, run_id, &p8, codex_bridge.as_ref()));
         if let Some(cid) = row.credential_id {
             let _ = credentials::touch(&self.store, cid);
         }
@@ -1536,6 +1550,7 @@ impl SessionManager {
                 let cause = classify_exit(requested, m.quitting.load(Ordering::SeqCst), system_shutting_down());
                 let (end, state) = after_exit(cause);
                 let _ = rows::end_run(&m.store, run.id, end, Some(code));
+                crate::instructions::run_ended(&m.state_dir(live.id));
                 run.recorder.lock().expect("recorder lock").run_ended(&m.store);
                 if state == Some(SessionState::Exited) {
                     let note = m.exit_note(live.id, code, run.started.elapsed()).unwrap_or_else(|| format!("Exited with code {code}."));
@@ -1703,6 +1718,9 @@ impl SessionManager {
                 tags: first.tags.clone(),
                 workspace: Workspace::Here,
                 routing: None,
+                // The partner is another agent: the Bot's instructions are for its own.
+                bot_id: None,
+                first_prompt: None,
             };
             let (session, error) = match self.create_in(derived, worktree) {
                 Ok(s) => (Some(s), None),
@@ -1810,6 +1828,7 @@ impl SessionManager {
         for live in self.live.lock().expect("live lock").values() {
             if let Some(run) = live.current_run() {
                 let _ = rows::end_run(&self.store, run.id, chorus_core::session::RunEnd::ChorusClosed, None);
+                crate::instructions::run_ended(&self.state_dir(live.id));
                 capped.extend(run.capped);
             }
         }
@@ -1876,4 +1895,4 @@ impl Drop for CappedGuard {
 
 #[cfg(test)]
 mod tests;
-mod codex_bridge;
+pub(crate) mod codex_bridge;

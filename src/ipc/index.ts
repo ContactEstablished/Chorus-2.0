@@ -100,3 +100,23 @@ export async function unwrap<T>(pending: Promise<Result<T>>): Promise<T> {
 }
 
 export type { ComposerImage, Draft } from './bindings'
+
+// P8: Bots, notes, instructions, documents and automations.
+export type {
+  Automation,
+  AutomationRun,
+  AutomationSave,
+  Bot,
+  BotSave,
+  DocKind,
+  Document as ChorusDocument,
+  Note,
+  NoteRef,
+  NoteSave,
+  Outcome as AutomationOutcome,
+  RunInstructions,
+  InstructionSupport,
+  Schedule,
+  SessionBot,
+  SessionInstructions,
+} from './bindings'

@@ -48,6 +48,7 @@ const MIGRATION_FILES: &[(&str, &str)] = &[
     ("0017_p6_progress.sql", include_str!("../../migrations/0017_p6_progress.sql")),
     ("0018_p6_narrator.sql", include_str!("../../migrations/0018_p6_narrator.sql")),
     ("0019_p7_notifications.sql", include_str!("../../migrations/0019_p7_notifications.sql")),
+    ("0020_p8_bots_notes.sql", include_str!("../../migrations/0020_p8_bots_notes.sql")),
 ];
 
 pub struct Store {
@@ -353,7 +354,8 @@ mod tests {
         }
         let store = Store::init(conn).unwrap();
         store.with(|c| {
-            for table in ["sessions", "launch_profiles"] {
+            // 0020 renamed launch_profiles to bots (P8).
+            for table in ["sessions", "bots"] {
                 let values: Vec<String> = c.prepare(&format!("SELECT options FROM {table} ORDER BY id"))?
                     .query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
                 let first: serde_json::Value = serde_json::from_str(&values[0]).unwrap();
