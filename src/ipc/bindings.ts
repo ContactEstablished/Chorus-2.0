@@ -158,6 +158,7 @@ export const commands = {
 	noteSave: (input: NoteSave) => typedError<Note, string>(__TAURI_INVOKE("note_save", { input })),
 	noteDelete: (id: number) => typedError<boolean, string>(__TAURI_INVOKE("note_delete", { id })),
 	sessionInstructions: (sessionId: number) => typedError<SessionInstructions, string>(__TAURI_INVOKE("session_instructions", { sessionId })),
+	instructionsSupport: () => __TAURI_INVOKE<InstructionSupport[]>("instructions_support"),
 	documentsList: () => typedError<Document[], string>(__TAURI_INVOKE("documents_list")),
 	/**  Opens a document in the application Windows associates with it. */
 	documentOpen: (id: number) => typedError<null, string>(__TAURI_INVOKE("document_open", { id })),
@@ -674,6 +675,13 @@ export type GitFolder = {
 };
 
 export type GroupBy = "status" | "project" | "none";
+
+/**  How each agent takes instructions, for Settings → Agents (D19: an unsupported one says why). */
+export type InstructionSupport = {
+	agent: AgentKind,
+	supported: boolean,
+	text: string,
+};
 
 /**
  *  What a session asks for. An empty field means the agent's declared default, or for the model,

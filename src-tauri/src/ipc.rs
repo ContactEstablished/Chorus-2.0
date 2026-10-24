@@ -107,6 +107,7 @@ pub fn builder() -> Builder<tauri::Wry> {
             notes::note_save,
             notes::note_delete,
             instructions::session_instructions,
+            instructions::instructions_support,
             documents::documents_list,
             documents::document_open,
             automations::automations_list,

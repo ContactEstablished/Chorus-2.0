@@ -1,13 +1,18 @@
 <script setup lang="ts">
 /** The agent CLIs Chorus looked for: found or not, the version, and how it compares (fail visible). */
-import { onMounted } from 'vue'
-import type { AgentInfo } from '../../ipc'
+import { onMounted, ref } from 'vue'
+import { commands, type AgentInfo, type AgentKind, type InstructionSupport } from '../../ipc'
 import { useAgentsStore } from '../../stores/agents'
 import { AGENT_CHIPS } from '../../shell/status'
 import { versionText } from '../../raw/labels'
 
 const agents = useAgentsStore()
-onMounted(() => void agents.load(false))
+// P8: how each agent takes Bot instructions and notes, or why it doesn't.
+const instructions = ref(new Map<AgentKind, InstructionSupport>())
+onMounted(async () => {
+  void agents.load(false)
+  instructions.value = new Map((await commands.instructionsSupport()).map((i) => [i.agent, i]))
+})
 
 function state(a: AgentInfo): { text: string; tone: 'ok' | 'warn' | 'bad' | 'muted' } {
   const d = a.detection
@@ -34,6 +39,7 @@ function state(a: AgentInfo): { text: string; tone: 'ok' | 'warn' | 'bad' | 'mut
         <div class="body">
           <p class="name">{{ a.displayName }}</p>
           <p class="state" :class="state(a).tone">{{ state(a).text }}</p>
+          <p v-if="instructions.get(a.kind)" class="state" :class="instructions.get(a.kind)!.supported ? 'muted' : 'warn'">{{ instructions.get(a.kind)!.text }}</p>
           <code v-if="a.detection?.program" class="program" :title="a.detection.program">{{ a.detection.program }}</code>
         </div>
       </li>

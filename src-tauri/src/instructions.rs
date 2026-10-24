@@ -379,3 +379,35 @@ mod codex_tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
+
+/// How each agent takes instructions, for Settings → Agents (D19: an unsupported one says why).
+#[derive(Debug, Clone, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct InstructionSupport {
+    pub agent: AgentKind,
+    pub supported: bool,
+    pub text: String,
+}
+
+pub fn support() -> Vec<InstructionSupport> {
+    AgentKind::ALL
+        .into_iter()
+        .map(|agent| {
+            let (supported, text) = match carrier(agent) {
+                Carrier::AppendFile(flag) => (true, format!("Gets Bot instructions and notes from a file in Chorus's data folder ({flag}).")),
+                Carrier::CodexDeveloperInstructions => (
+                    true,
+                    "Gets Bot instructions and notes as a developer message through Chorus's private Codex server (Codex 0.163.0); other versions get none.".to_owned(),
+                ),
+                Carrier::Unsupported(reason) => (false, reason.to_owned()),
+            };
+            InstructionSupport { agent, supported, text }
+        })
+        .collect()
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn instructions_support() -> Vec<InstructionSupport> {
+    support()
+}

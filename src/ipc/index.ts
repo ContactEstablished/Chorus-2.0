@@ -106,6 +106,7 @@ export type {
   NoteSave,
   Outcome as AutomationOutcome,
   RunInstructions,
+  InstructionSupport,
   Schedule,
   SessionBot,
   SessionInstructions,
