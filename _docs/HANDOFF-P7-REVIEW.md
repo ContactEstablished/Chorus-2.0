@@ -101,8 +101,8 @@ Runtime, isolated `eve7` instance, Claude Code 2.1.308 on haiku (Fast), scratch 
 - **Fleet:** sessions verified; a rename plus Restart updated the address; two sessions given the same
   name both showed the collision. Another live Claude session (not Chorus's) was listed with no actions.
 
-Not verified: the tray menu items with real input (new tray icons start in the overflow area on
-Windows 11); question notifications; other DPI
+Not verified at first: the tray menu items with real input (new tray icons start in the overflow
+area on Windows 11; Quit Chorus was later picked with real input, §12); question notifications; other DPI
 scales or monitor changes (one monitor at 100 %); opencode's Ctrl+Shift+F (not installed). Codex's
 binary showed no Ctrl+Shift+F binding string and Claude Code's default table binds Ctrl+F, not
 Ctrl+Shift+F; neither was checked against docs.
@@ -196,3 +196,9 @@ search the Raw view; export the transcript; rename the session and Restart to se
 - **D23 again on the final merged build, real input:** a click on empty strip space and an 80 px drag
   (and back) left an external window focused, typed text landed there, and a chip click brought
   Chorus forward. Export with an agent transcript also rechecked after its refactor.
+- **Quitting with the strip and tray open:** closing the main window (WM_CLOSE, as the taskbar's
+  Close window sends) ended Chorus, the strip, a live shell's cmd.exe and conhost, and WebView2. On
+  the next start the shell was relaunched, as P1 restores what was running. Quit Chorus from the
+  tray menu (opened with a real right click, picked with real Up and Enter; the menu's items aren't
+  exposed to UI Automation) did the same, and the session came back again. No panics; the log's
+  only error is WebView2's usual "Failed to unregister class" line at exit.
