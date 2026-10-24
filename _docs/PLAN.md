@@ -76,8 +76,8 @@ does not close those phases.
 | P4 | App shell and Overview | Closed 2026-10-22; full-day acceptance waived, not performed (D72) |
 | P5 | Git and worktrees | Closed 2026-10-22; retained reuse, boot reconcile, worktree panel and diff summaries verified in the app (D73–D74) |
 | P6 | Friendly view and Next steps | Ready for review: composer/images/queue, progress and Claude/Codex controls verified; narrated Now / Blocker / Up next, durable suggestions, settings and costs implemented (D82). Raw drafts remain deferred; Codex checklist emission remains conditional. |
-| P7 | Attention and notifications | Planned; fleet strip prototype exists; production inbox, notifications, tray, strip, search and export remain |
-| P8 | Bots, Automations, Notes, Documents | Planned; the four screens are placeholders |
+| P7 | Attention and notifications | Built 2026-10-24 and ready for review: inbox order and ages, notification centre, tray badge, fleet strip, Raw search, transcript export and Claude fleet addressing; exit gate and D23 seen in the app ([review](HANDOFF-P7-REVIEW.md)). Tray clicks with real input, DPI scales and opencode bindings unverified |
+| P8 | Bots, Automations, Notes, Documents | Built 2026-10-24 and ready for review: Bots from profiles, Notes and per-run instructions (Claude; Codex through its app-server, awaiting approval), Documents and Automations for Claude Code ([review](HANDOFF-P8-REVIEW.md)) |
 | P9 | Voice | Removed; separate dictation app (D22); Chorus retains compatibility (D23) |
 | P10 | Council | Planned |
 | P11 | Measurement, made visible | Planned; tokens, costs, attention and Usage UI; forecasts remain gated on data completeness |
