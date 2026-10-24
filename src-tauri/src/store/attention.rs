@@ -8,6 +8,19 @@ use chorus_core::{
 };
 use rusqlite::{OptionalExtension, params};
 
+/// The newest unanswered ask of `kind` ("approval" or "question") in the session: what it is
+/// waiting on, already scrubbed, for a notification's body.
+pub fn open_ask_subject(store: &Store, session: u32, kind: &str) -> Result<Option<String>, String> {
+    store.with(|c| {
+        c.query_row(
+            "SELECT subject FROM asks WHERE session_id=?1 AND kind=?2 AND answered_at IS NULL ORDER BY asked_at DESC, id DESC LIMIT 1",
+            params![session, kind],
+            |r| r.get(0),
+        )
+        .optional()
+    })
+}
+
 pub fn waiting_since(
     store: &Store,
     session: u32,
@@ -49,6 +62,17 @@ pub fn waiting_since(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_open_ask_names_what_it_waits_on() {
+        let store = Store::in_memory();
+        store.with(|c| c.execute_batch("INSERT INTO sessions(id,name,agent,cwd,state,cols,rows,created_at) VALUES(1,'n','shell','.','running',80,24,1);
+            INSERT INTO asks(session_id,turn_id,kind,subject,asked_at,answered_at) VALUES
+                (1,NULL,'approval','Write old.txt',10,20),(1,NULL,'approval','Write p7.txt',30,NULL),(1,NULL,'question','Tea or coffee?',40,NULL);")).unwrap();
+        assert_eq!(open_ask_subject(&store, 1, "approval").unwrap().as_deref(), Some("Write p7.txt"));
+        assert_eq!(open_ask_subject(&store, 1, "question").unwrap().as_deref(), Some("Tea or coffee?"));
+        assert_eq!(open_ask_subject(&store, 2, "approval").unwrap(), None);
+    }
 
     #[test]
     fn persisted_ages_ignore_old_runs_answered_asks_and_unrelated_turns() {

@@ -100,10 +100,18 @@ impl Attention {
 
     fn notify(&self, s: &SessionSummary) {
         let Some(manager) = self.manager.get().and_then(Weak::upgrade) else { return };
+        // What it is waiting on: the request itself for an approval or a question, else the last
+        // message; for a failure, why it stopped.
+        let kind = match s.attention {
+            chorus_core::attention::Attention::Approval => Some("approval"),
+            chorus_core::attention::Attention::Input => Some("question"),
+            _ => None,
+        };
+        let ask = kind.and_then(|k| crate::store::attention::open_ask_subject(manager.store(), s.id, k).ok().flatten());
         let detail = if matches!(s.attention, chorus_core::attention::Attention::Failed) {
             s.note.as_deref().or(s.latest.as_deref())
         } else {
-            s.latest.as_deref()
+            ask.as_deref().or(s.latest.as_deref())
         };
         let fallback = s.run_started_at_secs.unwrap_or(s.created_at_secs);
         let facts = NoticeFacts {
