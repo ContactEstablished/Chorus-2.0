@@ -1826,6 +1826,7 @@ impl SessionManager {
         for live in self.live.lock().expect("live lock").values() {
             if let Some(run) = live.current_run() {
                 let _ = rows::end_run(&self.store, run.id, chorus_core::session::RunEnd::ChorusClosed, None);
+                crate::instructions::run_ended(&self.state_dir(live.id));
                 capped.extend(run.capped);
             }
         }

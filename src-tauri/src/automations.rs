@@ -372,7 +372,7 @@ fn save(m: &SessionManager, input: &AutomationSave) -> Result<Automation, String
     Ok(view(m, &row(store, id)?.ok_or("That automation no longer exists.")?))
 }
 
-/// The previous run's session, when it is still busy: working, asking, or not yet reporting.
+/// The previous run's session, when it is still busy: working, asking, or still starting.
 fn busy_session(m: &SessionManager, automation: u32) -> Option<String> {
     let last: u32 = m
         .store()
@@ -387,7 +387,15 @@ fn busy_session(m: &SessionManager, automation: u32) -> Option<String> {
         .ok()
         .flatten()?;
     let s = m.summary(last).ok()?;
-    let busy = s.live && matches!(s.activity, Activity::Working | Activity::AwaitingApproval | Activity::NeedsAnswer | Activity::Unknown);
+    // Unknown counts only while the run's first prompt hasn't been seen yet (it is starting); a
+    // session relaunched by a later Chorus is unknown until its next event, and idle.
+    let starting = || {
+        let run = crate::store::sessions::last_run(m.store(), last).ok().flatten();
+        run.is_some_and(|r| crate::store::delivery::unobserved(m.store(), r.id).unwrap_or(true))
+    };
+    let busy = s.live
+        && (matches!(s.activity, Activity::Working | Activity::AwaitingApproval | Activity::NeedsAnswer)
+            || (s.activity == Activity::Unknown && starting()));
     busy.then(|| format!("Skipped: the previous run's session, {}, is still {}.", s.name, session_status(m, last).unwrap_or_else(|| "running".into())))
 }
 
