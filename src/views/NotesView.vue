@@ -17,6 +17,8 @@ const filter = ref<'all' | 'untagged' | number>('all')
 const editing = ref<NoteSave | null>(null)
 const error = ref<string | null>(null)
 const busy = ref(false)
+// Deleting a note can't be undone, so it asks once, in place (as Close does for a session).
+const confirmingDelete = ref(false)
 
 async function load(): Promise<void> {
   try {
@@ -43,10 +45,12 @@ const counts = computed(() => {
 
 function startNew(): void {
   error.value = null
+  confirmingDelete.value = false
   editing.value = { id: null, projectId: typeof filter.value === 'number' ? filter.value : null, title: '', body: '', pinned: false }
 }
 function edit(n: Note): void {
   error.value = null
+  confirmingDelete.value = false
   editing.value = { id: n.id, projectId: n.projectId, title: n.title, body: n.body, pinned: n.pinned }
 }
 
@@ -70,6 +74,7 @@ async function remove(): Promise<void> {
   if (id === null || id === undefined) return
   try {
     await unwrap(commands.noteDelete(id))
+    confirmingDelete.value = false
     editing.value = null
     await load()
   } catch (e) {
@@ -134,7 +139,14 @@ function age(secs: number): string {
       <p class="hint">Keys don't belong in notes: a note that holds one is refused.</p>
       <p v-if="error" class="hint warn">{{ error }}</p>
       <div class="actions">
-        <button v-if="editing.id !== null" type="button" class="danger" @click="remove">Delete</button>
+        <template v-if="editing.id !== null">
+          <template v-if="confirmingDelete">
+            <span class="ask">Delete this note for good?</span>
+            <button type="button" class="danger" :disabled="busy" @click="remove">Delete</button>
+            <button type="button" class="quiet" @click="confirmingDelete = false">Keep</button>
+          </template>
+          <button v-else type="button" class="danger" @click="confirmingDelete = true">Delete…</button>
+        </template>
         <span class="grow" />
         <button type="button" class="quiet" @click="editing = null">Cancel</button>
         <button type="submit" class="primary" :disabled="busy || !editing.title.trim()">Save note</button>
@@ -257,7 +269,12 @@ textarea {
 }
 .actions {
   display: flex;
+  align-items: center;
   gap: 8px;
+}
+.ask {
+  color: var(--text-2);
+  font-size: 13px;
 }
 .grow {
   flex: 1;

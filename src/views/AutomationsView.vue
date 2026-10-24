@@ -28,6 +28,8 @@ const time = ref('09:00')
 const days = ref<number[]>([0, 1, 2, 3, 4])
 const error = ref<string | null>(null)
 const busy = ref(false)
+// Deleting an automation (and its run history) can't be undone, so it asks once, in place.
+const confirmingDelete = ref(false)
 let timer: ReturnType<typeof setInterval> | null = null
 
 const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
@@ -63,6 +65,7 @@ function schedule(): Schedule {
 
 function startNew(): void {
   error.value = null
+  confirmingDelete.value = false
   kind.value = 'daily'
   minutes.value = 60
   time.value = '09:00'
@@ -72,6 +75,7 @@ function startNew(): void {
 
 function edit(a: Automation): void {
   error.value = null
+  confirmingDelete.value = false
   const s = a.schedule
   kind.value = s.kind
   if (s.kind === 'every') minutes.value = s.minutes
@@ -98,7 +102,14 @@ async function save(): Promise<void> {
 async function remove(): Promise<void> {
   const id = editing.value?.id
   if (id === null || id === undefined) return
-  await unwrap(commands.automationDelete(id)).catch((e) => (error.value = String(e)))
+  try {
+    await unwrap(commands.automationDelete(id))
+  } catch (e) {
+    // Keep the editor open so the reason shows.
+    error.value = e instanceof Error ? e.message : String(e)
+    return
+  }
+  confirmingDelete.value = false
   editing.value = null
   if (open.value === id) open.value = null
   await load()
@@ -204,7 +215,14 @@ function outcomeText(r: AutomationRun): string {
       <label class="check"><input v-model="editing.enabled" type="checkbox" /> Enabled</label>
       <p v-if="error" class="hint warn">{{ error }}</p>
       <div class="actions">
-        <button v-if="editing.id !== null" type="button" class="danger" @click="remove">Delete</button>
+        <template v-if="editing.id !== null">
+          <template v-if="confirmingDelete">
+            <span class="ask">Delete it and its run history?</span>
+            <button type="button" class="danger" :disabled="busy" @click="remove">Delete</button>
+            <button type="button" class="quiet" @click="confirmingDelete = false">Keep</button>
+          </template>
+          <button v-else type="button" class="danger" @click="confirmingDelete = true">Delete…</button>
+        </template>
         <span class="grow" />
         <button type="button" class="quiet" @click="editing = null">Cancel</button>
         <button type="submit" class="primary" :disabled="busy || !editing.name.trim()">Save automation</button>
@@ -312,7 +330,12 @@ textarea {
 }
 .actions {
   display: flex;
+  align-items: center;
   gap: 8px;
+}
+.ask {
+  color: var(--text-2);
+  font-size: 13px;
 }
 .grow {
   flex: 1;

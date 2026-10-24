@@ -32,5 +32,11 @@ export const useProfilesStore = defineStore('profiles', () => {
     if ((await attempt(() => unwrap(commands.profileDelete(id)))) !== null) list.value = list.value.filter((p) => p.id !== id)
   }
 
-  return { list, error, load, save, remove }
+  /** Archives a Bot (P8): it leaves New session and can be restored on the Bots screen, where its
+   * instructions and skills are kept. */
+  async function archive(id: number): Promise<void> {
+    if ((await attempt(() => unwrap(commands.botSetArchived(id, true)))) !== null) list.value = list.value.filter((p) => p.id !== id)
+  }
+
+  return { list, error, load, save, remove, archive }
 })

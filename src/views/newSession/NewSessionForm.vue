@@ -450,7 +450,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
           <button type="button" :title="optionsText(p) || 'defaults'" @click="applyProfile(p)">
             {{ p.name }} <em>{{ AGENT_LABELS[p.agent] }}{{ p.providerName ? ` · ${p.providerName}` : '' }}</em>
           </button>
-          <button type="button" class="x" :title="`Delete ${p.name}`" @click="profiles.remove(p.id)">×</button>
+          <button type="button" class="x" :title="`Archive ${p.name} (restore it on the Bots screen)`" @click="profiles.archive(p.id)">×</button>
         </span>
       </div>
       <p v-if="savedNote" class="hint">{{ savedNote }}</p>
