@@ -151,6 +151,15 @@ export const commands = {
 	fleetOpenSession: (sessionId: number) => typedError<null, string>(__TAURI_INVOKE("fleet_open_session", { sessionId })),
 	/**  The strip's geometry, styles and the foreground window, for runtime checks (D23). */
 	fleetProbe: () => typedError<FleetProbe, string>(__TAURI_INVOKE("fleet_probe")),
+	/**  Exports a session's history. Returns none when the save dialog is cancelled. */
+	sessionExport: (sessionId: number, includeTranscript: boolean) => typedError<{
+	path: string,
+	turns: number,
+	/**  Where the scrubbed copy of the agent's transcript went, if it was asked for and written. */
+	transcriptPath: string | null,
+	/**  Why the agent's transcript wasn't copied, when it was asked for. */
+	transcriptNote: string | null,
+} | null, string>(__TAURI_INVOKE("session_export", { sessionId, includeTranscript })),
 };
 
 /** Events */
@@ -505,6 +514,15 @@ export type EffortChoice = {
 	 *  `optionsInConfig`, the configuration key and value.
 	 */
 	args: string,
+};
+
+export type ExportResult = {
+	path: string,
+	turns: number,
+	/**  Where the scrubbed copy of the agent's transcript went, if it was asked for and written. */
+	transcriptPath: string | null,
+	/**  Why the agent's transcript wasn't copied, when it was asked for. */
+	transcriptNote: string | null,
 };
 
 export type FileLeak = {

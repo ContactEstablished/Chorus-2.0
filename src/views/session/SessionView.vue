@@ -10,6 +10,7 @@ import codexLogo from '../../assets/agents/codex.png'
 import { compactPath } from '../../shell/compactPath'
 import SessionTerminal from '../../raw/SessionTerminal.vue'
 import RawSearch from '../../raw/RawSearch.vue'
+import ExportTranscript from './ExportTranscript.vue'
 import SessionStrip from './SessionStrip.vue'
 import SessionFacts from './SessionFacts.vue'
 import PromptHistory from './PromptHistory.vue'
@@ -231,6 +232,7 @@ async function send(bytes: string): Promise<void> {
         <button v-else class="quiet notebtn" @click="noteDraft = s.description ?? ''">{{ s.description ?? 'Add a note on what this session is for…' }}</button>
       </p>
       <div class="actions">
+        <ExportTranscript :session-id="s.id" />
         <template v-if="askingPin">
           <input v-model="pin" type="password" placeholder="PIN" autocomplete="off" aria-label="PIN" @keyup.enter="toggleLock" />
           <button @click="toggleLock">Unlock</button>

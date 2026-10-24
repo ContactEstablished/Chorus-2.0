@@ -4,6 +4,7 @@ mod agents;
 mod app;
 mod attention;
 mod events;
+mod export;
 mod fleet;
 mod git;
 mod ipc;

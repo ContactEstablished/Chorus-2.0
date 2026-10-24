@@ -15,6 +15,7 @@ pub mod attention;
 pub mod inbox;
 pub mod badge;
 pub mod strip;
+pub mod export;
 pub mod batch;
 pub mod build;
 pub mod claude;
