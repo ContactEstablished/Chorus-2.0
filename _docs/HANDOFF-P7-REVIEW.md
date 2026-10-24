@@ -228,6 +228,10 @@ search the Raw view; export the transcript; rename the session and Restart to se
     then hide, one strip window after two shows.
   - With the mouse buttons swapped the strip couldn't be dragged; the press loop now follows the
     primary button. Not tried (it would change this machine's mouse setting).
+  - After these fixes, with real input on the final build: D23 again (a click on empty strip space
+    under the shield and an 80 px drag and back left an external window focused, typed text
+    landed there, a chip click brought Chorus forward); the tray menu's "Show fleet strip" tick,
+    now posted, followed the setting both ways (captured with the strip hidden and shown).
   - Checked for the same pattern elsewhere: the other calls that wait for the main thread (the
     monitor lists, building the strip, the save and folder dialogs) run off it and hold no lock the
     main thread takes; the strip's new open lock is only taken off the main thread.
