@@ -102,7 +102,8 @@ Runtime, isolated `eve7` instance, Claude Code 2.1.308 on haiku (Fast), scratch 
   name both showed the collision. Another live Claude session (not Chorus's) was listed with no actions.
 
 Not verified at first: the tray menu items with real input (new tray icons start in the overflow
-area on Windows 11; Quit Chorus was later picked with real input, §12); question notifications; other DPI
+area on Windows 11; Quit Chorus was later picked with real input, §12); question notifications
+(later seen, §12); other DPI
 scales or monitor changes (one monitor at 100 %); opencode's Ctrl+Shift+F (not installed). Codex's
 binary showed no Ctrl+Shift+F binding string and Claude Code's default table binds Ctrl+F, not
 Ctrl+Shift+F; neither was checked against docs.
@@ -204,10 +205,11 @@ search the Raw view; export the transcript; rename the session and Restart to se
   only error is WebView2's usual "Failed to unregister class" line at exit.
 - **Question notifications:** Claude Code's AskUserQuestion gave attention "input" and one
   notification, "Question check needs your answer" with the question as its body, and a strip chip;
-  a resize and an answer attempt added none. Not settled: answering from Friendly's card several
-  minutes after the question left the session on "input" (Claude Code still showed its PreToolUse
-  hook running); the session was closed before its screen was read, so whether that is the hook's
-  wait limit or a fault is still open.
+  answering added none. Answered from Friendly's card within two minutes, the turn ended ("You
+  prefer tea."). Left past D76's 120 s hold, the card said "Reply channel expired or disconnected.
+  Answer the agent in Raw." with Send answer disabled, Raw showed Claude Code's own question, and
+  answering there (Down, then Enter as a separate write) ended the turn; still one notification.
+  Two earlier tries that seemed stuck were answers sent after the hold had expired.
 - **Third code review (P7 back end):** five findings, all checked against the code and fixed.
   - The tray's `set_icon`/`set_tooltip` (and the menu tick) wait for the main thread, and summaries
     are sent while Restart, Close and Lock hold the session's action lock, which `session_write` (a
