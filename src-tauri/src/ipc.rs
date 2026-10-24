@@ -8,7 +8,7 @@ use specta_typescript::Typescript;
 use std::path::Path;
 use tauri_specta::{Builder, collect_commands, collect_events};
 
-use crate::{agents, app, fleet, lock, narrator, prefs, projects, providers, routing, sessions, splash, vault};
+use crate::{agents, app, attention, fleet, lock, narrator, prefs, projects, providers, routing, sessions, splash, vault};
 
 /// Where the generated bindings live, relative to this crate.
 #[cfg_attr(not(debug_assertions), allow(dead_code, reason = "debug builds and tests regenerate the bindings"))]
@@ -82,8 +82,6 @@ pub fn builder() -> Builder<tauri::Wry> {
             v::vault_delete,
             v::dev_vault_add_test_key,
             v::dev_leak_check,
-            fleet::spike_fleet_open,
-            fleet::spike_fleet_probe,
             splash::restore_progress,
             splash::splash_replay,
             // P6: shared action routing and explicit channel availability.
@@ -98,8 +96,24 @@ pub fn builder() -> Builder<tauri::Wry> {
             sessions::images::session_image_add,
             sessions::images::session_image_remove,
             sessions::images::session_image_read,
+            // P7: notifications, the tray and the fleet strip.
+            attention::notifications_list,
+            attention::notification_read,
+            attention::notifications_read_all,
+            fleet::fleet_shown,
+            fleet::fleet_set_shown,
+            fleet::fleet_open_session,
+            fleet::fleet_probe,
         ])
-        .events(collect_events![app::BackendPulse, sessions::SessionUpdated, fleet::FleetClick])
+        .events(collect_events![
+            app::BackendPulse,
+            sessions::SessionUpdated,
+            fleet::FleetClick,
+            // P7
+            attention::NotificationAdded,
+            attention::AttentionNavigate,
+            fleet::FleetShown,
+        ])
 }
 
 #[cfg_attr(not(debug_assertions), allow(dead_code, reason = "debug builds and tests regenerate the bindings"))]

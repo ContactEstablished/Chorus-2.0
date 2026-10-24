@@ -122,12 +122,6 @@ export const commands = {
 	 *  its WAL, scrollback files).
 	 */
 	devLeakCheck: (id: number, text: string) => typedError<LeakReport, string>(__TAURI_INVOKE("dev_leak_check", { id, text })),
-	/**
-	 *  Opens the strip (or returns the open one) without activating it. Async because building a window
-	 *  inside a synchronous command deadlocks on Windows.
-	 */
-	spikeFleetOpen: () => typedError<FleetProbe, string>(__TAURI_INVOKE("spike_fleet_open")),
-	spikeFleetProbe: () => typedError<FleetProbe, string>(__TAURI_INVOKE("spike_fleet_probe")),
 	/**  How far the restore at start has got: the splash asks as it plays. */
 	restoreProgress: () => __TAURI_INVOKE<RestoreProgress>("restore_progress"),
 	/**
@@ -147,12 +141,25 @@ export const commands = {
 	sessionImageAdd: (sessionId: number, revision: number, name: string, png: number[]) => typedError<Draft, string>(__TAURI_INVOKE("session_image_add", { sessionId, revision, name, png })),
 	sessionImageRemove: (sessionId: number, revision: number, imageId: number) => typedError<Draft, string>(__TAURI_INVOKE("session_image_remove", { sessionId, revision, imageId })),
 	sessionImageRead: (sessionId: number, imageId: number) => typedError<number[], string>(__TAURI_INVOKE("session_image_read", { sessionId, imageId })),
+	notificationsList: () => typedError<NotificationsPage, string>(__TAURI_INVOKE("notifications_list")),
+	/**  Marks one notification read and returns the unread count. */
+	notificationRead: (id: number) => typedError<number, string>(__TAURI_INVOKE("notification_read", { id })),
+	notificationsReadAll: () => typedError<null, string>(__TAURI_INVOKE("notifications_read_all")),
+	fleetShown: () => __TAURI_INVOKE<boolean>("fleet_shown"),
+	fleetSetShown: (shown: boolean) => __TAURI_INVOKE<void>("fleet_set_shown", { shown }),
+	/**  A chip on the strip was clicked: bring the main window forward on that session. */
+	fleetOpenSession: (sessionId: number) => typedError<null, string>(__TAURI_INVOKE("fleet_open_session", { sessionId })),
+	/**  The strip's geometry, styles and the foreground window, for runtime checks (D23). */
+	fleetProbe: () => typedError<FleetProbe, string>(__TAURI_INVOKE("fleet_probe")),
 };
 
 /** Events */
 export const events = {
+	attentionNavigate: makeEvent<AttentionNavigate>("attention-navigate"),
 	backendPulse: makeEvent<BackendPulse>("backend-pulse"),
 	fleetClick: makeEvent<FleetClick>("fleet-click"),
+	fleetShown: makeEvent<FleetShown>("fleet-shown"),
+	notificationAdded: makeEvent<NotificationAdded>("notification-added"),
 	sessionUpdated: makeEvent<SessionUpdated>("session-updated"),
 };
 
@@ -266,6 +273,11 @@ export type Attention =
 "running" | 
 /**  Exited cleanly, or closed. */
 "done";
+
+/**  Asks the main window to show a session, or the Overview's Needs you (the tray, a strip chip). */
+export type AttentionNavigate = {
+	sessionId: number | null,
+};
 
 /**
  *  Emitted once a second so the window can show the back end is alive. It also proves the typed
@@ -525,6 +537,11 @@ export type FleetProbe = {
 	foregroundHwnd: string,
 };
 
+/**  Whether the strip is shown, for Settings. */
+export type FleetShown = {
+	shown: boolean,
+};
+
 /**  What New session learns about a folder as it's typed or picked. */
 export type FolderCheck = {
 	/**  Why a session can't start there, in words to show; none when it can. */
@@ -683,6 +700,30 @@ export type NitroSelection_Serialize = {
 	likely: NitroLikely | null,
 	/**  The reliability and precision rules the likely endpoint fails. */
 	likelyFailsRules: string[],
+};
+
+export type Notification = {
+	id: number,
+	sessionId: number,
+	/**  `approval`, `input` or `failed`. */
+	kind: string,
+	title: string,
+	body: string,
+	/**  Unix milliseconds. */
+	createdAt: number | null,
+	readAt: number | null,
+};
+
+/**  A notification was stored; the centre adds it and the bell shows the new unread count. */
+export type NotificationAdded = {
+	notification: Notification,
+	unread: number,
+};
+
+export type NotificationsPage = {
+	/**  Newest first. */
+	items: Notification[],
+	unread: number,
 };
 
 /**  What a turn really ran with. */

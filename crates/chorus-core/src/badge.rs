@@ -42,8 +42,18 @@ pub fn tooltip(count: u32) -> String {
 /// `base` (RGBA, `width` × `height`) with the badge for `count` drawn over it. A buffer of the
 /// wrong size, or a count of zero, comes back unchanged.
 pub fn overlay(base: &[u8], width: u32, height: u32, count: u32) -> Vec<u8> {
+    // About two thirds of the icon, against the bottom-right corner.
+    draw(base, width, height, count, i64::from(width.min(height)) * 2 / 3)
+}
+
+/// The badge alone, filling a `size` × `size` canvas: the taskbar button's overlay icon.
+pub fn alone(base: &[u8], size: u32, count: u32) -> Vec<u8> {
+    draw(base, size, size, count, i64::from(size))
+}
+
+fn draw(base: &[u8], width: u32, height: u32, count: u32, diameter: i64) -> Vec<u8> {
     let mut out = base.to_vec();
-    let (w, h) = (width as i64, height as i64);
+    let (w, h) = (i64::from(width), i64::from(height));
     let Some(text) = label(count) else { return out };
     if w < 8 || h < 8 || base.len() as i64 != w * h * 4 {
         return out;
@@ -54,9 +64,8 @@ pub fn overlay(base: &[u8], width: u32, height: u32, count: u32) -> Vec<u8> {
             out[i..i + 4].copy_from_slice(&c);
         }
     };
-    // The disc: about two thirds of the icon, against the bottom-right corner, with a light ring
-    // so it reads on a dark or a light taskbar.
-    let d = (w.min(h) * 2 / 3).max(7);
+    // The disc, with a light ring so it reads on a dark or a light taskbar.
+    let d = diameter.clamp(7, w.min(h));
     let (cx2, cy2) = (2 * w - d, 2 * h - d); // centre, doubled to stay in integers
     let r2 = d * d; // (diameter)² = (2·radius)²
     let ring = (d / 8).max(1);
@@ -150,6 +159,14 @@ mod tests {
         assert!(count_colour(&big, INK) > 400);
         let short = vec![0u8; 10];
         assert_eq!(overlay(&short, 32, 32, 3), short);
+    }
+
+    #[test]
+    fn alone_fills_its_canvas() {
+        let blank = vec![0u8; 32 * 32 * 4];
+        let badge = alone(&blank, 32, 4);
+        assert!(count_colour(&badge, DISC) > 400);
+        assert_eq!(alone(&blank, 32, 0), blank);
     }
 
     #[test]

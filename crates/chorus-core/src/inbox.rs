@@ -39,9 +39,10 @@ pub struct NoticeFacts<'a> {
     pub attention: Attention,
     /// `needs_you_since`, when known.
     pub since_ms: Option<i64>,
-    /// When the current (or last) run started, or the session was made: the episode's fallback
-    /// identity when its start is unknown.
+    /// When the current (or last) run started, or the session was made, in Unix milliseconds:
+    /// the episode's fallback identity when its start is unknown.
     pub fallback_at: i64,
+    pub now_ms: i64,
     /// What it last said or was asked (already scrubbed), or why it stopped.
     pub detail: Option<&'a str>,
 }
@@ -60,9 +61,13 @@ pub struct Notice {
 pub const NOTICE_BODY_CHARS: usize = 240;
 
 /// Entering Awaiting approval, Needs your answer or Failed notifies (P7, decision 5); Ready and
-/// Completed never do. The episode is the session, the kind and when it started waiting.
+/// Completed never do. The episode is the session, the kind and when it started waiting. An
+/// episode older than the history keeps is not notified, so pruning never brings it back.
 pub fn notice_for(f: &NoticeFacts) -> Option<Notice> {
     let kind = notice_kind(f.attention)?;
+    if f.since_ms.unwrap_or(f.fallback_at) < f.now_ms - NOTICE_KEEP_MS {
+        return None;
+    }
     let title = match f.attention {
         Attention::Approval => format!("{} needs your approval", f.name),
         Attention::Input => format!("{} needs your answer", f.name),
@@ -81,7 +86,7 @@ mod tests {
     use super::*;
 
     fn facts(attention: Attention, since_ms: Option<i64>) -> NoticeFacts<'static> {
-        NoticeFacts { session: 7, name: "Ada", attention, since_ms, fallback_at: 5, detail: Some("  Run the tests?  ") }
+        NoticeFacts { session: 7, name: "Ada", attention, since_ms, fallback_at: 5, now_ms: 100, detail: Some("  Run the tests?  ") }
     }
 
     #[test]
@@ -103,6 +108,15 @@ mod tests {
         assert_ne!(a.dedupe_key, notice_for(&facts(Attention::Input, Some(10))).unwrap().dedupe_key);
         // An unknown start falls back to the run, so it still notifies once.
         assert_eq!(notice_for(&facts(Attention::Failed, None)).unwrap().dedupe_key, "7:failed:run5");
+    }
+
+    #[test]
+    fn episodes_older_than_the_history_are_not_notified() {
+        let now = NOTICE_KEEP_MS + 1_000;
+        let old = NoticeFacts { now_ms: now, ..facts(Attention::Failed, Some(999)) };
+        assert!(notice_for(&old).is_none());
+        let recent = NoticeFacts { now_ms: now, ..facts(Attention::Failed, Some(1_000)) };
+        assert!(notice_for(&recent).is_some());
     }
 
     #[test]

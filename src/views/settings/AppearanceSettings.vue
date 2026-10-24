@@ -1,8 +1,8 @@
 <script setup lang="ts">
 /** Theme (D25), text size (the window's zoom) and the Overview's default grouping. */
-import { computed } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import ChorusMark from '../../components/ChorusMark.vue'
-import { commands, type GroupBy, type Theme } from '../../ipc'
+import { commands, events, type GroupBy, type Theme } from '../../ipc'
 import { usePrefsStore, ZOOM_MAX, ZOOM_MIN } from '../../stores/prefs'
 import { useNoticesStore } from '../../stores/notices'
 
@@ -25,6 +25,19 @@ const notices = useNoticesStore()
 async function replay(): Promise<void> {
   const res = await commands.splashReplay(3, false)
   if (res.status === 'error') notices.error("Couldn't open the splash.", res.error)
+}
+
+// The fleet strip (P7): shown or hidden here or from the tray's menu; both stay in step.
+const strip = ref(true)
+let unlistenStrip: (() => void) | null = null
+onMounted(async () => {
+  strip.value = await commands.fleetShown()
+  unlistenStrip = await events.fleetShown.listen(({ payload }) => (strip.value = payload.shown))
+})
+onUnmounted(() => unlistenStrip?.())
+async function setStrip(shown: boolean): Promise<void> {
+  strip.value = shown
+  await commands.fleetSetShown(shown)
 }
 </script>
 
@@ -70,6 +83,14 @@ async function replay(): Promise<void> {
       <span>Play the 3D splash as Chorus starts, with the count of sessions coming back (about 3 seconds; any key skips it)</span>
     </label>
     <button class="quiet replay" @click="replay">Play it now</button>
+  </div>
+
+  <div class="group">
+    <h2>Fleet strip</h2>
+    <label class="check">
+      <input type="checkbox" :checked="strip" @change="setStrip(($event.target as HTMLInputElement).checked)" />
+      <span>Show the always-on-top strip of sessions that need you. It never takes the focus; drag it anywhere, and click a session to open it here</span>
+    </label>
   </div>
 
   <div class="group">

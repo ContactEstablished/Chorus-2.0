@@ -1,7 +1,10 @@
-//! The fleet switcher strip (spike S3; the real strip is P7).
+//! The fleet switcher strip (spike S3, made real in P7).
 //!
 //! An always-on-top window that is never activated, so an external dictation app keeps the focus
-//! while you click the strip (D23).
+//! while you click or drag the strip (D23). Only a click on a session's chip brings the main window
+//! forward, on that session: an explicit request to go to Chorus (P7, decision 4). Whether it is
+//! shown (default: shown) and where it was dragged are kept in settings, and the remembered place
+//! is pulled back onto a screen when the displays change (`chorus_core::strip`).
 //!
 //! `focusable(false)` (WS_EX_NOACTIVATE) is not enough on its own: a click lands on WebView2's
 //! input window, which belongs to the browser process and answers WM_MOUSEACTIVATE with
@@ -11,13 +14,13 @@
 //! move loop, LESSONS L11), and reports a short click to the page, which clicks the element under
 //! it. Coordinates are physical pixels throughout, so the strip is correct at any DPI.
 
-use std::sync::OnceLock;
 use std::sync::mpsc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use specta::Type;
-use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Manager, PhysicalPosition, WebviewUrl, WebviewWindowBuilder};
 use tauri_specta::Event;
 use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
@@ -31,7 +34,15 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::w;
 
+use crate::sessions::SessionManager;
+use crate::store::settings;
+
 pub const LABEL: &str = "fleet";
+const SHOWN_KEY: &str = "fleet.shown";
+const POSITION_KEY: &str = "fleet.position";
+/// The strip's size in logical pixels.
+const WIDTH: f64 = 460.0;
+const HEIGHT: f64 = 56.0;
 
 /// Movement below this many pixels between press and release is a click, not a drag.
 const CLICK_SLOP_PX: i32 = 4;
@@ -110,10 +121,17 @@ fn track_press(strip: HWND, origin: (i32, i32)) {
                 std::thread::sleep(Duration::from_millis(8));
             }
         }
-        if moved < CLICK_SLOP_PX
-            && let Some(app) = APP.get()
-        {
+        let Some(app) = APP.get() else { return };
+        if moved < CLICK_SLOP_PX {
             let _ = FleetClick { x: origin.0, y: origin.1 }.emit_to(app, LABEL);
+        } else {
+            let mut end = RECT::default();
+            // SAFETY: a plain query on our own window.
+            if unsafe { GetWindowRect(strip, &mut end) }.is_ok()
+                && let Some(manager) = app.try_state::<Arc<SessionManager>>()
+            {
+                let _ = settings::set(manager.store(), POSITION_KEY, &format!("{},{}", end.left, end.top));
+            }
         }
     });
 }
@@ -175,19 +193,46 @@ fn install_shield(strip: HWND) -> windows::core::Result<()> {
     Ok(())
 }
 
-/// Opens the strip (or returns the open one) without activating it. Async because building a window
-/// inside a synchronous command deadlocks on Windows.
-#[tauri::command]
-#[specta::specta]
-pub async fn spike_fleet_open(app: AppHandle) -> Result<FleetProbe, String> {
+/// Where the strip should open, in physical pixels: the remembered place, kept on a screen.
+fn placement(app: &AppHandle) -> (PhysicalPosition<i32>, f64) {
+    let monitors = app.available_monitors().unwrap_or_default();
+    let primary = app.primary_monitor().ok().flatten();
+    let scale = primary.as_ref().or(monitors.first()).map_or(1.0, |m| m.scale_factor());
+    // The primary screen first, so a strip that was never moved goes there.
+    let mut areas: Vec<chorus_core::strip::Area> = Vec::new();
+    for m in primary.iter().chain(monitors.iter()) {
+        let r = m.work_area();
+        let area = chorus_core::strip::Area {
+            x: r.position.x,
+            y: r.position.y,
+            width: r.size.width as i32,
+            height: r.size.height as i32,
+        };
+        if !areas.contains(&area) {
+            areas.push(area);
+        }
+    }
+    let saved = app.try_state::<Arc<SessionManager>>().and_then(|m| settings::get(m.store(), POSITION_KEY).ok().flatten()).and_then(|v| {
+        let (x, y) = v.split_once(',')?;
+        Some((x.trim().parse().ok()?, y.trim().parse().ok()?))
+    });
+    let size = ((WIDTH * scale).round() as i32, (HEIGHT * scale).round() as i32);
+    let (x, y) = chorus_core::strip::place(saved, size, &areas);
+    (PhysicalPosition::new(x, y), scale)
+}
+
+/// Opens the strip (or returns the open one) without activating it. Async because building a
+/// window on the thread that runs the event loop deadlocks on Windows (L28).
+async fn open(app: AppHandle) -> Result<FleetProbe, String> {
     let _ = APP.set(app.clone());
     if let Some(w) = app.get_webview_window(LABEL) {
         return Ok(probe_hwnd(w.hwnd().map_err(|e| e.to_string())?, true));
     }
+    let (at, scale) = placement(&app);
     let window = WebviewWindowBuilder::new(&app, LABEL, WebviewUrl::App("index.html?view=fleet".into()))
         .title("Chorus fleet")
-        .inner_size(420.0, 64.0)
-        .position(80.0, 80.0)
+        .inner_size(WIDTH, HEIGHT)
+        .position(f64::from(at.x) / scale, f64::from(at.y) / scale)
         .decorations(false)
         .resizable(false)
         .always_on_top(true)
@@ -197,6 +242,7 @@ pub async fn spike_fleet_open(app: AppHandle) -> Result<FleetProbe, String> {
         .focusable(false)
         .build()
         .map_err(|e| e.to_string())?;
+    let _ = window.set_position(at);
     let hwnd = window.hwnd().map_err(|e| e.to_string())?;
     let raw = hwnd.0 as usize;
     let (tx, rx) = mpsc::channel();
@@ -209,9 +255,74 @@ pub async fn spike_fleet_open(app: AppHandle) -> Result<FleetProbe, String> {
     Ok(probe_hwnd(hwnd, true))
 }
 
+/// Whether the strip should be shown: the stored choice, shown when never chosen.
+pub fn wanted(manager: &SessionManager) -> bool {
+    settings::get(manager.store(), SHOWN_KEY).ok().flatten().is_none_or(|v| v != "false")
+}
+
+pub fn is_shown(app: &AppHandle) -> bool {
+    app.get_webview_window(LABEL).is_some()
+}
+
+/// Shows or hides the strip and remembers the choice. Never activates anything.
+pub fn set_shown(app: &AppHandle, shown: bool) {
+    let _ = APP.set(app.clone());
+    if let Some(manager) = app.try_state::<Arc<SessionManager>>() {
+        let _ = settings::set(manager.store(), SHOWN_KEY, if shown { "true" } else { "false" });
+    }
+    crate::tray::strip_checked(shown);
+    if shown {
+        let opening = app.clone();
+        tauri::async_runtime::spawn(async move {
+            if let Err(e) = open(opening).await {
+                eprintln!("fleet strip: {e}");
+            }
+        });
+    } else if let Some(w) = app.get_webview_window(LABEL) {
+        let _ = w.close();
+    }
+    let _ = FleetShown { shown }.emit(app);
+}
+
+/// At start: opens the strip if it is wanted.
+pub fn start(app: &AppHandle, manager: &SessionManager) {
+    if wanted(manager) {
+        set_shown(app, true);
+    }
+}
+
+/// Whether the strip is shown, for Settings.
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+#[serde(rename_all = "camelCase")]
+pub struct FleetShown {
+    pub shown: bool,
+}
+
 #[tauri::command]
 #[specta::specta]
-pub fn spike_fleet_probe(app: AppHandle) -> Result<FleetProbe, String> {
+pub fn fleet_shown(state: tauri::State<'_, Arc<SessionManager>>) -> bool {
+    wanted(&state)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn fleet_set_shown(app: AppHandle, shown: bool) {
+    set_shown(&app, shown);
+}
+
+/// A chip on the strip was clicked: bring the main window forward on that session.
+#[tauri::command]
+#[specta::specta]
+pub fn fleet_open_session(app: AppHandle, state: tauri::State<'_, Arc<SessionManager>>, session_id: u32) -> Result<(), String> {
+    state.summary(session_id)?;
+    crate::attention::show_main(&app, Some(session_id));
+    Ok(())
+}
+
+/// The strip's geometry, styles and the foreground window, for runtime checks (D23).
+#[tauri::command]
+#[specta::specta]
+pub fn fleet_probe(app: AppHandle) -> Result<FleetProbe, String> {
     let window = app.get_webview_window(LABEL).ok_or("fleet strip is not open")?;
     Ok(probe_hwnd(window.hwnd().map_err(|e| e.to_string())?, true))
 }

@@ -18,6 +18,7 @@ import { useNoticesStore } from '../stores/notices'
 import { installDevApi } from './devApi'
 import { useInboxStore } from '../stores/inbox'
 import { inboxKey } from '../shell/inbox'
+import { events } from '../ipc'
 
 import OverviewView from '../views/OverviewView.vue'
 import SessionsView from '../views/SessionsView.vue'
@@ -63,14 +64,30 @@ function onKey(e: KeyboardEvent): void {
   e.stopPropagation()
 }
 
+// The tray and the fleet strip bring the window forward on a session, or on Needs you (P7).
+let unlistenNavigate: (() => void) | null = null
+async function listenNavigate(): Promise<void> {
+  unlistenNavigate = await events.attentionNavigate.listen(({ payload }) => {
+    view.palette = null
+    if (payload.sessionId !== null) {
+      view.openSession(payload.sessionId)
+    } else {
+      inbox.filter = 'needs'
+      view.go('overview')
+    }
+  })
+}
+
 onMounted(async () => {
   window.addEventListener('keydown', onKey, { capture: true })
+  void listenNavigate()
   await app.init()
   await Promise.all([prefs.load(), sessions.init(), projects.load()])
   if (app.info?.flavor === 'dev') installDevApi()
 })
 onUnmounted(() => {
   window.removeEventListener('keydown', onKey, { capture: true })
+  unlistenNavigate?.()
   sessions.dispose()
   app.dispose()
 })
