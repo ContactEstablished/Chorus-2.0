@@ -216,7 +216,8 @@ search the Raw view; export the transcript; rename the session and Restart to se
     sync command, so on the main thread) also takes: a restart that changed the count while a
     keystroke arrived could hang the app. The redraw is now posted to the main thread, not waited
     for. Seen: a failed shell restarted three times with 40 writes in flight each time; every call
-    answered and the tray redrew. (The hang itself was not reproduced on the old build.)
+    answered and the tray redrew. The same script on the previous `attention.rs`/`tray.rs` hung
+    the app on its first round (Windows reported it not responding; stopped by its PID).
   - Two redraws could finish out of order and leave a stale count; the count is now taken and
     compared under one lock and the redraw draws the newest count when it runs.
   - The input shield kept its first size; it now follows the strip's size. Seen: the strip resized
