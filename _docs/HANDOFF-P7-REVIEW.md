@@ -239,4 +239,7 @@ search the Raw view; export the transcript; rename the session and Restart to se
     now posted, followed the setting both ways (captured with the strip hidden and shown).
   - Checked for the same pattern elsewhere: the other calls that wait for the main thread (the
     monitor lists, building the strip, the save and folder dialogs) run off it and hold no lock the
-    main thread takes; the strip's new open lock is only taken off the main thread.
+    main thread takes; the strip's new open lock is only taken off the main thread. Slow work under
+    a lock was checked too: the narrator's OpenRouter call (P6) runs on its own thread with no lock
+    held across it, and P8's automation firing lock is taken only off the main thread (Run now is
+    async, the scheduler has its own thread). Nothing to change.
