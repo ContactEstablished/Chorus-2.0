@@ -13,7 +13,7 @@ gathers them, with a recommendation each. Nothing here is decided until Matthew 
 | 3 | What counts as "still active" when runs overlap | Busy only: working, waiting for you, or not past its first prompt | P8 §9 Q3 |
 | 4 | Native Claude skills through `--plugin-dir` (not built or tried) | Try after this merges, behind the same carrier table | P8 §9 Q4 |
 | 5 | Codex automations | Claude Code only for now; Codex later, with the bridge sending the first prompt | P8 §9 Q5 |
-| 6 | Each window may call only its own commands (P7-D5); today the strip and splash can call all 100+ | Do it: the strip and splash need four commands between them | P7 §8 |
+| 6 | Each window may call only its own commands (P7-D5); today the strip and splash can call all 100+ | Do it: the strip and splash need four app commands between them (checked on the final branch: the strip calls `sessionsList`, `prefsGet` and `fleetOpenSession`; the splash calls `restoreProgress`, plus Tauri's own window API) | P7 §8 |
 
 Smaller questions, each with a recommendation in place: approval notification bodies naming the
 ask's subject (P7 §9 Q1, recommended yes) and keeping `fleet_probe` in release builds (P7 §9 Q2,
