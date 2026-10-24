@@ -21,6 +21,7 @@ tonight (`thread/inject_items`, not argv). It is built, but it is a decision for
 - Commits before this file (`git log --oneline main..HEAD`):
 
 ```
+456b388 P8: plain words for opencode's instructions reason
 24a6c2e P8: Settings → Agents says how each agent takes instructions
 082bfc4 P8: idle relaunched sessions don't block automations; files go at quit
 8e878b6 P8: Codex instructions through its private app-server
