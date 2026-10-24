@@ -225,7 +225,8 @@ Claude Code 2.1.308 (`--append-system-prompt-file`, `--system-prompt-snapshot`, 
 
 1. **Keep Codex instructions over the app-server?** Built and seen working. Consequences: a first
    prompt typed within about half a second of launch could beat the injection (the bridge polls every
-   500 ms); compaction may summarise the injected message away (not tested); a Restart with changed
+   500 ms); compaction might summarise the injected message away (a forced `/compact` kept it, §12;
+   automatic compaction late in a long session not tested); a Restart with changed
    notes adds a second developer message that says it replaces the first. Options: (a) keep it;
    (b) turn Codex instructions off until compaction is measured; (c) argv, already rejected.
    *Recommendation: (a), and measure compaction on a long session later.*
