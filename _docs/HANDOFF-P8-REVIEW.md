@@ -299,3 +299,15 @@ trusted in them):
    scheduled time: another run. Pause it. Make a daily one due in two minutes, quit Chorus, reopen
    after the time: a "Missed: Chorus was closed." row.
 8. Try a note containing a key-shaped string: refused.
+
+## 12. Follow-up on the integration branch (2026-10-24)
+
+Checked again after merging with P7 (`evening/p6-p8`), in an isolated instance:
+- An automation's Run now created a Claude Code session whose single turn was recorded with source
+  `automation`; it answered with both a global note's and its Bot's canary words, with P7's `-n
+  <name>` placed before P8's arguments, and the session's fleet address was its name.
+- **Documents now include Codex.** Codex's `fileChange` items list their files under `changes`, so
+  the recorded target was empty. The first changed file now names the call, and `fileChange` counts as
+  a writing tool. Seen with Codex 0.163.0: a plan written with `apply_patch` appeared in Documents,
+  linked to its session. A file written by a shell command (Codex's `pwsh`, Claude's `Bash`) has no
+  recorded path and is still not found, for any agent; only the first file of a multi-file patch is.

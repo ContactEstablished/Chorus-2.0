@@ -118,7 +118,10 @@ impl Stream {
                     }
                     Some("commandExecution" | "fileChange" | "mcpToolCall") => {
                         let tool = item["type"].as_str().unwrap().to_owned();
-                        let target = tool_target(item);
+                        // A file change lists its files under `changes`; the first names the call, so
+                        // Documents can find what Codex wrote (P8).
+                        let first_file = item["changes"].as_array().and_then(|c| c.first()).and_then(|c| c["path"].as_str());
+                        let target = first_file.and_then(|p| tool_target(&serde_json::json!({ "path": p }))).or_else(|| tool_target(item));
                         out.push(Update::Event(if method == "item/started" { AgentEvent::ToolStarted { turn: Some(turn.clone()), call: Some(id.into()), tool, target } }
                             else { AgentEvent::ToolFinished { turn: Some(turn.clone()), call: Some(id.into()), tool, target, failed: item["status"] == "failed" || item["status"] == "declined" } }));
                     }
@@ -156,6 +159,13 @@ impl Stream {
         e["params"]["thread"]["parentThreadId"]=json!("one");
         assert!(!changed_root("one",&e,300,200));
         assert!(!relevant(&event("item/reasoning/textDelta",json!({"delta":"private"}))));
+    }
+    #[test] fn a_file_change_is_named_by_its_first_file() {
+        let mut s = Stream::default();
+        s.accept("one",&event("turn/started",json!({"threadId":"one","turn":{"id":"t"}})),0);
+        let item = json!({"type":"fileChange","id":"f","status":"completed","changes":[{"path":"_docs/PLAN-x.md","kind":{"type":"add"},"diff":"+# Plan"},{"path":"b.rs","kind":{"type":"add"},"diff":""}]});
+        let out = s.accept("one",&event("item/completed",json!({"threadId":"one","turnId":"t","item":item})),10);
+        assert!(out.iter().any(|u| matches!(u, Update::Event(AgentEvent::ToolFinished { tool, target: Some(t), .. }) if tool == "fileChange" && t == "_docs/PLAN-x.md")));
     }
     #[test] fn restarting_does_not_record_an_old_completed_turn_again() {
         let response=json!({"thread":{"turns":[{"id":"old","status":"completed","items":[]}]}});

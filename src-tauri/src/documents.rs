@@ -23,8 +23,9 @@ use crate::vault::commands::secs;
 type Manager<'a> = State<'a, Arc<SessionManager>>;
 
 const CURSOR_KEY: &str = "documents.scan_cursor";
-/// Tools whose target is a file they wrote: Claude Code's.
-const WRITING_TOOLS: &[&str] = &["Write", "Edit", "MultiEdit", "NotebookEdit"];
+/// Tools whose target is a file they wrote: Claude Code's, and Codex's file changes (named by their
+/// first file).
+const WRITING_TOOLS: &[&str] = &["Write", "Edit", "MultiEdit", "NotebookEdit", "fileChange"];
 const PASS_EVERY: Duration = Duration::from_secs(5);
 const BATCH: u32 = 500;
 /// A write still under way stops the pass, so it is seen once finished, unless it is this old.
