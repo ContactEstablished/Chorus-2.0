@@ -319,3 +319,14 @@ Checked again after merging with P7 (`evening/p6-p8`), in an isolated instance:
   file is scrubbed with every vault key and the built-in patterns before it is written and is deleted
   at run end and start-up, and a long closure records one "missed" row per automation, not one per
   slot.
+- **Skills, seen with an agent:** a Bot listing a skill folder (`SKILL.md` with name and description)
+  gave Claude Code the index; asked for what the skill covers, it read that `SKILL.md` and answered
+  from it.
+- **Size cap, seen in the app:** six notes of about 5 KiB each gave a 20,355-byte instruction file
+  with five notes (the pinned one first) and "2 more left out: over the size limit" in session facts.
+- **Code review fixes** (commit "P7/P8: fixes from a code review of the merged branch"): Codex
+  instructions on a resumed run whose thread wasn't loaded at the first poll; per-run instruction
+  files so a slow-exiting run can't delete a Restart's file; a Bot only attaches to its own agent;
+  Run now and the scheduler fire one at a time; no instructions warning on plain shells; a drive root
+  accepted as a folder. Seen: Codex answered a changed note after Restart; a Claude session restarted
+  at once kept its instructions with one file on disk; a Claude Bot didn't attach to Codex.
