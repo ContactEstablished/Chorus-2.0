@@ -109,6 +109,22 @@ pub fn session_transcript(store: &Store, session_id: u32) -> Result<Option<Strin
     })
 }
 
+/// What a run's newest turn ran with, from the agent's own record (migration 0022).
+pub fn set_run_observed(store: &Store, run_id: u32, seen: &chorus_core::opencode::Observed) -> Result<(), String> {
+    let json = serde_json::to_string(seen).map_err(|e| e.to_string())?;
+    store.with(|c| c.execute("UPDATE runs SET observed = ?2 WHERE id = ?1", params![run_id, json]).map(|_| ()))
+}
+
+/// The newest turn a session's runs recorded what they ran with: still there after the run ends or
+/// restarts. An unreadable row reads as none.
+pub fn session_observed(store: &Store, session_id: u32) -> Result<Option<chorus_core::opencode::Observed>, String> {
+    let json: Option<String> = store.with(|c| {
+        c.query_row("SELECT observed FROM runs WHERE session_id = ?1 AND observed IS NOT NULL ORDER BY id DESC LIMIT 1", [session_id], |r| r.get(0))
+            .optional()
+    })?;
+    Ok(json.and_then(|j| serde_json::from_str(&j).ok()))
+}
+
 /// Drops raw events older than `older_than_ms`; the history rows stay.
 pub fn prune_events(store: &Store, older_than_ms: i64) -> Result<usize, String> {
     store.with(|c| c.execute("DELETE FROM agent_events WHERE at < ?1", [now_ms() - older_than_ms]))
@@ -304,6 +320,22 @@ mod tests {
             },
         )
         .unwrap()
+    }
+
+    #[test]
+    fn what_a_turn_ran_with_outlasts_its_run_and_the_newest_wins() {
+        use chorus_core::opencode::Observed;
+        let s = Store::in_memory();
+        let id = session(&s);
+        let run = |s: &Store| rows::start_run(s, &rows::NewRun { session_id: id, pid: None, program: "claude.exe", args: &[], cli_version: None, resumed: false }).unwrap();
+        let seen = |model: &str| Observed { model: model.into(), variant: Some("xhigh".into()), agent: None };
+        assert_eq!(session_observed(&s, id).unwrap(), None);
+        let first = run(&s);
+        set_run_observed(&s, first, &seen("claude-opus-5-5")).unwrap();
+        let second = run(&s);
+        assert_eq!(session_observed(&s, id).unwrap(), Some(seen("claude-opus-5-5")), "a restarted run with no reply yet");
+        set_run_observed(&s, second, &seen("claude-sonnet-5-5")).unwrap();
+        assert_eq!(session_observed(&s, id).unwrap(), Some(seen("claude-sonnet-5-5")));
     }
 
     #[test]

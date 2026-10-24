@@ -152,7 +152,8 @@ pub struct SessionSummary {
     pub attention: Attention,
     /// Start of this waiting episode, Unix milliseconds; null when no reliable evidence exists.
     pub needs_you_since: Option<f64>,
-    /// What the running agent's newest turn really used, read back from the agent (opencode).
+    /// What the newest turn really used, read back from the agent: opencode's server while it runs,
+    /// and Claude Code's transcript (model and effort), kept after the run ends.
     pub observed: Option<Observed>,
     /// How that turn differs from `options`, one phrase each; empty when it matches.
     pub observed_differs: Vec<String>,
@@ -705,7 +706,12 @@ impl SessionManager {
     fn summary_of(&self, row: &SessionRow) -> SessionSummary {
         let live = self.live.lock().expect("live lock").get(&row.id).cloned();
         let run = live.as_ref().and_then(|l| l.current_run());
-        let observed = run.as_ref().and_then(|r| r.observed.lock().expect("observed lock").clone());
+        // opencode's server says what a turn ran with while it runs; Claude Code's transcript record
+        // is also kept with its run, so it outlasts the run.
+        let observed = run
+            .as_ref()
+            .and_then(|r| r.observed.lock().expect("observed lock").clone())
+            .or_else(|| history::session_observed(&self.store, row.id).ok().flatten());
         let last = rows::last_run(&self.store, row.id).ok().flatten();
         let credential_label =
             row.credential_id.and_then(|id| credentials::get(&self.store, id).ok().flatten()).map(|c| c.label);
@@ -745,6 +751,9 @@ impl SessionManager {
             needs_you_since: crate::store::attention::waiting_since(&self.store, row.id, current_attention, last.as_ref())
                 .ok().flatten().map(|at| at as f64),
             observed_differs: match (&observed, &run) {
+                (Some(o), r) if row.agent == AgentKind::Claude => {
+                    chorus_core::claude::differences(row.agent.spec(), r.as_ref().map_or(&row.options, |r| &r.asked), o)
+                }
                 (Some(o), Some(r)) => oc::differences(row.agent.spec(), &r.asked, o),
                 _ => Vec::new(),
             },
@@ -1375,6 +1384,19 @@ impl SessionManager {
                     for (key, at, content) in chorus_core::progress::claude_message(line).into_iter().filter(|(_, at, _)| *at >= launched_ms) {
                         if let Ok(Some(row)) = history::progress_turn(&m.store, run.id, at) {
                             run.recorder.lock().expect("recorder lock").progress_at(&m.store, row, &key, content, at);
+                        }
+                    }
+                    // Which model and effort really answered; kept with the run for after it ends.
+                    if let Some((_, seen)) = chorus_core::claude::reply_ran(line).filter(|(at, _)| *at >= launched_ms) {
+                        let changed = {
+                            let mut slot = run.observed.lock().expect("observed lock");
+                            let changed = slot.as_ref() != Some(&seen);
+                            *slot = Some(seen.clone());
+                            changed
+                        };
+                        if changed {
+                            let _ = history::set_run_observed(&m.store, run.id, &seen);
+                            m.notify_id(session_id);
                         }
                     }
                 }

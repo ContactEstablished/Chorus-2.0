@@ -112,6 +112,19 @@ Send). Mouse reports now count as terminal protocol, like focus and cursor repor
 review instance: with Raw open and the pointer moving over it through a whole run, 24 mouse reports
 reached the agent and Chorus still closed it about a second after its turn.
 
+**Added at Matthew's request: which model really answered (Claude Code).** The details panel's
+"Last turn ran" line, until now opencode only, also shows Claude Code's model and effort, read from
+its transcript and kept with the run (migration 0022), so a session Chorus closed still says which
+model answered. It is flagged when it isn't what was asked: a family name (`opus`) matches any
+model of that family, a full model id only itself. Seen in the review instance: a Haiku canary run
+read "claude-haiku-5-5 · medium effort" while it ran and after Chorus closed it; the Opus run before
+it was `claude-opus-5-5` at `xhigh` in its transcript.
+
+**Proposed lessons (to number), Claude Code 2.1.308:** every reply line in its transcript records
+`message.model`, `requestedModel` and `effort` (a subagent's lines say `isSidechain: true`); and
+it turns on any-motion mouse tracking (`?1003h` with SGR `?1006h`), so a terminal showing it sends
+mouse reports whenever the pointer moves over it.
+
 **Proposed lesson (to number):** in Tauri 2.12, once `AppManifest::commands` is set, every app
 command is checked against the calling window's capabilities, the main window's included. Each
 command's permission is `allow-<name with hyphens>`. Debug builds say where a refused command is

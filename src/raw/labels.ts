@@ -84,9 +84,13 @@ export function optionsText(s: Pick<SessionSummary, 'options'>): string {
   return parts.join(' · ')
 }
 
-/** What the newest turn really ran with, read back from the agent: "glm-5.3-flash-free · high · plan agent". */
+/**
+ * What the newest turn really ran with, read back from the agent: "glm-5.3-flash-free · high · plan agent"
+ * (opencode), "claude-opus-5-5 · xhigh effort" (Claude Code, which may not record an effort).
+ */
 export function observedText(s: SessionSummary): string | null {
   const o = s.observed
   if (!o) return null
-  return [o.model, o.variant ?? 'default effort', o.agent ? `${o.agent} agent` : null].filter(Boolean).join(' · ')
+  const effort = s.agent === 'claude' ? (o.variant ? `${o.variant} effort` : null) : (o.variant ?? 'default effort')
+  return [o.model, effort, o.agent ? `${o.agent} agent` : null].filter(Boolean).join(' · ')
 }
