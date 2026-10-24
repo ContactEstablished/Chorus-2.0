@@ -250,27 +250,20 @@ Claude Code 2.1.308 (`--append-system-prompt-file`, `--system-prompt-snapshot`, 
 
 ## 10. Risks and known issues
 
-- **Merging with P7.** P7 adds a `notifications` migration (renumber one of the two), a
-  `SessionSummary.needsYouSince` field (P8 adds none: its facts come from `session_instructions`),
-  and edits `lib.rs`, `ipc.rs`, `App.vue`, `sessions/mod.rs` and `agent.rs`. Expected conflicts:
-  `lib.rs` (`mod` lines and one start call, near `narrator::start`), `ipc.rs` (both append a block at
-  the end of the commands), `App.vue` (P8 replaced the four placeholders and removed the
-  `PhasePlaceholder` import; if P7 still imports it, keep the import), `sessions/mod.rs` (P8's lines
-  are in `CreateSession`, `create_in`, `start_run` after the redaction list and after the run row,
-  the exit watcher, `shutdown`, the Pair literal and the `codex_bridge` `mod` line). P8 doesn't touch
-  `agent.rs`. `bindings.ts`: regenerate.
-- **Claude `-n` (P7) and P8's args** both go into Claude's argv; P8's go after the conversation
-  arguments and end with the automation's positional prompt, so P7's `-n <name>` must come before
-  that (anywhere before `p8.args`).
-- **Codex bridge change** (`codex_bridge.rs` is P6's): the injection happens before the bridge's own
-  `thread/resume`; injecting materialises a new thread's rollout, so that resume may now succeed
-  before the first prompt rather than after it. Seen working for one Codex session; not stress-tested.
+- **Merging with P7: done** on `evening/p6-p8` (§12). P8's migration became `0020`, P7's `-n <name>`
+  goes before `p8.args` (so the automation's positional prompt stays last), and `bindings.ts` was
+  regenerated.
+- **Codex bridge change** (`codex_bridge.rs` is P6's): instructions are injected when Codex's TUI
+  already has the thread loaded, before the bridge's own `thread/resume`, and again after that resume
+  if still pending (a no-op once given). Injecting materialises a new thread's rollout, so the
+  resume may now succeed before the first prompt rather than after it. Seen working for new and
+  resumed Codex sessions; not stress-tested.
 - An automation's prompt is in argv and `runs.args` (scrubbed), as the plan allows.
 - A Bot chip in New session sets the Bot for the session; there is no way to clear it except choosing
   another chip or closing the dialog.
 - The Bot editor doesn't edit provider or key (kept as saved).
-- Deleting a Bot from New session's chip (×) still deletes it (sessions keep their copy; its
-  automations then say "Its Bot was deleted"); the Bots screen archives instead.
+- New session's chip (×) archives a Bot, as the Bots screen does (restore it there); a failed
+  archive is reported. Sessions keep their copy either way.
 - `bindings.ts` names `Document` and `Schedule` types; `index.ts` exports `Document` as
   `ChorusDocument` to avoid the DOM global.
 
