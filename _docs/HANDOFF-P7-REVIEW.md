@@ -146,7 +146,10 @@ PLAN: P7 built and verified as in §6; awaiting Matthew's review.
 1. ~~Notification bodies show the latest prompt or message; the ask's own subject would be more
    useful.~~ Done on the integration branch: the body is the open ask's subject (unit-tested with
    "Write p7.txt"; seen in the app with a question, §12), falling back to the latest message.
-2. Should `fleet_probe` stay in release builds? It is read only. *Recommendation: keep.*
+2. Should `fleet_probe` stay in release builds? It is read only (rechecked on the final branch: it
+   reads the open strip's rectangle, DPI and styles, and errors if the strip isn't open). Its
+   `shield` field is assumed true rather than looked up; a `FindWindowExW` check like `fit_shield`'s
+   would make it exact. *Recommendation: keep, with that check.*
 
 ## 10. Risks and known issues
 
