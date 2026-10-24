@@ -9,6 +9,7 @@ import Icon from '../../components/Icon.vue'
 import codexLogo from '../../assets/agents/codex.png'
 import { compactPath } from '../../shell/compactPath'
 import SessionTerminal from '../../raw/SessionTerminal.vue'
+import RawSearch from '../../raw/RawSearch.vue'
 import SessionStrip from './SessionStrip.vue'
 import SessionFacts from './SessionFacts.vue'
 import PromptHistory from './PromptHistory.vue'
@@ -157,6 +158,9 @@ async function toggleLock(): Promise<void> {
 // The terminal.
 const attached = ref(false)
 const size = ref<{ cols: number; rows: number } | null>(null)
+// Raw search (P7).
+const rawTerm = ref<InstanceType<typeof SessionTerminal> | null>(null)
+const searchOpen = ref(false)
 watch(
   () => props.sessionId,
   () => {
@@ -259,16 +263,21 @@ async function send(bytes: string): Promise<void> {
           <span v-if="size" class="mono muted">{{ size.cols }}×{{ size.rows }}</span>
           <span class="mono muted">scrollback 10k</span>
           <span class="spacer" />
+          <button class="key" title="Find in the terminal (Ctrl+Shift+F)" aria-label="Find in the terminal" @click="searchOpen = true"><Icon name="search" :size="13" /></button>
           <button class="key" :disabled="!s.live" title="Send Ctrl+C" @click="send('\x03')">^C</button>
           <button class="key" :disabled="!s.live" title="Send Escape (interrupts most agents)" @click="send('\x1b')">Esc</button>
         </div>
+        <RawSearch v-if="searchOpen" :key="`search-${s.id}`" :term="rawTerm" @close="searchOpen = false" />
         <p v-if="s.note" class="warn">{{ s.note }}</p>
         <p v-if="s.scrollbackError" class="warn">{{ s.scrollbackError }}</p>
         <div class="term">
           <SessionTerminal
+            ref="rawTerm"
             :key="s.id"
             :session-id="s.id"
             :live="s.live"
+            searchable
+            @search="searchOpen = true"
             @attached="(a) => (attached = a)"
             @size="(cols, rows) => (size = { cols, rows })"
             @error="(m) => notices.error(m)"
