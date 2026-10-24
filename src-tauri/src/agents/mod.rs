@@ -6,6 +6,7 @@
 //! (LESSONS L14). Auto-update is switched off for every agent that has a switch (LESSONS L7).
 
 pub mod codex;
+pub mod codex_socket;
 pub mod commands;
 pub mod detect;
 pub mod gemini;

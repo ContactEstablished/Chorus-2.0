@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
  * The rail (DESIGN.md "Rail"): the mark and wordmark, the destinations, the projects, and New
- * session at the bottom. Under 720 px wide it shows icons only.
+ * session at the bottom. The user can collapse it to icons; narrow windows start collapsed.
  */
 import { computed } from 'vue'
 import ChorusMark from '../components/ChorusMark.vue'
@@ -10,11 +10,13 @@ import type { IconName } from '../components/icons'
 import { useSessionsStore } from '../stores/sessions'
 import { useProjectsStore } from '../stores/projects'
 import { useViewStore, type ViewName } from '../stores/view'
+import { useLayoutStore } from '../stores/layout'
 import { counts, needsYou } from './status'
 
 const emit = defineEmits<{ newProject: []; editProject: [id: number] }>()
 
 const view = useViewStore()
+const layout = useLayoutStore()
 const sessions = useSessionsStore()
 const projects = useProjectsStore()
 
@@ -56,15 +58,23 @@ function go(name: ViewName): void {
 </script>
 
 <template>
-  <nav class="rail" aria-label="Main">
+  <nav id="main-navigation" class="rail" :class="{ collapsed: layout.railCollapsed }" aria-label="Main">
     <div class="brand" data-tauri-drag-region>
       <ChorusMark :height="22" />
       <span class="wordmark" data-tauri-drag-region>Chorus</span>
+      <button
+        class="rail-toggle quiet"
+        :title="layout.railCollapsed ? 'Expand sidebar' : 'Collapse sidebar'"
+        :aria-label="layout.railCollapsed ? 'Expand sidebar' : 'Collapse sidebar'"
+        :aria-expanded="!layout.railCollapsed"
+        aria-controls="main-navigation"
+        @click="layout.railCollapsed = !layout.railCollapsed"
+      ><Icon :name="layout.railCollapsed ? 'chevronRight' : 'panelLeft'" :size="17" /></button>
     </div>
 
     <ul class="nav">
       <li v-for="item in NAV" :key="item.name">
-        <button class="item" :class="{ on: isOn(item.name) }" :title="item.label" @click="go(item.name)">
+        <button class="item" :class="{ on: isOn(item.name) }" :title="item.label" :aria-label="item.label" @click="go(item.name)">
           <Icon :name="item.icon" />
           <span class="label">{{ item.label }}</span>
           <span v-if="item.name === 'overview' && needs" class="badge" :title="`${needs} need you`">{{ needs }}</span>
@@ -82,6 +92,7 @@ function go(name: ViewName): void {
           class="item project"
           :class="{ on: view.name === 'overview' && view.projectFilter === p.id }"
           :title="p.folder ? `${p.name} — ${p.folder}` : p.name"
+          :aria-label="p.name"
           @click="view.openProject(p.id)"
           @contextmenu.prevent="emit('editProject', p.id)"
         >
@@ -96,7 +107,7 @@ function go(name: ViewName): void {
       </li>
     </ul>
 
-    <button class="new primary-outline" title="New session" @click="view.newSessionOpen = true">
+    <button class="new primary-outline" title="New session" aria-label="New session" @click="view.newSessionOpen = true">
       <Icon name="plus" :size="16" />
       <span class="label">New session</span>
     </button>
@@ -106,6 +117,7 @@ function go(name: ViewName): void {
 <style scoped>
 .rail {
   width: var(--rail-w);
+  flex: none;
   height: 100%;
   display: flex;
   flex-direction: column;
@@ -128,6 +140,7 @@ function go(name: ViewName): void {
   font-size: 17px;
   letter-spacing: -0.01em;
 }
+.rail-toggle { margin-left: auto; padding: 5px; display: grid; place-items: center; }
 ul {
   list-style: none;
   margin: 0;
@@ -266,27 +279,29 @@ ul {
   flex: none;
 }
 
-@media (max-width: 720px) {
-  .rail {
+  .rail.collapsed {
     width: 60px;
     padding: 0 8px 12px;
   }
-  .brand {
+  .collapsed .brand {
     justify-content: center;
     padding: 0;
+    flex-direction: column;
+    height: 88px;
+    gap: 8px;
   }
-  .wordmark,
-  .label,
-  .count,
-  .projects-head .label {
+  .collapsed .rail-toggle { margin-left: 0; }
+  .collapsed .wordmark,
+  .collapsed .label,
+  .collapsed .count {
     display: none;
   }
-  .item {
+  .collapsed .item {
     justify-content: center;
     padding: 9px 0;
     position: relative;
   }
-  .badge {
+  .collapsed .badge {
     position: absolute;
     top: 1px;
     right: 1px;
@@ -294,24 +309,23 @@ ul {
     padding: 0 4px;
     font-size: 10px;
   }
-  .projects-head {
+  .collapsed .projects-head {
     justify-content: center;
     padding: 0;
   }
-  .attn {
+  .collapsed .attn {
     position: absolute;
     top: 6px;
     right: 8px;
   }
-  .swatch {
+  .collapsed .swatch {
     width: 12px;
     height: 12px;
   }
-  .empty {
+  .collapsed .empty {
     display: none;
   }
-  .new {
+  .collapsed .new {
     padding: 9px 0;
   }
-}
 </style>

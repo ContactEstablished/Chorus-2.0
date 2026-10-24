@@ -8,6 +8,12 @@ import * as __TAURI_EVENT from "@tauri-apps/api/event";
 /** Commands */
 export const commands = {
 	appInfo: () => __TAURI_INVOKE<AppInfo>("app_info"),
+	narratorSettings: () => typedError<NarratorSettings, string>(__TAURI_INVOKE("narrator_settings")),
+	narratorConfigure: (config: NarratorConfig) => typedError<null, string>(__TAURI_INVOKE("narrator_configure", { config })),
+	narratorProjectSet: (projectId: number, enabled: boolean) => typedError<null, string>(__TAURI_INVOKE("narrator_project_set", { projectId, enabled })),
+	sessionNarrator: (id: number) => typedError<NarratorView, string>(__TAURI_INVOKE("session_narrator", { id })),
+	narratorSummarize: (id: number, turnId: number) => typedError<null, string>(__TAURI_INVOKE("narrator_summarize", { id, turnId })),
+	narratorActionSet: (id: number, actionId: number, disposition: string) => typedError<null, string>(__TAURI_INVOKE("narrator_action_set", { id, actionId, disposition })),
 	prefsGet: () => __TAURI_INVOKE<Prefs>("prefs_get"),
 	/**  Stores the preferences, with anything out of range brought back in, and applies the zoom. */
 	prefsSet: (prefs: Prefs) => typedError<Prefs, string>(__TAURI_INVOKE("prefs_set", { prefs })),
@@ -51,6 +57,8 @@ export const commands = {
 	/**  Which provider's key keeps refreshed models' speeds fresh every 30 minutes; `None` stops it. */
 	routingWatch: (providerId: number | null) => typedError<null, string>(__TAURI_INVOKE("routing_watch", { providerId })),
 	sessionsList: () => typedError<SessionSummary[], string>(__TAURI_INVOKE("sessions_list")),
+	/**  Open only this session's recorded working directory; the frontend cannot supply an arbitrary path. */
+	sessionOpenFolder: (sessionId: number) => typedError<null, string>(__TAURI_INVOKE("session_open_folder", { sessionId })),
 	sessionCreate: (request: CreateSession) => typedError<SessionSummary, string>(__TAURI_INVOKE("session_create", { request })),
 	/**  Starts the sessions a preset makes (one for Solo, two for Pair and Workbench). */
 	sessionsLaunch: (request: LaunchRequest) => typedError<LaunchOutcome[], string>(__TAURI_INVOKE("sessions_launch", { request })),
@@ -131,6 +139,14 @@ export const commands = {
 	sessionActionCapabilities: (sessionId: number) => typedError<SessionCapabilities, string>(__TAURI_INVOKE("session_action_capabilities", { sessionId })),
 	sessionAction: (sessionId: number, request: ActionRequest) => typedError<ActionResult, string>(__TAURI_INVOKE("session_action", { sessionId, request })),
 	sessionPendingReplies: (sessionId: number) => typedError<PendingReply[], string>(__TAURI_INVOKE("session_pending_replies", { sessionId })),
+	sessionComposer: (sessionId: number) => typedError<ComposerState, string>(__TAURI_INVOKE("session_composer", { sessionId })),
+	sessionDraftSave: (sessionId: number, revision: number, text: string) => typedError<Draft, string>(__TAURI_INVOKE("session_draft_save", { sessionId, revision, text })),
+	sessionComposerSubmit: (sessionId: number, request: ComposerSubmit) => typedError<ComposerState, string>(__TAURI_INVOKE("session_composer_submit", { sessionId, request })),
+	sessionQueueChange: (sessionId: number, itemId: number, resumeRunId: number | null) => typedError<ComposerState, string>(__TAURI_INVOKE("session_queue_change", { sessionId, itemId, resumeRunId })),
+	sessionQueueSend: (sessionId: number, itemId: number, runId: number, inputEpoch: number, confirmReady: boolean) => typedError<ComposerState, string>(__TAURI_INVOKE("session_queue_send", { sessionId, itemId, runId, inputEpoch, confirmReady })),
+	sessionImageAdd: (sessionId: number, revision: number, name: string, png: number[]) => typedError<Draft, string>(__TAURI_INVOKE("session_image_add", { sessionId, revision, name, png })),
+	sessionImageRemove: (sessionId: number, revision: number, imageId: number) => typedError<Draft, string>(__TAURI_INVOKE("session_image_remove", { sessionId, revision, imageId })),
+	sessionImageRead: (sessionId: number, imageId: number) => typedError<number[], string>(__TAURI_INVOKE("session_image_read", { sessionId, imageId })),
 };
 
 /** Events */
@@ -152,7 +168,7 @@ export type ActionCapabilities = {
 	queue: ActionCapability,
 };
 
-export type ActionCapability = { channel: "pty" } | { channel: "held-hook" } | { channel: "unavailable"; reason: string };
+export type ActionCapability = { channel: "pty" } | { channel: "held-hook" } | { channel: "server" } | { channel: "transcript" } | { channel: "unavailable"; reason: string };
 
 export type ActionRequest = {
 	runId: number,
@@ -366,6 +382,34 @@ export type CloseReport = {
 	worktreeNote: string | null,
 };
 
+export type ComposerImage = {
+	id: number,
+	name: string,
+	bytes: number,
+};
+
+export type ComposerState = {
+	draft: Draft,
+	items: QueuedPrompt[],
+	runId: number | null,
+	inputEpoch: number,
+	sendReason: string | null,
+	nextSendReason: string | null,
+	queueReason: string | null,
+	canConfirmReady: boolean,
+	dispatchReason: string | null,
+	imageReason: string | null,
+};
+
+export type ComposerSubmit = {
+	runId: number,
+	inputEpoch: number,
+	requestId: string,
+	draftRevision: number,
+	queue: boolean,
+	confirmReady: boolean,
+};
+
 export type CreateSession = {
 	agent: AgentKind,
 	cwd: string,
@@ -431,6 +475,12 @@ export type Diff = {
 	additions: number,
 	deletions: number,
 	binary: number,
+};
+
+export type Draft = {
+	text: string,
+	revision: number,
+	images: ComposerImage[],
 };
 
 /**  One effort scale for every agent. */
@@ -540,6 +590,69 @@ export type LeakReport = {
 	filesScanned: number,
 };
 
+export type Narration = {
+	now: string,
+	blocker: string,
+	next: string,
+	is_question: boolean,
+	has_next_step?: boolean,
+	actions: Suggestion[],
+};
+
+export type NarratorAction = {
+	id: number,
+	turnId: number | null,
+	suggestion: Suggestion,
+	disposition: string,
+	restored: boolean,
+};
+
+export type NarratorConfig = {
+	providerId: number | null,
+	model: string,
+};
+
+export type NarratorCosts = {
+	reportedUsd: number | null,
+	calls: number,
+	unknownCostCalls: number,
+};
+
+export type NarratorJob = {
+	turnId: number,
+	status: string,
+	note: string | null,
+	model: string | null,
+	summary: Narration | null,
+	costUsd: number | null,
+	promptTokens: number | null,
+	completionTokens: number | null,
+	finishedAtSecs: number | null,
+};
+
+export type NarratorProject = {
+	id: number,
+	name: string,
+	enabled: boolean,
+};
+
+export type NarratorSettings = {
+	config: NarratorConfig,
+	reason: string | null,
+	costs: NarratorCosts,
+	projects: NarratorProject[],
+};
+
+export type NarratorView = {
+	enabled: boolean,
+	reason: string | null,
+	job: NarratorJob | null,
+	actions: NarratorAction[],
+	costs: NarratorCosts,
+	latestTurn: number | null,
+	canSummarize: boolean,
+};
+
 /**  The endpoint Nitro would most likely use: a labelled preview, not a choice. */
 export type NitroLikely = {
 	tag: string,
@@ -620,6 +733,7 @@ export type PendingReply = {
 	askId: number,
 	runId: number,
 	details: ReplyDetails,
+	denialReasonSupported: boolean,
 	remainingSecs: number,
 	blockedReason: string | null,
 };
@@ -640,6 +754,12 @@ export type Permission =
 export type PermissionChoice = {
 	permission: Permission,
 	args: string,
+};
+
+export type PlanStep = {
+	id: string,
+	text: string,
+	status: string,
 };
 
 export type Prefs = {
@@ -709,6 +829,13 @@ export type ProfileSummary = {
 	providerName: string | null,
 	credential: CredentialUse | null,
 	updatedAtSecs: number,
+};
+
+export type Progress = { kind: "message"; text: string } | { kind: "plan"; steps: PlanStep[] } | { kind: "proposed-plan"; text: string };
+
+export type ProgressEntry = {
+	id: number,
+	content: Progress,
 };
 
 export type Project = {
@@ -798,6 +925,17 @@ export type Question = {
 export type QuestionOption = {
 	label: string,
 	description: string,
+};
+
+export type QueuedPrompt = {
+	id: number,
+	runId: number,
+	requestId: string,
+	text: string,
+	status: string,
+	reason: string | null,
+	promptId: number | null,
+	images: ComposerImage[],
 };
 
 /**  The three tiers the ranker orders. Nitro is never ranked: OpenRouter chooses. */
@@ -1013,6 +1151,14 @@ export type Snapshot = {
 	diffNote: string | null,
 };
 
+export type Suggestion = {
+	kind: string,
+	title: string,
+	what: string,
+	sends: string,
+	eta: string,
+};
+
 export type TagUse = {
 	tag: string,
 	/**  How many sessions have it, closed ones included. */
@@ -1179,6 +1325,7 @@ export type TurnEntry = {
 	finalMessage: string | null,
 	tools: ToolEntry[],
 	asks: AskEntry[],
+	progress: ProgressEntry[],
 };
 
 /**  How a found version relates to the one Chorus checked. */

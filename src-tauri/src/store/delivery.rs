@@ -43,6 +43,11 @@ pub fn existing(store: &Store, session: u32, request: &str, text: &str, source: 
 }
 
 pub fn begin(store: &Store, session: u32, run: u32, request: &str, text: &str, source: PromptSource, at: i64) -> Result<Delivered, String> {
+    begin_with_queue(store, session, run, request, text, source, at, None)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn begin_with_queue(store: &Store, session: u32, run: u32, request: &str, text: &str, source: PromptSource, at: i64, queued: Option<u32>) -> Result<Delivered, String> {
     store.with(|c| {
         let tx = c.unchecked_transaction()?;
         tx.execute("INSERT INTO prompts (session_id,run_id,source,text,created_at) VALUES (?1,?2,?3,?4,?5)",
@@ -50,6 +55,10 @@ pub fn begin(store: &Store, session: u32, run: u32, request: &str, text: &str, s
         let prompt_id: u32 = tx.query_row("SELECT last_insert_rowid()", [], |r| r.get(0))?;
         tx.execute("INSERT INTO prompt_deliveries (prompt_id,session_id,run_id,request_id,status,attempted_at) VALUES (?1,?2,?3,?4,'uncertain',?5)",
             params![prompt_id, session, run, request, at])?;
+        if let Some(id) = queued {
+            let n = tx.execute("UPDATE prompt_queue SET status='attempted',prompt_id=?4,reason=NULL WHERE id=?1 AND session_id=?2 AND run_id=?3 AND status='queued'", params![id,session,run,prompt_id])?;
+            if n != 1 { return Err(rusqlite::Error::InvalidQuery); }
+        }
         tx.commit()?;
         Ok(Delivered { prompt_id, run_id: run, status: DeliveryStatus::Uncertain })
     })

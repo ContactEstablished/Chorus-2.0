@@ -2,6 +2,9 @@
 // never edit it by hand). Import IPC from here, not from bindings.ts directly.
 export { commands, events } from './bindings'
 export type {
+  NarratorView,
+  NarratorSettings,
+  NarratorAction,
   Activity,
   AgentInfo,
   AgentKind,
@@ -17,6 +20,8 @@ export type {
   CloseCheck,
   CloseReport,
   CreateSession,
+  ComposerState,
+  ComposerSubmit,
   CredentialSummary,
   CredentialUse,
   Detection,
@@ -84,3 +89,5 @@ export async function unwrap<T>(pending: Promise<Result<T>>): Promise<T> {
   if (res.status === 'error') throw new Error(res.error)
   return res.data
 }
+
+export type { ComposerImage, Draft } from './bindings'

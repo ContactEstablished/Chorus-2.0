@@ -29,12 +29,17 @@ pub fn open_turn(store: &Store, session_id: u32, run_id: Option<u32>, agent_turn
 
 pub fn close_turn(store: &Store, turn_id: i64, end: &str, final_message: Option<&str>) -> Result<(), String> {
     store.with(|c| {
-        c.execute(
+        let tx = c.unchecked_transaction()?;
+        let changed = tx.execute(
             "UPDATE turns SET ended_at = ?2, end_reason = ?3, final_message = COALESCE(?4, final_message)
              WHERE id = ?1 AND ended_at IS NULL",
             params![turn_id, now_ms(), end, final_message],
         )
-        .map(|_| ())
+        ?;
+        if changed > 0 && matches!(end, "done" | "failed") {
+            tx.execute("INSERT OR IGNORE INTO narrator_jobs(turn_id,session_id,created_at) SELECT id,session_id,?2 FROM turns WHERE id=?1",params![turn_id,now_ms()])?;
+        }
+        tx.commit()
     })
 }
 
@@ -132,6 +137,23 @@ pub struct TurnEntry {
     pub final_message: Option<String>,
     pub tools: Vec<ToolEntry>,
     pub asks: Vec<AskEntry>,
+    pub progress: Vec<ProgressEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Type)]
+pub struct ProgressEntry { pub id: u32, pub content: chorus_core::progress::Progress }
+
+pub fn progress(store: &Store, turn: i64, key: &str, content: &chorus_core::progress::Progress, at: i64) -> Result<(), String> {
+    let body = serde_json::to_string(content).map_err(|e| e.to_string())?;
+    store.with(|c| c.execute(
+        "INSERT INTO turn_progress(turn_id,source_key,body,at) SELECT ?1,?2,?3,?4 WHERE (SELECT count(*) FROM turn_progress WHERE turn_id=?1)<500 OR EXISTS(SELECT 1 FROM turn_progress WHERE turn_id=?1 AND source_key=?2)
+         ON CONFLICT(turn_id,source_key) DO UPDATE SET body=excluded.body",
+        params![turn,key,body,at]).map(|_| ()))
+}
+
+/// Polling may arrive after Stop; attach by timestamp within this run, never a resumed older run.
+pub fn progress_turn(store: &Store, run: u32, at: i64) -> Result<Option<i64>, String> {
+    store.with(|c| c.query_row("SELECT id FROM turns WHERE run_id=?1 AND started_at<=?2 ORDER BY started_at DESC,id DESC LIMIT 1", params![run,at], |r| r.get(0)).optional())
 }
 
 #[derive(Debug, Clone, Serialize, Type)]
@@ -179,6 +201,7 @@ pub fn recent_turns(store: &Store, session_id: u32, limit: u32) -> Result<Vec<Tu
                     final_message: r.get(6)?,
                     tools: Vec::new(),
                     asks: Vec::new(),
+                    progress: Vec::new(),
                 })
             })?
             .collect::<rusqlite::Result<_>>()?;
@@ -186,6 +209,10 @@ pub fn recent_turns(store: &Store, session_id: u32, limit: u32) -> Result<Vec<Tu
         let mut tools = c.prepare("SELECT tool, target, failed, ended_at IS NOT NULL FROM tool_calls WHERE turn_id = ?1 ORDER BY id")?;
         let mut asks = c.prepare("SELECT id, kind, subject, answer, details, (SELECT action FROM reply_attempts r WHERE r.ask_id = asks.id) FROM asks WHERE turn_id = ?1 ORDER BY id")?;
         for t in &mut turns {
+            t.progress = c.prepare("SELECT id,body FROM turn_progress WHERE turn_id=?1 ORDER BY at,id")?
+                .query_map([t.id], |r| Ok((r.get::<_,u32>(0)?, r.get::<_,String>(1)?)))?
+                .filter_map(|r| match r { Ok((id,body)) => serde_json::from_str(&body).ok().map(|content| Ok(ProgressEntry { id,content })), Err(e) => Some(Err(e)) })
+                .collect::<rusqlite::Result<_>>()?;
             t.tools = tools
                 .query_map([t.id], |r| Ok(ToolEntry { tool: r.get(0)?, target: r.get(1)?, failed: r.get(2)?, finished: r.get(3)? }))?
                 .collect::<rusqlite::Result<_>>()?;

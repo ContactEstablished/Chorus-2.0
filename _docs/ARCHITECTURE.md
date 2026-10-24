@@ -117,12 +117,41 @@ P6's first slice adds `sessions::actions::ActionRouter` and the shared `sessions
 The prompt and an uncertain receipt commit atomically before any PTY write; a completed write is
 not agent acknowledgement. A matching same-run hook echo within 60 seconds links the existing prompt
 and marks the receipt observed. Repeated requests never write again. No automatic retry after an
-uncertain write, crash or restart. Busy/unknown state and pending asks refuse; the queue is still
-pending. Claude question/approval replies now use held HTTP hooks (D76); other agents refuse with
-a Raw fallback. A live hook waits at most 120 seconds, and `Answer in Raw` releases it without a
+uncertain write, crash or restart. Pending asks refuse direct delivery. D78 adds the Friendly composer and queue, described below. Claude question/approval replies use held HTTP hooks (D76); measured Codex 0.163.0 runs use
+the shared app-server channel (D81). Other adapters keep explicit Raw fallbacks. A live hook waits at most 120 seconds, and `Answer in Raw` releases it without a
 decision. Scrubbed reply attempts commit before the response; the receipt does not assert which
 answer won the race with Raw. Run/ask identity, lock and expiry are checked again at dispatch.
 No reply is automatically replayed after a timeout, restart or crash.
+
+
+The Friendly composer persists scrubbed drafts with revision checks in `composer_drafts` and
+instructions in `prompt_queue` (migration 0015). Submission clears the reviewed draft and inserts
+its instruction in one transaction. A backend worker dispatches one FIFO item at a time only at
+structured Ready, without pending asks, Raw edits or unobserved deliveries. The queue claim,
+prompt and uncertain delivery receipt share one transaction before the shared PTY writer runs.
+Send/dispatch, cancellation, Raw input, Lock, Close and Restart share the session action lock.
+Clicking Send or Send next now supplies the manual readiness override (D80), scoped to the run
+and Raw input revision; it cannot override Working, an ask or an unobserved delivery. There is no
+separate readiness checkbox. This does not detect, clear or import an existing Raw draft.
+Drafts survive view changes and restarts. Unsent queue items are held after a run change or app
+restart until explicitly reviewed; written/uncertain attempts are never replayed. A held head
+item blocks later items. The worker runs without an attached view. Queue support is enabled only
+for Claude and Codex. D81 adds the separate Codex app-server control channel below.
+
+Friendly image attachments (D79, migration 0016) keep normalized PNG bytes in `composer_images`.
+The browser decodes PNG/JPEG/WebP inputs and re-encodes pixels without source metadata; Rust checks
+the PNG envelope and size/dimension limits. Draft additions/removals share its revision check.
+Enqueue transfers all draft images to the queued item in the same transaction that clears the draft.
+Managed image files are recreated from those bytes before delivery; explicit local-file references
+are included in the persisted prompt. Claude/Codex read the images using their existing tools and
+permissions. Previews use session-scoped IPC reads, never arbitrary filesystem paths or broad asset
+protocol access. Cancelled and attempted items retain their images for review.
+
+Progress (D81, migration 0017) is stored in `turn_progress`, keyed by turn and source identity.
+The core parses displayable assistant text and real task-tool plans; the backend tails Claude's
+main transcript and records successful task hooks. Codex message deltas are bounded and persisted
+at most four times per second per message, with a completed-item flush. The UI shows the latest
+actual checklist and never infers one from prose or exposes reasoning blocks.
 
 ## 5. Agent channels
 
@@ -149,6 +178,18 @@ to `session.execution.succeeded`, questions are forms (`form.created`), and appr
 `permission.asked`, answered with `{decision}`. A model or effort picked in the TUI stays on the session,
 so a resumed run sets the session's own again (D60). A prompt typed during a turn joins the running
 execution, and opencode can't replay events a dropped stream missed (L42).*
+
+**Codex 0.163.0 follow-up (D81):** the older S5 column above describes native embedded mode.
+Measured runs now own a private authenticated loopback WebSocket app-server and a remote TUI in
+one Job Object. A random environment-only capability token authenticates both clients; the server
+receives only its SHA-256 verifier in argv. WinHTTP comes from the existing Windows crate. The TUI
+creates the actual conversation; the controller attaches after its first user prompt materializes
+history, with no synthetic model turn. Options are applied on the server, and hooks are disabled
+for this path to avoid duplicate events. Typed questions and command/file approvals share the
+existing durable reply boundary. Unsupported/secret requests stay in Raw; disconnection does not
+replay replies. Real app tests cover questions, approvals, queued follow-up, denial, and resume.
+Current-model checklist emission was not observed; `turn/plan/updated` is supported conditionally.
+Other CLI versions retain the native hook path and show its actual capability limits.
 
 **Fallbacks are explicit.** If a CLI update breaks a parser, the adapter reports "Friendly view
 unavailable for codex 0.170: unrecognised rollout format" in the session header, and Raw keeps working.
@@ -215,11 +256,32 @@ Rule: anything written to `prompts`, `messages`, `tool_calls` or `asks` passes t
 
 At each turn end, a small model reads the last prompt, the final message, the plan, tool-call summaries and
 the diff stat (all scrubbed), and returns JSON: `now`, `blocker`, `next`, `is_question`, and up to four
-`actions` (`kind`, `title`, `what`, `sends`, `eta`). One call per turn end, cost recorded against the
+`actions` (`kind`, `title`, `what`, `sends`, `eta`), and `has_next_step`. A false `has_next_step` clears
+contradictory actions and gives a no-further-action summary. One call per turn end, cost recorded against the
 session. The model is a cheap OpenRouter model chosen in Settings; the narrator is on by default and can
 be switched off per project (D28). Done or dismissed actions are fed back in, so they are not suggested
 again. With no narrator configured, Friendly shows a generic Continue and Review step, and a note saying
 why.
+
+Implemented in D82 (migration 0018): closing a completed/failed turn and queueing its narration
+share a transaction. A backend worker prepares bounded excerpts, redacts before clipping, and
+commits an attempt before its fixed OpenRouter HTTPS call. Attempts are unique by turn; timeout,
+invalid output and restart never replay them. Configuration/project state is rechecked after
+preparation. Unsupported HTTP/model responses and missing/deleted keys stay visible. No historical
+backfill runs on configuration changes; an unattempted latest turn can be summarized explicitly.
+
+Friendly keeps live agent status and request cards authoritative. AI summaries carry their turn
+identity; an older summary cannot supply the new turn's Blocker/Up next. Suggested actions append
+to the saved composer draft without submitting or removing images. Done/Dismiss are session-scoped,
+persisted, supplied as model feedback and suppressed by normalized prompt or title identity;
+unrecognized paraphrases remain a model-quality limitation. Restore explicitly makes an action
+available again. When unconfigured/off, generic Continue/Review remain available.
+
+Settings → Narrator selects an existing OpenRouter provider/API credential and a model, exposes
+catalog prices and per-project switches (default on when configured). Reported `usage.cost` and
+token counts persist even if summary validation fails; absent/uncertain costs are counted separately,
+never treated as zero. These totals are narrator-only and separate from agent costs. No additional
+dependency was introduced.
 
 ## 10. Dependencies (approved 2026-10-18, D30)
 

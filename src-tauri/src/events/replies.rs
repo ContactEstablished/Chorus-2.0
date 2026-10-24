@@ -25,6 +25,7 @@ pub struct PendingReply {
     pub ask_id: u32,
     pub run_id: u32,
     pub details: ReplyDetails,
+    pub denial_reason_supported: bool,
     pub remaining_secs: u32,
     pub blocked_reason: Option<String>,
 }

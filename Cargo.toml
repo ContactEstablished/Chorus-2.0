@@ -24,6 +24,7 @@ portable-pty = "0.9"
 rusqlite = { version = "0.40", features = ["bundled"] }
 tauri-plugin-single-instance = "2"
 tauri-plugin-dialog = "2.8"
+tauri-plugin-opener = "2"
 # opencode's loopback server, OpenRouter, gateways and Jev (ARCHITECTURE §10). TLS is Windows'
 # own (SChannel, through native-tls), so nothing is compiled from C.
 reqwest = { version = "0.13", default-features = false, features = ["json", "native-tls"] }
@@ -32,6 +33,7 @@ axum = { version = "0.8", default-features = false, features = ["tokio", "http1"
 tokio = { version = "1", features = ["net"] }
 windows = { version = "0.62", features = [
   "Win32_Foundation",
+  "Win32_Networking_WinHttp",
   "Win32_Security",
   "Win32_Security_Cryptography",
   "Win32_Storage_FileSystem",

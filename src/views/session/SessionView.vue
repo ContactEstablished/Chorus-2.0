@@ -6,6 +6,8 @@
  */
 import { computed, ref, watch } from 'vue'
 import Icon from '../../components/Icon.vue'
+import codexLogo from '../../assets/agents/codex.png'
+import { compactPath } from '../../shell/compactPath'
 import SessionTerminal from '../../raw/SessionTerminal.vue'
 import SessionStrip from './SessionStrip.vue'
 import SessionFacts from './SessionFacts.vue'
@@ -18,6 +20,7 @@ import { useSessionsStore } from '../../stores/sessions'
 import { useProjectsStore } from '../../stores/projects'
 import { useKeysStore } from '../../stores/keys'
 import { useViewStore } from '../../stores/view'
+import { useLayoutStore } from '../../stores/layout'
 import { useAppStore } from '../../stores/app'
 import { useNoticesStore } from '../../stores/notices'
 import { AGENT_LABELS } from '../../raw/labels'
@@ -30,11 +33,23 @@ const sessions = useSessionsStore()
 const projects = useProjectsStore()
 const keys = useKeysStore()
 const view = useViewStore()
+const layout = useLayoutStore()
 const app = useAppStore()
 const notices = useNoticesStore()
 
 const s = computed<SessionSummary | null>(() => sessions.byId[props.sessionId] ?? null)
 const project = computed(() => (s.value?.projectId == null ? null : (projects.byId.get(s.value.projectId) ?? null)))
+const openingFolder = ref(false)
+async function openFolder(): Promise<void> {
+  if (!s.value || openingFolder.value) return
+  openingFolder.value = true
+  try {
+    const result = await commands.sessionOpenFolder(s.value.id)
+    if (result.status === 'error') notices.error('Could not open the session folder.', result.error)
+  } catch (e) {
+    notices.error('Could not open the session folder. Restart Chorus if its backend has not been updated yet.', e)
+  } finally { openingFolder.value = false }
+}
 
 // A session that closes (here or elsewhere) leaves its view.
 watch(s, (now) => {
@@ -166,7 +181,10 @@ async function send(bytes: string): Promise<void> {
 
     <header class="head">
       <button class="back" title="Back" aria-label="Back" @click="view.goBack()"><Icon name="back" :size="16" /></button>
-      <span class="agent-chip big" :class="`agent-${s.agent}`">{{ AGENT_CHIPS[s.agent] }}</span>
+      <span class="agent-chip big" :class="`agent-${s.agent}`" :title="AGENT_LABELS[s.agent]">
+        <img v-if="s.agent === 'codex'" :src="codexLogo" alt="Codex" />
+        <template v-else>{{ AGENT_CHIPS[s.agent] }}</template>
+      </span>
       <div class="titles">
         <form v-if="nameDraft !== null" class="rename" @submit.prevent="saveName">
           <input v-model="nameDraft" maxlength="80" aria-label="Session name" autocomplete="off" @keyup.esc="nameDraft = null" />
@@ -175,10 +193,10 @@ async function send(bytes: string): Promise<void> {
         </form>
         <h1 v-else class="name" title="Click to rename" @click="nameDraft = s.name">{{ s.name }}</h1>
         <p class="where">
+          <button class="folder-link quiet" :disabled="openingFolder" :title="`Open folder in File Explorer: ${s.cwd}`" aria-label="Open session folder in File Explorer" @click="openFolder"><Icon name="folder" :size="15" /></button>
           <span v-if="project" class="project-tag" :style="{ '--tag': project.colour }">{{ project.name }}</span>
-          <code :title="s.cwd">{{ shortPath(s.cwd, app.info?.homeDir ?? null) }}</code>
-          <span class="sep">·</span>
-          <span class="mono">{{ AGENT_LABELS[s.agent] }}<template v-if="s.providerName"> · {{ s.providerName }}</template><template v-if="s.options.model"> / {{ s.options.model }}</template></span>
+          <code :title="s.cwd">{{ compactPath(shortPath(s.cwd, app.info?.homeDir ?? null)) }}</code>
+          <span v-if="s.providerName || s.options.model" class="mono">{{ s.providerName }}<template v-if="s.providerName && s.options.model"> / </template>{{ s.options.model }}</span>
         </p>
       </div>
       <span class="pill" :class="`st-${s.attention}`">
@@ -188,6 +206,15 @@ async function send(bytes: string): Promise<void> {
         <button role="radio" :aria-checked="mode === 'friendly'" :class="{ on: mode === 'friendly' }" @click="mode = 'friendly'">Friendly</button>
         <button role="radio" :aria-checked="mode === 'raw'" :class="{ on: mode === 'raw' }" @click="mode = 'raw'">Raw</button>
       </div>
+      <button
+        class="details-toggle quiet"
+        :class="{ on: layout.detailsOpen }"
+        :title="layout.detailsOpen ? 'Hide session details' : 'Show session details'"
+        :aria-label="layout.detailsOpen ? 'Hide session details' : 'Show session details'"
+        :aria-expanded="layout.detailsOpen"
+        aria-controls="session-details"
+        @click="layout.detailsOpen = !layout.detailsOpen"
+      ><Icon name="panelRight" :size="18" /></button>
     </header>
 
     <div class="controls">
@@ -222,7 +249,7 @@ async function send(bytes: string): Promise<void> {
       <button class="quiet" @click="confirmingClose = false">Keep</button>
     </div>
 
-    <div class="body">
+    <div class="body" :class="{ 'details-hidden': !layout.detailsOpen }">
       <FriendlyTimeline v-if="mode === 'friendly'" :session="s" @raw="mode = 'raw'" />
       <div v-else class="raw">
         <div class="rawbar">
@@ -253,7 +280,7 @@ async function send(bytes: string): Promise<void> {
         </p>
       </div>
 
-      <aside class="panel scroll">
+      <aside v-show="layout.detailsOpen" id="session-details" class="panel scroll" aria-label="Session details">
         <ActionChannels :session-id="s.id" :live="s.live" />
         <div v-if="readiness" class="ready" :class="`st-${s.attention}`">
           <p class="rt"><span class="dot" />{{ readiness.title }}</p>
@@ -294,11 +321,15 @@ async function send(bytes: string): Promise<void> {
   flex: none;
 }
 .agent-chip.big {
-  height: 28px;
-  min-width: 34px;
+  height: 32px;
+  width: 32px;
+  min-width: 32px;
   border-radius: 8px;
   font-size: 12px;
 }
+.agent-chip.big img { width: 24px; height: 24px; object-fit: contain; }
+.folder-link { display: grid; place-items: center; flex: none; width: 20px; height: 20px; padding: 0; color: var(--text-muted); }
+.folder-link:hover { color: var(--accent); }
 .titles {
   flex: 1;
   min-width: 0;
@@ -324,7 +355,7 @@ async function send(bytes: string): Promise<void> {
   margin: 4px 0 0;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 6px;
   font-size: 12.5px;
   color: var(--text-muted);
   min-width: 0;
@@ -337,9 +368,6 @@ async function send(bytes: string): Promise<void> {
   overflow: hidden;
   text-overflow: ellipsis;
   min-width: 0;
-}
-.sep {
-  color: var(--border-strong);
 }
 .pill {
   display: inline-flex;
@@ -376,8 +404,9 @@ async function send(bytes: string): Promise<void> {
   font-size: 13px;
 }
 .modes button.on {
-  background: var(--surface-chip);
-  color: var(--text);
+  background: var(--accent-soft);
+  color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent-line);
 }
 .controls {
   display: flex;
@@ -453,6 +482,9 @@ async function send(bytes: string): Promise<void> {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 320px;
 }
+.body.details-hidden { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
+.details-toggle { display: grid; place-items: center; flex: none; width: 32px; height: 32px; padding: 0; }
+.details-toggle.on { color: var(--accent); background: var(--accent-soft); }
 .raw {
   display: flex;
   flex-direction: column;
@@ -564,7 +596,7 @@ async function send(bytes: string): Promise<void> {
   .panel {
     border-left: 0;
     border-top: 1px solid var(--border);
-    max-height: 40%;
+    max-height: 220px;
   }
   .where .mono,
   .where .sep {

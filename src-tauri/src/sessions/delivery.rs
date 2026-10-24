@@ -23,6 +23,12 @@ pub fn deliver_prompt(manager: &SessionManager, session_id: u32, run_id: u32, re
         return Ok(receipt);
     }
     if run.id != run_id { return Err("The session restarted. Review the current run before sending.".into()); }
+    if run.codex_bridge.as_ref().is_some_and(|b| !b.connected.load(std::sync::atomic::Ordering::SeqCst) || !b.ready.load(std::sync::atomic::Ordering::SeqCst)) {
+        return Err("Codex Friendly control is not ready. Check Raw before sending.".into());
+    }
+    if crate::store::composer::oldest(&manager.store, session_id)?.is_some() {
+        return Err("An earlier instruction is waiting in Friendly. Review its queue first.".into());
+    }
     if let ActionCapability::Unavailable { reason } = capabilities(row.agent).prompt { return Err(reason); }
     let is_live = run.exit.lock().expect("exit lock").is_none()
         && run.requested.lock().expect("requested lock").is_none()
@@ -30,21 +36,34 @@ pub fn deliver_prompt(manager: &SessionManager, session_id: u32, run_id: u32, re
     if let Some(reason) = prompt_blocker(false, is_live, recorder.activity(), recorder.pending_question(), delivery::unobserved(&manager.store, run_id)?) {
         return Err(reason.into());
     }
-    let mut receipt = delivery::begin(&manager.store, session_id, run_id, request_id, &scrubbed, source, crate::store::now_ms())?;
+    if recorder.raw_dirty { return Err("Raw input may contain a draft. Review it in the Friendly composer before sending.".into()); }
+    let receipt = delivery::begin(&manager.store, session_id, run_id, request_id, &scrubbed, source, crate::store::now_ms())?;
+    let receipt = write_attempt(manager, &run, &text, receipt);
+    drop(recorder);
+    drop(_action);
+    manager.notify_id(session_id);
+    Ok(receipt)
+}
+
+/// Caller holds the session action and recorder locks, and has committed the attempt.
+pub(super) fn write_attempt(manager: &SessionManager, run: &super::Run, text: &str, mut receipt: Delivered) -> Delivered {
     // Keep the writer across both writes so Raw keystrokes cannot interleave the text and Enter.
     // Keep the recorder too: an immediate hook can't race persistence or matching registration.
     let result = {
         use std::io::Write;
         let mut writer = run.writer.lock().expect("writer lock");
-        writer.write_all(prompt_write(&text).as_bytes()).and_then(|()| writer.flush())
-            .and_then(|()| writer.write_all(b"\r")).and_then(|()| writer.flush())
+        writer.write_all(prompt_write(text).as_bytes()).and_then(|()| writer.flush())
+            .and_then(|()| {
+                // Separate OS writes can still reach a TUI in the same input batch. Let its
+                // paste handler settle before Enter. Image-reference prompts on Codex 0.163.0
+                // needed more than the original 150 ms (live P6 attachment check).
+                std::thread::sleep(std::time::Duration::from_millis(750));
+                writer.write_all(b"\r")
+            }).and_then(|()| writer.flush())
     };
     if result.is_ok() && delivery::written(&manager.store, receipt.prompt_id).is_ok() {
         receipt.status = DeliveryStatus::Written;
     }
     // Failure may be after a partial write. Return the durable uncertain receipt, never retry.
-    drop(recorder);
-    drop(_action);
-    manager.notify_id(session_id);
-    Ok(receipt)
+    receipt
 }

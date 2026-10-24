@@ -426,3 +426,54 @@ Each was found only by counting. 2.0 counts first (P3's completeness bar) and bu
 
 **L20 — Runtime-verify claims, including your own.** Implementer summaries in Chorus 1 sometimes came from
 another environment. A phase is done when the real app is seen doing the thing.
+
+
+**L55 — Separate PTY writes can still be one TUI input batch.** In the Friendly composer runtime
+check on Claude Code 2.1.308, prompt text followed immediately by a separate Enter write filled
+the prompt without submitting it. A 150 ms gap after flushing the text let the paste handler
+settle; a multiline Friendly prompt and subsequent queued prompts then produced hook-confirmed
+turns. Keep both the writer and action lock across the gap. Never retry an unobserved delivery
+automatically: its text may already be in the terminal. Codex 0.163.0 also accepted this path.
+
+**L56 — Raw focus reports are not draft edits.** xterm sends focus notifications when switching
+views, and cursor/device replies during terminal setup. Counting those as typing needlessly
+paused the composer queue. Ignore only recognised complete protocol replies; printable text,
+control keys and mixed packets still invalidate the reviewed Raw prompt. Readiness confirmation
+in Vue must watch individual values: a getter returning a fresh array resets the checkbox on
+every poll even when those values have not changed.
+
+**L57 — Longer image-reference prompts need paste settling and exact wrapper matching.**
+Codex 0.163.0 left the longer test prompt unsent with L55's 150 ms gap; 750 ms produced an
+observed submission without a second Enter. Claude 2.1.308 wraps longer bracketed pastes in
+`<pasted_content id="…">` in UserPromptSubmit. Accept only a whole matching-id envelope whose
+contents equal the persisted prompt exactly, within the existing same-run/time bounds. Do not
+use substring or fuzzy matching. An uncertain delivery still never retries itself.
+
+**L58 — PreToolUse does not prove permission was granted.** Two image reads in Claude manual
+mode exposed the recorder treating a second Read's PreToolUse as approval of the first pending
+Read (PermissionRequest can omit its call id). That removed a still-live Friendly approval card.
+Keep the request until its own tool finishes or an explicit answer/turn end arrives. Match a
+completed call by id, or by exact nonempty target when the ask lacks an id, never just tool name.
+The two simultaneous Read approvals remained independently answerable after this fix.
+
+**L59 — Codex remote startup and idle timeouts are separate concerns.** On 0.163.0, passing
+permission overrides to a remote `resume` fails; apply options on the private server. A newly
+started zero-turn thread has no materialized rollout, so a second client cannot resume it yet.
+Let the real TUI create it, and attach after the first actual user submission. Do not manufacture
+an extra model turn to create history. Keep HTTP connection/upgrade timeouts bounded, but do not
+use a short HTTP receive timeout for the long-lived WebSocket: an agent thinking or a person
+reviewing a question can legitimately be silent. Codex approval `availableDecisions` may offer
+`cancel` rather than `decline`; use the offered once-only response and never an exec-policy grant.
+Codex also emits thread-start notifications for ephemeral/background work. They are not evidence
+that the user changed Raw conversations. Ignore ephemeral and child threads, and notifications
+received before the controller attached; scope display/replies to the selected thread identity.
+A regression test covers these distinctions, and the final denial/restart app check passed.
+
+**L60 — Narrator output needs local consistency and identity checks.** Cheap structured-output
+models can return "no further action" alongside a redundant review action, or rewrite a dismissed
+action's prompt while keeping its title. Use an explicit `has_next_step` flag and clear actions
+when false; suppress normalized prompt or title matches against durable Done/Dismiss history.
+Feed dispositions back to the model, but do not promise perfect recognition of every paraphrase.
+Redact evidence before clipping, otherwise a newly known secret across the boundary can leak a
+prefix. Record provider usage even if summary validation fails, and count unavailable usage as
+unknown. HTTP 429 is a visible provider limit, not a reason to replay a paid attempt automatically.

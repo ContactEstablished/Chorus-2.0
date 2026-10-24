@@ -8,6 +8,24 @@ use crate::actions::{ApprovalDecision, SessionAction, clean_prompt};
 pub const REPLY_WAIT_SECS: u64 = 120;
 pub const MAX_REQUEST_BYTES: usize = 32 * 1024;
 
+/// A completed call resolves only its own approval. Some PermissionRequest payloads lack a
+/// call id, so use an exact, nonempty target in that case; a tool name alone is ambiguous.
+pub fn finished_approval(ask_call: Option<&str>, call: Option<&str>, ask_target: Option<&str>, target: Option<&str>) -> bool {
+    match ask_call {
+        Some(id) => call == Some(id),
+        None => ask_target.is_some_and(|t| !t.is_empty() && target == Some(t)),
+    }
+}
+
+#[test]
+fn finished_approvals_require_call_identity_or_an_exact_target() {
+    assert!(finished_approval(Some("a"), Some("a"), None, None));
+    assert!(!finished_approval(Some("a"), Some("b"), Some("same"), Some("same")));
+    assert!(finished_approval(None, Some("a"), Some("1.png"), Some("1.png")));
+    assert!(!finished_approval(None, Some("a"), Some("1.png"), Some("2.png")));
+    assert!(!finished_approval(None, None, None, None));
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 pub struct QuestionOption { pub label: String, pub description: String }
 
@@ -29,7 +47,7 @@ pub enum ReplyDetails {
 }
 
 /// Kept only in memory, including the original input. History/UI receive a scrubbed copy.
-pub struct HookRequest { pub details: ReplyDetails, pub input: Value }
+pub struct HookRequest { pub details: ReplyDetails, pub input: Value, pub protocol: Option<String> }
 
 pub fn claude_request(payload: &Value) -> Option<HookRequest> {
     let input = payload.get("tool_input")?.clone();
@@ -48,10 +66,11 @@ pub fn claude_request(payload: &Value) -> Option<HookRequest> {
         }
         _ => return None,
     };
-    Some(HookRequest { details, input })
+    Some(HookRequest { details, input, protocol: None })
 }
 
 pub fn response(request: &HookRequest, action: &SessionAction) -> Result<Value, String> {
+    if request.protocol.is_some() { return crate::codex_protocol::response(request, action); }
     match (&request.details, action) {
         (_, SessionAction::Release { .. }) => Ok(json!({})),
         (ReplyDetails::Approval { .. }, SessionAction::Approval { decision, message, .. }) => {

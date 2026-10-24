@@ -3,15 +3,31 @@
  * One session on the Overview (glacier-overview.png): agent, status, name, project and folder, what
  * it last said, and how long it has run. The whole card opens the session.
  */
-import { computed } from 'vue'
-import type { Project, SessionSummary } from '../ipc'
+import { computed, ref } from 'vue'
+import { commands, type Project, type SessionSummary } from '../ipc'
+import Icon from '../components/Icon.vue'
+import { compactPath } from '../shell/compactPath'
+import { useNoticesStore } from '../stores/notices'
 import { AGENT_LABELS } from '../raw/labels'
-import { AGENT_CHIPS, ATTENTION, ago, shortDuration, shortPath } from '../shell/status'
+import AgentLogo from '../components/AgentLogo.vue'
+import { ATTENTION, ago, shortDuration, shortPath } from '../shell/status'
 
 const props = defineProps<{ session: SessionSummary; project: Project | null; home: string | null; now: number }>()
 defineEmits<{ open: [] }>()
 
 const s = computed(() => props.session)
+const notices = useNoticesStore()
+const openingFolder = ref(false)
+async function openFolder(): Promise<void> {
+  if (openingFolder.value) return
+  openingFolder.value = true
+  try {
+    const result = await commands.sessionOpenFolder(s.value.id)
+    if (result.status === 'error') notices.error('Could not open the session folder.', result.error)
+  } catch (e) {
+    notices.error('Could not open the session folder. Restart Chorus if its backend has not been updated yet.', e)
+  } finally { openingFolder.value = false }
+}
 const label = computed(() => (s.value.attention === 'working' && s.value.noSignal ? 'Working · no signal' : ATTENTION[s.value.attention].label))
 
 /** What it last said or was asked; for a failure, why it stopped comes first. */
@@ -36,24 +52,35 @@ const timing = computed(() => {
     :class="`st-${s.attention}`"
     tabindex="0"
     role="button"
-    :aria-label="`${s.name}: ${label}`"
+    :aria-label="`${s.name}: ${AGENT_LABELS[s.agent]}, ${label}`"
     @click="$emit('open')"
-    @keydown.enter.prevent="$emit('open')"
-    @keydown.space.prevent="$emit('open')"
+    @keydown.enter.self.prevent="$emit('open')"
+    @keydown.space.self.prevent="$emit('open')"
   >
     <header class="top">
-      <span class="agent-chip" :class="`agent-${s.agent}`">{{ AGENT_CHIPS[s.agent] }}</span>
-      <span class="agent">{{ AGENT_LABELS[s.agent] }}<template v-if="s.providerName"> · {{ s.providerName }}</template></span>
+      <AgentLogo :agent="s.agent" />
+      <h3 class="name">
+        <span class="name-text" :title="s.name">{{ s.name }}</span>
+        <span v-if="s.locked" class="locked" title="Locked: Close and Restart are off until it's unlocked">locked</span>
+      </h3>
       <span class="status"><span class="dot" :class="{ pulse: s.attention === 'working' && !s.noSignal }" />{{ label }}</span>
     </header>
-    <h3 class="name">
-      {{ s.name }}
-      <span v-if="s.locked" class="locked" title="Locked: Close and Restart are off until it's unlocked">locked</span>
-    </h3>
     <p class="where">
+      <span v-if="s.providerName" class="agent">{{ s.providerName }}</span>
       <span v-if="project" class="project-tag" :style="{ '--tag': project.colour }">{{ project.name }}</span>
       <span v-for="t in s.tags" :key="t" class="tag">{{ t }}</span>
-      <code :title="s.worktree ? `${s.cwd}\nworktree on ${s.worktree.branch}` : s.cwd">{{ shortPath(s.cwd, home) }}</code>
+      <span class="folder">
+        <button
+          class="folder-link quiet"
+          type="button"
+          :disabled="openingFolder"
+          :title="`Open folder in File Explorer: ${s.cwd}`"
+          :aria-label="`Open ${s.name}'s folder in File Explorer`"
+          @click.stop="openFolder"
+          @keydown.stop
+        ><Icon name="folder" :size="15" /></button>
+        <code :title="s.worktree ? `${s.cwd}\nworktree on ${s.worktree.branch}` : s.cwd">{{ compactPath(shortPath(s.cwd, home)) }}</code>
+      </span>
     </p>
     <p class="body">{{ body }}</p>
     <footer class="foot">
@@ -103,13 +130,14 @@ const timing = computed(() => {
 }
 .agent {
   color: var(--text-2);
-  flex: 1;
+  font-size: 12px;
   min-width: 0;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
 .status {
+  margin-left: auto;
   display: inline-flex;
   align-items: center;
   gap: 7px;
@@ -122,6 +150,7 @@ const timing = computed(() => {
   color: var(--text-muted);
 }
 .name {
+  flex: 1;
   margin: 0;
   font-size: 17px;
   font-weight: 650;
@@ -129,9 +158,14 @@ const timing = computed(() => {
   align-items: center;
   gap: 8px;
   min-width: 0;
-  overflow-wrap: anywhere;
+}
+.name-text {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 .locked {
+  flex: none;
   font-family: var(--font-ui);
   font-size: 10.5px;
   font-weight: 600;
@@ -143,6 +177,7 @@ const timing = computed(() => {
 .where {
   margin: 0;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 10px;
   min-width: 0;
@@ -155,7 +190,25 @@ const timing = computed(() => {
   color: var(--text-2);
   white-space: nowrap;
 }
-.where code {
+.folder {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+}
+.folder-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  color: var(--text-muted);
+}
+.folder-link:hover { color: var(--accent); }
+.folder code {
   font-size: 12.5px;
   color: var(--text-muted);
   overflow: hidden;

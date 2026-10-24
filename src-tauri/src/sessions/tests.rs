@@ -115,11 +115,139 @@ fn delivery_fixture(f: &Fixture, fail_enter: bool) -> (u32, Arc<Run>, DeliveryCh
         *writer = Box::new(DeliveryWriter { manager: Arc::downgrade(&f.manager), chunks: chunks.clone(), fail_enter, _original: original });
     }
     run.recorder.lock().unwrap().record(&f.manager.store, "test", &serde_json::json!({}), &[chorus_core::events::AgentEvent::Idle], crate::store::now_ms());
+    // The controlled shell command has completed; this fixture has no pending Raw draft.
+    run.recorder.lock().unwrap().raw_dirty = false;
     (id, run, chunks)
 }
 
 const DELIVERY_REQUEST: &str = "0f8fad5b-d9cb-469f-a165-70867728950e";
 const OTHER_REQUEST: &str = "7c9e6679-7425-40de-944b-e07fc1f90ae7";
+
+#[test]
+fn composer_images_survive_queueing_and_recreate_files_before_delivery() {
+    use crate::store::{composer as db, images};
+    let f = Fixture::new("composer-images");
+    let (id, run, chunks) = delivery_fixture(&f, false);
+    let png = include_bytes!("../../icons/32x32.png");
+    images::add(&f.manager.store, id, 0, "reference.png", png).unwrap();
+    let request = compose(&f, id, &run, "", DELIVERY_REQUEST, true);
+    composer::submit(&f.manager, id, request.clone()).unwrap();
+    let item = db::oldest(&f.manager.store, id).unwrap().unwrap();
+    assert_eq!(item.images.len(), 1);
+    let path = f.dir.join("images").join(id.to_string()).join(format!("{}.png", item.images[0].id));
+    assert_eq!(std::fs::read(&path).unwrap(), png);
+    std::fs::remove_file(&path).unwrap();
+    assert!(db::draft(&f.manager.store, id).unwrap().images.is_empty());
+    composer::tick(&f.manager, id).unwrap();
+    assert_eq!(std::fs::read(&path).unwrap(), png);
+    assert_eq!(chunks.lock().unwrap().len(), 2);
+    assert!(item.text.contains("Image 1:"));
+    composer::submit(&f.manager, id, request).unwrap();
+    composer::tick(&f.manager, id).unwrap();
+    assert_eq!(chunks.lock().unwrap().len(), 2, "images must not cause a replay");
+}
+
+fn compose(f: &Fixture, id: u32, run: &Run, text: &str, request: &str, queue: bool) -> composer::ComposerSubmit {
+    let draft = crate::store::composer::draft(&f.manager.store, id).unwrap();
+    let saved = composer::save(&f.manager, id, draft.revision, text).unwrap();
+    composer::ComposerSubmit { run_id: run.id, input_epoch: run.recorder.lock().unwrap().input_epoch,
+        request_id: request.into(), draft_revision: saved.revision, queue, confirm_ready: false }
+}
+
+#[test]
+fn composer_queues_fifo_waits_for_ack_and_cancel_never_writes() {
+    use chorus_core::events::AgentEvent;
+    use crate::store::composer as db;
+    let f=Fixture::new("composer-fifo");
+    let (id,run,chunks)=delivery_fixture(&f,false);
+    let event=|event| run.recorder.lock().unwrap().record(&f.manager.store,"test",&serde_json::json!({}),&[event],crate::store::now_ms());
+    event(AgentEvent::TurnStarted { turn:Some("busy".into()), prompt:Some("working".into()) });
+    let a=compose(&f,id,&run,"one",DELIVERY_REQUEST,true);
+    composer::submit(&f.manager,id,a.clone()).unwrap();
+    composer::submit(&f.manager,id,a).unwrap();
+    let b=compose(&f,id,&run,"two",OTHER_REQUEST,true);
+    composer::submit(&f.manager,id,b).unwrap();
+    composer::tick(&f.manager,id).unwrap();
+    assert!(chunks.lock().unwrap().is_empty());
+    event(AgentEvent::TurnEnded { turn:Some("busy".into()), message:Some("Done".into()) });
+    composer::tick(&f.manager,id).unwrap();
+    composer::tick(&f.manager,id).unwrap();
+    assert_eq!(*chunks.lock().unwrap(),[b"one".to_vec(),b"\r".to_vec()]);
+    let second=db::oldest(&f.manager.store,id).unwrap().unwrap();
+    db::cancel(&f.manager.store,id,second.id).unwrap();
+    event(AgentEvent::TurnStarted { turn:Some("one".into()), prompt:Some("one".into()) });
+    event(AgentEvent::TurnEnded { turn:Some("one".into()), message:Some("Done".into()) });
+    composer::tick(&f.manager,id).unwrap();
+    assert_eq!(chunks.lock().unwrap().len(),2);
+    assert_eq!(db::list(&f.manager.store,id).unwrap()[1].status,"observed");
+}
+
+#[test]
+fn composer_partial_write_and_database_failure_cannot_replay() {
+    use crate::store::composer as db;
+    let f=Fixture::new("composer-uncertain");
+    let (id,run,chunks)=delivery_fixture(&f,true);
+    let request=compose(&f,id,&run,"one",DELIVERY_REQUEST,false);
+    composer::submit(&f.manager,id,request.clone()).unwrap();
+    composer::submit(&f.manager,id,request).unwrap();
+    assert_eq!(chunks.lock().unwrap().len(),1);
+    assert_eq!(db::list(&f.manager.store,id).unwrap()[0].status,"uncertain");
+    db::recover(&f.manager.store).unwrap();
+    composer::tick(&f.manager,id).unwrap();
+    assert_eq!(chunks.lock().unwrap().len(),1);
+    assert!(db::cancel(&f.manager.store,id,db::list(&f.manager.store,id).unwrap()[0].id).is_err());
+    let request=compose(&f,id,&run,"two",OTHER_REQUEST,true);
+    composer::submit(&f.manager,id,request).unwrap();
+    // Simulate a fresh run's ledger with a storage failure before dispatch.
+    f.manager.store.with(|c| c.execute_batch("UPDATE prompt_deliveries SET status='observed'; CREATE TRIGGER refuse_composer BEFORE INSERT ON prompt_deliveries BEGIN SELECT RAISE(ABORT,'injected'); END;")).unwrap();
+    assert!(composer::tick(&f.manager,id).is_err());
+    assert_eq!(chunks.lock().unwrap().len(),1);
+    let prompts:u32=f.manager.store.with(|c|c.query_row("SELECT count(*) FROM prompts",[],|r|r.get(0))).unwrap();
+    assert_eq!(prompts,1,"failed claim rolls back its prompt");
+}
+
+#[test]
+fn composer_rechecks_lock_run_raw_input_and_scrubs_saved_drafts() {
+    use crate::store::composer as db;
+    let f=Fixture::new("composer-guards");
+    let (id,run,chunks)=delivery_fixture(&f,false);
+    let request=compose(&f,id,&run,"one",DELIVERY_REQUEST,false);
+    f.manager.set_locked(id,true,None).unwrap();
+    assert!(composer::submit(&f.manager,id,request.clone()).is_err());
+    f.manager.set_locked(id,false,None).unwrap();
+    let mut stale=request.clone(); stale.run_id+=1;
+    assert!(composer::submit(&f.manager,id,stale).is_err());
+    { let mut r=run.recorder.lock().unwrap(); r.raw_dirty=true; r.input_epoch+=1; }
+    let mut confirmed=request.clone(); confirmed.confirm_ready=true;
+    assert!(composer::submit(&f.manager,id,confirmed).is_err(),"old Raw review cannot authorise a send");
+    assert!(chunks.lock().unwrap().is_empty());
+    assert_eq!(db::draft(&f.manager.store,id).unwrap().text,"one");
+    let secret="private-composer-test-value";
+    *run.recorder.lock().unwrap()=Recorder::new(id,run.id,"hook",Arc::new(vec![secret.as_bytes().to_vec()]),Arc::new(builtin_patterns()));
+    let d=composer::save(&f.manager,id,request.draft_revision,secret).unwrap();
+    assert!(!d.text.contains(secret));
+    assert_eq!(db::draft(&Store::open(&f.dir.join("chorus.db")).unwrap(),id).unwrap().text,d.text);
+}
+
+#[test]
+fn composer_recovery_holds_unsent_instructions_and_rejects_changed_request_identity() {
+    use crate::store::composer as db;
+    let f=Fixture::new("composer-recovery");
+    let (id,run,chunks)=delivery_fixture(&f,false);
+    let request=compose(&f,id,&run,"one",DELIVERY_REQUEST,true);
+    composer::submit(&f.manager,id,request.clone()).unwrap();
+    let mut changed=request.clone(); changed.draft_revision+=1;
+    assert!(composer::submit(&f.manager,id,changed).is_err());
+    db::recover(&f.manager.store).unwrap();
+    composer::tick(&f.manager,id).unwrap();
+    assert!(chunks.lock().unwrap().is_empty());
+    let item=db::oldest(&f.manager.store,id).unwrap().unwrap();
+    assert_eq!(item.status,"held");
+    db::resume(&f.manager.store,id,item.id,run.id).unwrap();
+    composer::tick(&f.manager,id).unwrap();
+    composer::submit(&f.manager,id,request).unwrap();
+    assert_eq!(chunks.lock().unwrap().len(),2);
+}
 
 fn held_approval(f: &Fixture, run: &Run, call: &str) -> (u32, crate::events::replies::HookReceiver) {
     let payload = serde_json::json!({"hook_event_name":"PermissionRequest","tool_name":"Write","tool_use_id":call,"tool_input":{"file_path":"test.txt","content":"hello"}});

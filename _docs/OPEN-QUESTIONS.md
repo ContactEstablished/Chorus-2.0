@@ -14,25 +14,6 @@ variable is empty, so it only fires for Chorus-launched sessions; (c) drive Grok
 TUI. None could be tested: Grok isn't signed in on this machine. *Default: (a) for P2; revisit (b) once
 Grok is signed in.* Blocks: P3.
 
-**Q19 — Codex plans.** (From spike S5.) In TUI mode Codex 0.162.1 exposes no plan: `update_plan` isn't
-written to the rollout and has no hook. Codex's experimental `app-server` does emit `turn/plan/updated`,
-and its TUI can attach with `--remote`, the same shape as opencode's serve + attach. *Default: P3 tries
-app-server + `--remote` behind a capability flag; until then Friendly says "plan not available for
-Codex".* Blocks: P6.
-
-2026-10-22 follow-up on Codex 0.163.0: `app-server --listen`, `--ws-auth capability-token`,
-`--ws-token-sha256`, TUI `--remote` and `--remote-auth-token-env` exist. A private server completed
-initialisation and a tiny subscription turn; its authenticated TUI reached the scratch-folder trust
-prompt through ConPTY. Generated schema includes `turn/plan/updated`, but the tiny turn emitted no
-plan notification. **Still open:** observe real plan updates and prove both clients control the
-same thread, with approval/question replies, disconnects and Raw fallback. No production bridge
-enabled yet. Details and remaining gates: [S5-P6.md](spikes/S5-P6.md).
-
-A further explicit plan-tool probe completed without a plan event. A diagnostic turn using the
-actual default `gpt-6-astra` reported `update_plan` unavailable and named `request_user_input`
-as a Plan-mode tool. This is bounded evidence for that configuration, not a universal absence
-claim. See [the next slice's findings](spikes/S5-P6-REPLIES.md); Q19 and the Codex exit check stay open.
-
 **Q21 — How should Chorus run DeepSeek Harness?** (D59.) `dsh` offers a local web UI and the server
 behind it (`dsh web`, port 3080), a one-shot headless run (`dsh --profile headless "<task>"`), a Python
 SDK, and a terminal UI only through a community plugin profile (`dsh --profile tui`). Options: (a) its
@@ -124,3 +105,38 @@ acceptance of complete Gemini/Aider turns remains P14 work; resolving these ques
 | Q28 Gemini folder trust | Read existing trust; inherit repository trust only for managed worktrees; explicit refusals win | D69 |
 | Q29 Aider permission labels | Accept edits and Full access; migrate old Manual labels without changing arguments | D70 |
 | Q30 Aider history isolation | Per-session chat/input files; keep old repository history without automatically importing it | D71 |
+
+## Resolved 2026-10-23
+
+| Question | Answer | Decision |
+|---|---|---|
+| Q19 Codex plans / Friendly review | Matthew accepts the current Friendly display and approves Q19 with remaining Friendly features understood. Prompting from Friendly is still required; implement the composer and durable queue next. Codex plan/control verification remains implementation work before enabling its bridge, not an outstanding user approval | D77 |
+
+### Q19 evidence and remaining implementation work
+
+Approval records the user's acceptance of the current display, not a successful plan/control test.
+P6 and its Friendly-only exit checks remain open. Historical protocol findings follow:
+
+**Q19 — Codex plans.** (From spike S5.) In TUI mode Codex 0.162.1 exposes no plan: `update_plan` isn't
+written to the rollout and has no hook. Codex's experimental `app-server` does emit `turn/plan/updated`,
+and its TUI can attach with `--remote`, the same shape as opencode's serve + attach. *Default: P3 tries
+app-server + `--remote` behind a capability flag; until then Friendly says "plan not available for
+Codex".* Previously blocked: P6; approval resolved by D77.
+
+2026-10-22 follow-up on Codex 0.163.0: `app-server --listen`, `--ws-auth capability-token`,
+`--ws-token-sha256`, TUI `--remote` and `--remote-auth-token-env` exist. A private server completed
+initialisation and a tiny subscription turn; its authenticated TUI reached the scratch-folder trust
+prompt through ConPTY. Generated schema includes `turn/plan/updated`, but the tiny turn emitted no
+plan notification. **Remaining implementation verification:** observe real plan updates and prove both clients control the
+same thread, with approval/question replies, disconnects and Raw fallback. No production bridge
+enabled yet. Details and remaining gates: [S5-P6.md](spikes/S5-P6.md).
+
+A further explicit plan-tool probe completed without a plan event. A diagnostic turn using the
+actual default `gpt-6-astra` reported `update_plan` unavailable and named `request_user_input`
+as a Plan-mode tool. This is bounded evidence for that configuration, not a universal absence
+claim. See [the next slice's findings](spikes/S5-P6-REPLIES.md); the Codex exit check stays open; Q19 approval was subsequently recorded in D77.
+
+A Plan-mode follow-up on the same CLI/default model observed a structured question,
+accepted its answer and received `serverRequest/resolved`. It still emitted no progress
+plan update. Question control and plan capture are distinct capabilities; authenticated
+same-thread Raw/controller verification remains open. See [mode evidence](spikes/S5-P6-Q19-MODES.md).

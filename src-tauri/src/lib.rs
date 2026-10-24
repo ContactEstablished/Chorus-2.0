@@ -7,6 +7,7 @@ mod fleet;
 mod git;
 mod ipc;
 mod lock;
+mod narrator;
 mod prefs;
 mod projects;
 mod providers;
@@ -41,6 +42,7 @@ pub fn run() {
         }))
         // New session's folder picker, used from Rust only: the front end gets no dialog permissions.
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::Builder::new().open_js_links_on_click(false).build())
         .invoke_handler(builder.invoke_handler())
         .setup(move |app| {
             builder.mount_events(app);
@@ -79,6 +81,8 @@ pub fn run() {
             // The listener agent hooks post to, before any session launches (P3).
             manager.set_hook_listener(events::listener::start(manager.clone()));
             manager.watch_signals();
+            sessions::composer::start(&manager)?;
+            narrator::start(&manager)?;
             let relaunch = manager.reopen()?;
             // Revoke OpenRouter keys an earlier Chorus minted and couldn't revoke. Only keys from
             // before this start are touched, so it can run beside the relaunches, which mint new ones.

@@ -31,6 +31,20 @@ pub fn sessions_list(state: Manager<'_>) -> Result<Vec<SessionSummary>, String> 
     state.list()
 }
 
+/// Open only this session's recorded working directory; the frontend cannot supply an arbitrary path.
+#[tauri::command]
+#[specta::specta]
+pub async fn session_open_folder(app: tauri::AppHandle, state: Manager<'_>, session_id: u32) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    blocking(&state, move |m| {
+        let folder = m.row(session_id)?.cwd;
+        if !std::path::Path::new(&folder).is_dir() {
+            return Err("The session folder no longer exists or is unavailable.".into());
+        }
+        app.opener().open_path(folder, None::<&str>).map_err(|e| format!("opening the session folder: {e}"))
+    }).await
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn session_create(state: Manager<'_>, request: CreateSession) -> Result<SessionSummary, String> {

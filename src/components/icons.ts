@@ -9,6 +9,8 @@ export const PATHS = {
   settings:
     'M12 9a3 3 0 1 0 0 6a3 3 0 1 0 0-6M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1',
   plus: 'M12 5v14M5 12h14',
+  panelLeft: 'M4 4h16v16H4zM9 4v16M14 9l-3 3l3 3',
+  panelRight: 'M4 4h16v16H4zM15 4v16M10 9l3 3l-3 3',
   close: 'M6 6l12 12M18 6L6 18',
   back: 'M15 5l-7 7l7 7',
   chevronDown: 'M6 9l6 6l6-6',

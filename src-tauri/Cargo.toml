@@ -28,6 +28,7 @@ portable-pty = { workspace = true }
 rusqlite = { workspace = true }
 tauri-plugin-single-instance = { workspace = true }
 tauri-plugin-dialog = { workspace = true }
+tauri-plugin-opener = { workspace = true }
 reqwest = { workspace = true }
 axum = { workspace = true }
 tokio = { workspace = true }

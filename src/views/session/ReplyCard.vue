@@ -40,7 +40,7 @@ async function send(action: SessionAction): Promise<void> {
     <template v-if="pending.details.kind === 'approval'">
       <h3>{{ pending.details.tool }}</h3>
       <pre>{{ pending.details.input }}</pre>
-      <p>Allow once sends permission to run exactly this request. Deny sends your reason to the agent.</p>
+      <p>Allow once sends permission to run exactly this request. {{ pending.denialReasonSupported ? 'Deny sends your reason to the agent.' : 'Deny refuses this request and may cancel the turn.' }}</p>
     </template>
     <p v-else>Answer every question. Selecting or inserting text does not send it.</p>
     <p v-if="pending.blockedReason || sent" class="status" role="status">
@@ -60,7 +60,7 @@ async function send(action: SessionAction): Promise<void> {
         <button class="primary" type="button" :disabled="answers.some(a => !a.trim())" @click="send({ kind: 'answer', ask_id: pending.askId, answers: [...answers] })">Send answer</button>
       </template>
       <template v-else>
-        <label class="question">Optional denial reason<textarea v-model="message" rows="2" maxlength="16384" /></label>
+        <label v-if="pending.denialReasonSupported" class="question">Optional denial reason<textarea v-model="message" rows="2" maxlength="16384" /></label>
         <div class="buttons">
           <button class="primary" type="button" @click="send({ kind: 'approval', ask_id: pending.askId, decision: 'allow', message: null })">Allow once</button>
           <button type="button" @click="send({ kind: 'approval', ask_id: pending.askId, decision: 'deny', message: message.trim() || null })">Deny</button>

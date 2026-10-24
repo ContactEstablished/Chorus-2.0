@@ -4,7 +4,7 @@ import { computed, ref } from 'vue'
 /** The rail's destinations, plus one session's own view. */
 export type ViewName = 'overview' | 'sessions' | 'session' | 'bots' | 'automations' | 'documents' | 'notes' | 'settings'
 
-export type SettingsSection = 'appearance' | 'projects' | 'providers' | 'keys' | 'agents'
+export type SettingsSection = 'appearance' | 'projects' | 'providers' | 'keys' | 'agents' | 'narrator'
 
 interface Place {
   name: ViewName

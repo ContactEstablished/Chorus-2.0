@@ -37,6 +37,8 @@ pub enum SessionAction {
 pub enum ActionCapability {
     Pty,
     HeldHook,
+    Server,
+    Transcript,
     Unavailable { reason: String },
 }
 
@@ -66,7 +68,10 @@ pub fn capabilities(agent: AgentKind) -> ActionCapabilities {
         } else {
             "Plan capture is not wired yet. Read the agent's plan in Raw."
         }),
-        queue: unavailable("The durable instruction queue is not built yet. Wait for the turn to finish."),
+        queue: match agent {
+            AgentKind::Claude | AgentKind::Codex => ActionCapability::Pty,
+            _ => unavailable("Instruction queue is not wired for this agent. Use Raw."),
+        },
     }
 }
 
@@ -77,7 +82,7 @@ pub fn prompt_blocker(locked: bool, live: bool, activity: Activity, pending_ques
     else if activity == Activity::AwaitingApproval { Some("Session is waiting for an approval. Answer it in Raw first.") }
     else if pending_question { Some("Session is waiting for a structured answer. Answer it in Raw first.") }
     else if unobserved { Some("The previous delivery has not been observed. Check Raw before sending again.") }
-    else if activity == Activity::Working { Some("Session is busy. The instruction queue is not built yet; wait for its next pause.") }
+    else if activity == Activity::Working { Some("Session is busy. Queue the instruction in Friendly for its next pause.") }
     else if !matches!(activity, Activity::Ready | Activity::NeedsAnswer) { Some("No confirmed prompt is available. Check Raw first.") }
     else { None }
 }
@@ -120,7 +125,17 @@ pub fn prompt_write(text: &str) -> String {
 }
 
 pub fn echo_matches(expected_run: u32, actual_run: u32, expected: &str, actual: &str, sent_ms: i64, now_ms: i64) -> bool {
-    expected_run == actual_run && expected == actual && (0..=ECHO_WINDOW_MS).contains(&now_ms.saturating_sub(sent_ms))
+    expected_run == actual_run && (expected == actual || pasted_echo(actual) == Some(expected))
+        && (0..=ECHO_WINDOW_MS).contains(&now_ms.saturating_sub(sent_ms))
+}
+
+/// Claude 2.1.308 wraps longer bracketed pastes in its UserPromptSubmit hook. Accept only
+/// one complete, matching-id envelope with identical contents; no fuzzy or substring matching.
+fn pasted_echo(actual: &str) -> Option<&str> {
+    let rest = actual.trim().strip_prefix("<pasted_content id=\"")?;
+    let (id, rest) = rest.split_once("\">\n")?;
+    if !(4..=32).contains(&id.len()) || !id.bytes().all(|c| c.is_ascii_hexdigit()) { return None; }
+    rest.strip_suffix(&format!("\n</pasted_content id=\"{id}\">"))
 }
 
 #[cfg(test)]
@@ -148,6 +163,11 @@ mod tests {
         assert!(!echo_matches(1, 1, "hi", "hi", 100, 99));
         assert!(!echo_matches(1, 1, "hi", "hi", 100, 60_101));
         assert!(!echo_matches(1, 1, "hi", "bye", 100, 101));
+        let wrapped = "\n\n<pasted_content id=\"a1b2\">\none\ntwo\n</pasted_content id=\"a1b2\">\n";
+        assert!(echo_matches(1, 1, "one\ntwo", wrapped, 100, 101));
+        assert!(!echo_matches(1, 1, "one\ntwo", &wrapped.replace("</pasted_content id=\"a1b2", "</pasted_content id=\"ffff"), 100, 101));
+        assert!(!echo_matches(1, 1, "one", wrapped, 100, 101));
+        assert!(!echo_matches(1, 1, "one\ntwo", &(wrapped.to_owned() + "extra"), 100, 101));
     }
     #[test]
     fn guarded_delivery_cannot_answer_an_approval_or_guess_idle() {

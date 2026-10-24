@@ -82,6 +82,12 @@ pub fn session_action_capabilities(state: Manager<'_>, session_id: u32) -> Resul
     if row.agent == chorus_core::agent::AgentKind::Claude && run.as_ref().is_some_and(|r| r.hook_token.is_some()) {
         caps.question = chorus_core::actions::ActionCapability::HeldHook;
         caps.approval = chorus_core::actions::ActionCapability::HeldHook;
+        caps.plan = chorus_core::actions::ActionCapability::Transcript;
+    }
+    if run.as_ref().and_then(|r|r.codex_bridge.as_ref()).is_some_and(|b|b.connected.load(std::sync::atomic::Ordering::SeqCst) && b.ready.load(std::sync::atomic::Ordering::SeqCst)) {
+        caps.question = chorus_core::actions::ActionCapability::Server;
+        caps.approval = chorus_core::actions::ActionCapability::Server;
+        caps.plan = chorus_core::actions::ActionCapability::Server;
     }
     Ok(SessionCapabilities { run_id: run.map(|r| r.id), capabilities: caps })
 }

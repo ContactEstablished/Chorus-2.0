@@ -6,7 +6,7 @@ const props = defineProps<{ sessionId: number; live: boolean }>()
 const channels = ref<SessionCapabilities | null>(null)
 const error = ref('')
 let generation = 0
-watch(() => [props.sessionId, props.live], async () => {
+async function refresh() {
   const current = ++generation
   channels.value = null
   error.value = ''
@@ -18,19 +18,20 @@ watch(() => [props.sessionId, props.live], async () => {
   } catch {
     if (current === generation) error.value = 'Action capabilities could not be loaded. Raw remains available.'
   }
-}, { immediate: true })
+}
+watch(() => [props.sessionId, props.live], refresh, { immediate: true })
 
 const labels = { prompt: 'Instructions', question: 'Questions', approval: 'Approvals', plan: 'Plan', queue: 'Queue' }
 </script>
 
 <template>
-  <details class="channels">
+  <details class="channels" @toggle="($event.target as HTMLDetailsElement).open && refresh()">
     <summary>Friendly capabilities</summary>
     <p v-if="error" role="status">{{ error }}</p>
     <dl v-if="channels">
       <template v-for="(capability, key) in channels.capabilities" :key="key">
         <dt>{{ labels[key] }}</dt>
-        <dd>{{ capability.channel === 'unavailable' ? capability.reason : capability.channel === 'held-hook' ? 'Live requests can be answered in Friendly while their hook is connected. Expired or unsupported requests remain in Raw.' : 'Instructions can be delivered after a confirmed pause. The composer is not available yet.' }}</dd>
+        <dd>{{ capability.channel === 'unavailable' ? capability.reason : capability.channel === 'held-hook' ? 'Live requests can be answered in Friendly while their hook is connected. Expired or unsupported requests remain in Raw.' : capability.channel === 'server' ? (key === 'plan' ? 'Shows plans when the agent emits them. This Codex configuration may not provide a progress checklist.' : 'Friendly and Raw share the same live Codex conversation. Unsupported requests remain in Raw.') : capability.channel === 'transcript' ? 'Shows recorded progress messages and task-tool plans as the agent produces them.' : 'Send instructions from Friendly or queue them for a confirmed pause. Drafts and queued instructions are saved.' }}</dd>
       </template>
     </dl>
     <p>The Raw terminal remains the control surface for this running session.</p>

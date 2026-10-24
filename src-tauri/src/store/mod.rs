@@ -4,7 +4,10 @@
 //! `chorus_core::migrate`). Typed queries for each area live in the submodules.
 
 pub mod credentials;
+pub mod narrator;
 pub mod delivery;
+pub mod composer;
+pub mod images;
 pub mod replies;
 pub mod history;
 pub mod profiles;
@@ -38,6 +41,10 @@ const MIGRATION_FILES: &[(&str, &str)] = &[
     ("0012_aider_permissions.sql", include_str!("../../migrations/0012_aider_permissions.sql")),
     ("0013_p6_delivery.sql", include_str!("../../migrations/0013_p6_delivery.sql")),
     ("0014_p6_replies.sql", include_str!("../../migrations/0014_p6_replies.sql")),
+    ("0015_p6_composer.sql", include_str!("../../migrations/0015_p6_composer.sql")),
+    ("0016_p6_images.sql", include_str!("../../migrations/0016_p6_images.sql")),
+    ("0017_p6_progress.sql", include_str!("../../migrations/0017_p6_progress.sql")),
+    ("0018_p6_narrator.sql", include_str!("../../migrations/0018_p6_narrator.sql")),
 ];
 
 pub struct Store {

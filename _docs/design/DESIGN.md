@@ -22,7 +22,28 @@ product name and logo: the app is **Chorus**, with the seven-bar mark ([Logo](#l
 **Rail:** the seven-bar mark and the wordmark **Chorus** at the top (where the mockup draws a rotated
 square and "Harness"), then Overview (badge = sessions needing you), Sessions, Bots, Automations,
 Documents, Notes, Settings; then **Projects** (colour dot, session count, attention dot, +); **New
-session** pinned at the bottom. It collapses to icons under 720 px wide, leaving the mark alone at the top.
+session** pinned at the bottom. The toggle beside the wordmark collapses it to an icon rail, with
+labelled buttons and an expand control. On first use, windows under 720 px start collapsed. An explicit
+choice is saved locally and takes precedence over window width.
+
+**Session details:** the panel toggle beside Friendly/Raw shows or hides the right pane in either
+view. Hidden details give their space back to the timeline or terminal. This choice is saved locally
+across sessions and app launches; windows under 980 px start with details hidden on first use.
+
+**Session header:** Codex uses its bundled logo in the agent square. A folder icon opens the
+session's recorded working directory in File Explorer. Display paths are capped at 44 characters
+with middle elision, keeping the final folder where it fits; hover shows the full path. Omit the
+repeated agent name after the path. The selected Friendly/Raw option uses the same theme accent
+as the Agent message label, with a subtle accent background and border.
+
+**Friendly composer:** a labelled multiline field saves a draft per session. Enter adds a line;
+only Send or Queue submits it. Send targets the reviewed live run; Queue waits for the next
+confirmed pause. Show saved/saving/error feedback and explain disabled actions. The FIFO list
+shows each instruction, cancellation, and review/resume controls for held items. Recent receipts
+distinguish written-to-terminal, agent-confirmed and uncertain delivery. After restart, drafts
+remain drafts and unsent instructions are held for review. If startup readiness is unknown or Raw
+was edited, offer an explicit empty-and-ready confirmation for manual sending. Never use that
+confirmation to answer an approval or bypass a busy agent.
 
 ## Status vocabulary
 

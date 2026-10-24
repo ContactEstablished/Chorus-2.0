@@ -6,7 +6,9 @@
 #![forbid(unsafe_code)]
 
 pub mod activity;
+pub mod narrator;
 pub mod actions;
+pub mod composer;
 pub mod replies;
 pub mod agent;
 pub mod attention;
@@ -38,3 +40,7 @@ pub mod shim;
 pub mod tags;
 pub mod tree;
 pub mod worktree;
+pub mod attachments;
+pub mod progress;
+pub mod codex_protocol;
+pub mod codex_stream;

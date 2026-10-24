@@ -15,6 +15,8 @@
 pub mod commands;
 pub mod actions;
 pub mod delivery;
+pub mod composer;
+pub mod images;
 pub mod job;
 pub mod mirror;
 pub mod profiles;
@@ -451,6 +453,7 @@ struct Run {
     finished: (Mutex<bool>, Condvar),
     /// opencode's server, which ends with the run.
     server: Option<Server>,
+    codex_bridge: Option<Arc<codex_bridge::Bridge>>,
     /// The ledger row of the OpenRouter key minted for this run, revoked when it ends.
     capped: Option<u32>,
     /// The options as this run's agent took them (a provider's model in the agent's own form).
@@ -632,6 +635,8 @@ impl SessionManager {
             }
         });
     }
+
+    pub fn is_quitting(&self) -> bool { self.quitting.load(Ordering::SeqCst) }
 
     pub fn store(&self) -> &Store {
         &self.store
@@ -961,6 +966,9 @@ impl SessionManager {
 
         let parent: Vec<(String, String)> = std::env::vars().collect();
         let mut launch = agents::resolve(row.agent, &parent, &state_dir)?;
+        if row.agent == AgentKind::Claude {
+            launch.additions.push(("CLAUDE_CODE_ENABLE_TODO_TOOLS", "1".into()));
+        }
         if row.agent == AgentKind::Codex {
             // Codex writes this into its rollout, which is how the session finds its conversation.
             launch.additions.push(("CODEX_INTERNAL_ORIGINATOR_OVERRIDE", chorus_core::codex::originator_for(row.id)));
@@ -1064,7 +1072,10 @@ impl SessionManager {
         // holds (D36, D37).
         let mut hook_args: Vec<String> = Vec::new();
         let mut hook_token = None;
-        if matches!(row.agent, AgentKind::Claude | AgentKind::Codex) {
+        let codex_control = row.agent == AgentKind::Codex && self.agents.get(row.agent).and_then(|d| d.version).as_deref() == Some("0.163.0");
+        let codex_token = codex_control.then(random_token);
+        if let Some(token) = &codex_token { secrets.push((codex_bridge::TOKEN_VAR.into(),token.clone())); }
+        if row.agent == AgentKind::Claude || (row.agent == AgentKind::Codex && !codex_control) {
             match self.hook_listener.get() {
                 Some(Ok(port)) => {
                     let url = hk::hook_url(*port, row.id);
@@ -1096,7 +1107,16 @@ impl SessionManager {
 
         let job = Job::new().map_err(|e| format!("creating the job object: {e}"))?;
         let mut args = launch.args.clone();
-        let (server, resumed) = if let Some(password) = &server_password {
+        let mut codex_bridge = None;
+        let (server, resumed) = if let Some(token) = &codex_token {
+            let mut extra = route_args.clone(); extra.extend(spec.option_args(&options));
+            let resume = row.agent_session_id.as_deref().filter(|id| agents::conversation_exists(row.agent,id,&parent));
+            let bridge = codex_bridge::Bridge::start(&launch,&extra,&env,&row.cwd,resume,&job,token)?;
+            args.extend(["--remote".into(),bridge.url.clone(),"--remote-auth-token-env".into(),codex_bridge::TOKEN_VAR.into()]);
+            if let Some(id)=&bridge.resume { args.extend(["resume".into(),id.clone()]); }
+            codex_bridge = Some(bridge);
+            (None,resume.is_some())
+        } else if let Some(password) = &server_password {
             let (server, conversation, existed) =
                 self.start_opencode(&row, &options, &launch, &env, password, &job, (&parent, &state_dir), &mut notes)?;
             args.extend(oc::tui_args(server.url(), &conversation));
@@ -1190,13 +1210,14 @@ impl SessionManager {
             exit: Mutex::new(None),
             finished: (Mutex::new(false), Condvar::new()),
             server,
+            codex_bridge,
             capped,
             asked: options,
             observed: Mutex::new(None),
             recorder: Mutex::new(Recorder::new(
                 row.id,
                 run_id,
-                if row.agent == AgentKind::Opencode { "server" } else { "hook" },
+                if row.agent == AgentKind::Opencode || codex_control { "server" } else { "hook" },
                 history_redact,
                 Arc::new(builtin_patterns()),
             )),
@@ -1205,14 +1226,15 @@ impl SessionManager {
             no_signal_shown: AtomicBool::new(false),
         });
         *live.run.lock().expect("run lock") = Some(run.clone());
-        if spec.resume.kind() == ResumeKind::Discovered && row.agent_session_id.is_none() {
+        if spec.resume.kind() == ResumeKind::Discovered && row.agent_session_id.is_none() && run.codex_bridge.is_none() {
             self.watch_for_conversation(&row, &run, launched_ms, &parent);
         }
         if let (Some(server), Some(conversation)) = (&run.server, conversation) {
             self.watch_opencode(row.id, &run, server.api.clone(), conversation);
         }
+        if let Some(bridge) = &run.codex_bridge { bridge.bind(self,row.id,&run); }
         if row.agent == AgentKind::Claude && run.hook_token.is_some() {
-            self.watch_claude_transcript(row.id, &run);
+            self.watch_claude_transcript(row.id, &run, launched_ms);
         }
         self.spawn_threads(live.clone(), run, child, reader, StreamScrubber::new(redact, builtin_patterns()));
         self.notify_id(row.id);
@@ -1309,9 +1331,9 @@ impl SessionManager {
     }
 
     /// Claude Code sends no hook when the user interrupts a turn (LESSONS L24), but its transcript
-    /// records it. While a turn is open, new transcript lines are checked every couple of seconds;
-    /// while none is, the reader just keeps up with the file's end.
-    fn watch_claude_transcript(self: &Arc<Self>, session_id: u32, run: &Arc<Run>) {
+    /// records it. Poll main assistant text too, including messages flushed just after Stop.
+    /// Timestamps and run identity prevent replaying older conversations on resume.
+    fn watch_claude_transcript(self: &Arc<Self>, session_id: u32, run: &Arc<Run>, launched_ms: i64) {
         let name = format!("claude-transcript-{}", run.id);
         let (m, run) = (self.clone(), run.clone());
         let _ = std::thread::Builder::new().name(name).spawn(move || {
@@ -1325,15 +1347,22 @@ impl SessionManager {
                 let len = std::fs::metadata(&path).map(|md| md.len()).unwrap_or(0);
                 let from = match &seen {
                     Some((p, at)) if *p == path && *at <= len => *at,
-                    _ => len,
+                    _ => len.saturating_sub(MAX_TRANSCRIPT_READ),
                 };
-                if !open || len == from {
+                if len == from {
                     seen = Some((path, len));
                     continue;
                 }
                 let Some((lines, read)) = read_new_lines(&path, from, len) else { continue };
                 seen = Some((path, from + read));
-                if lines.iter().any(|l| chorus_core::claude::transcript_line_interrupts(l)) {
+                for line in &lines {
+                    for (key, at, content) in chorus_core::progress::claude_message(line).into_iter().filter(|(_, at, _)| *at >= launched_ms) {
+                        if let Ok(Some(row)) = history::progress_turn(&m.store, run.id, at) {
+                            run.recorder.lock().expect("recorder lock").progress_at(&m.store, row, &key, content, at);
+                        }
+                    }
+                }
+                if open && lines.iter().any(|l| chorus_core::progress::current_interrupt(l,launched_ms)) {
                     let event = chorus_core::events::AgentEvent::TurnInterrupted { turn: None };
                     let changed = {
                         let mut r = run.recorder.lock().expect("recorder lock");
@@ -1535,7 +1564,14 @@ impl SessionManager {
         if data.len() > MAX_WRITE_BYTES {
             return Err("write too large".into());
         }
+        let live = self.open_live(id)?;
+        let _action = live.action.lock().expect("action lock");
         let run = self.running(id)?;
+        let mut recorder = run.recorder.lock().expect("recorder lock");
+        if chorus_core::composer::raw_changes_prompt(data) {
+            recorder.raw_dirty = true;
+            recorder.input_epoch = recorder.input_epoch.wrapping_add(1);
+        }
         let mut writer = run.writer.lock().expect("writer lock");
         writer.write_all(data.as_bytes()).and_then(|()| writer.flush()).map_err(|e| e.to_string())
     }
@@ -1838,3 +1874,4 @@ impl Drop for CappedGuard {
 
 #[cfg(test)]
 mod tests;
+mod codex_bridge;

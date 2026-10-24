@@ -59,12 +59,12 @@ scraping the screen, and records **every prompt durably** in SQLite.
 
 ## 4. Phases
 
-### Current position (2026-10-22)
+### Current position (2026-10-23)
 
 There are **14 active phases**: P0–P14 with P9 removed. Keep these identifiers: scope and decisions
 already refer to them. P0–P5 are closed; P4's full-day acceptance check was explicitly waived on
 2026-10-22, not performed (D72). P5's remaining work passed its app checks on 2026-10-22.
-M1 is complete with the recorded P1/P4 waivers. P6 is in progress. Work brought forward from P12 and P14
+M1 is complete with the recorded P1/P4 waivers. P6's final narrator slice is ready for review. Work brought forward from P12 and P14
 does not close those phases.
 
 | Phase | Definition | Status and remaining work |
@@ -75,7 +75,7 @@ does not close those phases.
 | P3 | Events and durable history | Closed 2026-10-19 for Claude Code, Codex and opencode; Grok has no event channel |
 | P4 | App shell and Overview | Closed 2026-10-22; full-day acceptance waived, not performed (D72) |
 | P5 | Git and worktrees | Closed 2026-10-22; retained reuse, boot reconcile, worktree panel and diff summaries verified in the app (D73–D74) |
-| P6 | Friendly view and Next steps | In progress: durable prompt delivery, Claude held-hook reply cards and a Friendly history timeline; Codex plans/control (Q19), full plan capture, queue and narrator remain |
+| P6 | Friendly view and Next steps | Ready for review: composer/images/queue, progress and Claude/Codex controls verified; narrated Now / Blocker / Up next, durable suggestions, settings and costs implemented (D82). Raw drafts remain deferred; Codex checklist emission remains conditional. |
 | P7 | Attention and notifications | Planned; fleet strip prototype exists; production inbox, notifications, tray, strip, search and export remain |
 | P8 | Bots, Automations, Notes, Documents | Planned; the four screens are placeholders |
 | P9 | Voice | Removed; separate dictation app (D22); Chorus retains compatibility (D23) |
@@ -86,8 +86,11 @@ does not close those phases.
 | P14 | More agents and ship | Partly built: Gemini, Aider, Ollama, CI, installer polish and Q28–Q30 fixes; complete real turns, DeepSeek spike/adapter, signing, updates and eventual name migration remain |
 
 **Execution order agreed 2026-10-22:** roadmap consolidation, Q28–Q30 and P5 are complete. Build P6
-and P7 for M2, then finish the remaining capability and release phases for M3. P6 starts with the
-structured action/plan channel (including Q19), then the Friendly timeline, queue and Next steps.
+and P7 for M2, then finish the remaining capability and release phases for M3. P6 began with the
+structured action/plan channel and Friendly timeline. Following the 2026-10-23 review (D77),
+the Friendly composer and durable queue were prioritised and verified (D78). Progress/control and
+multi-phase tasks followed (D81); narrator and Next steps now follow in D82. Review this final P6
+slice, then move to P7 attention and notifications.
 Record runtime evidence before closing a phase. P4's full-day check was waived by the user, not
 replaced by a short smoke test (D72).
 
@@ -279,16 +282,70 @@ reason and left its file absent. Full timeout preserved Raw's prompt; releasing 
 and answering an approval in Raw while its Friendly hook waited also passed. The timeline displays recorded prompts/final messages, collapsed
 tool calls and durable requests/reply attempts. Replies expire, reject stale runs, and never replay
 after an uncertain send. See [reply evidence and remaining gates](spikes/S5-P6-REPLIES.md).
-Q19 remains open: the current Codex/default-model probe emitted no plan and reported the plan tool
-unavailable; schema support alone still does not enable a production bridge. Checks pass: 456 Rust
+At this checkpoint Q19 remained open: the Codex/default-model probe emitted no plan and reported
+the plan tool unavailable; schema support alone still does not enable a production bridge.
+The subsequent user approval is recorded below (D77). Checks pass: 456 Rust
 tests, 19 frontend tests, TypeScript, Clippy and secret scan.
 
-**Next slices:** (1) complete the Codex app-server plan/control spike before enabling its bridge;
-(2) persisted plan and intermediate-message capture; (3) durable queue and
-composer with explicit cancel/restart/duplicate policy; (4) D28 narrator, costs and per-project switch,
-Now / Blocker / Up next and durable Done/dismissed actions; (5) both planned multi-phase acceptance runs.
-The queue, narrator/key fallback and both Friendly-only exit checks remain open. Nothing in this
-slice closes P6, P7 or the separate Gemini/Aider/P14 acceptance work.
+**User review (2026-10-23, D77):** Matthew reviewed the running app and accepted Friendly's
+current display, approving Q19 with remaining Friendly features understood. Prompting directly
+from Friendly remains required: switching to Raw to send a prompt is a temporary limitation.
+This resolves Q19's user approval, not the unperformed Codex plan/control checks, and does not
+close P6. Keep unsupported capabilities explicit until verified.
+
+**Composer and queue slice (2026-10-23, D78):** Friendly now saves per-session drafts, sends
+instructions to Claude/Codex and queues them durably for a confirmed pause. Cancellation and held
+item review share the delivery lock. Drafts survive restarts; unsent instructions are held until
+reviewed, while uncertain/written attempts never replay. Raw edits pause automatic dispatch;
+manual first sends or Raw-draft recovery use the Send click as the readiness override (D80). Other agents show
+the reason their composer delivery is unavailable. No Codex app-server plan/control capability
+was enabled by this slice.
+
+Verified in an isolated real app against Claude Code 2.1.308 and Codex 0.163.0: multiline delivery,
+agent-confirmed receipts, queued follow-ups and one composer history row per observed prompt.
+Claude also covered cancellation, Raw-draft inhibition and forced app termination with an unsent
+queue item plus a saved Friendly draft. On restart the draft survived, the queue stayed held,
+and an explicit Friendly send completed once without submitting the draft. The live test exposed
+and fixed a text/Enter batching issue (L55). Checks: 465 Rust tests, 28 frontend tests, TypeScript,
+Clippy and secret scan. See [composer verification](spikes/S5-P6-COMPOSER.md).
+
+**Composer review follow-up (2026-10-23):** Friendly opens at the latest end of its chronological
+history, with active reply cards and the composer below the messages. It follows growing content
+while near the bottom and preserves the reader's position when scrolled up. The button is now
+`Queue`. Automatic Raw draft detection/transfer is requested and remains open: the current Raw
+edit flag observes input activity, not the CLI's actual editable buffer. Investigate a supported
+editor handoff per agent; preserve existing Friendly drafts and verify that transfer cannot leave
+text in Raw to be submitted twice. Do not reconstruct the draft from terminal output or assume
+keystrokes reflect the final text after history, completion, multiline editing or attachments.
+
+**Image attachments (2026-10-23, D79):** Friendly accepts PNG/JPEG/WebP files and pasted images,
+with numbered thumbnails, X removal and a bounded preview modal. Normalized image bytes survive
+draft saving, queueing and restart. Explicit image-file references accompany the prompt in Raw;
+agents use their own image-reading tools and permissions. Verified with Claude Code 2.1.308 and
+Codex 0.163.0, including image-only queue dispatch, restart recovery, clipboard paste, preview and
+removal. The checks exposed and fixed longer-paste delivery/echo issues and concurrent Read approval
+matching (L57–L58). Checks: 471 Rust tests, 30 frontend tests, TypeScript, Clippy and secret scan.
+
+**Earlier slice plan, superseded by D81–D82:** the remaining progress/control and multi-phase
+acceptance work was completed below; Raw draft detection/transfer was explicitly deferred.
+The final narrator slice is now ready for user review. P7 and the separate Gemini/Aider/P14 work
+remain separate.
+
+**Progress/control slice (2026-10-23, D81):** Intermediate agent text and real task checklists now
+persist and display in Friendly. Codex 0.163.0 has a private authenticated server shared with Raw,
+with structured questions and once-only approvals. Claude completed a three-step checklist task
+through Friendly; Codex completed a phased task plus a queued follow-up through Friendly, with
+matching Raw history. Codex's current configuration emitted progress text but no checklist; that
+limitation remains explicit. Raw draft detection/transfer is deferred by user request; the bounded
+agent-by-agent investigation is [recorded here](spikes/S5-P6-PROGRESS.md).
+
+**Narrator and Next steps (2026-10-23, D82):** Friendly shows turn-labelled AI summaries with
+live-state precedence, optional next steps with saved Done/Dismiss/Restore, and Add to prompt
+that preserves the existing draft and attachments. Settings selects an OpenRouter model and
+provider, with project switches and narrator-only reported/unknown costs. Missing configuration,
+provider errors and uncertain attempts remain visible; calls are never automatically retried.
+Runtime acceptance and limitations are in [S5 narrator evidence](spikes/S5-P6-NARRATOR.md).
+This completes the requested implementation slices; user review is next, followed by P7.
 
 **Exit:** a Claude Code and a Codex session each run a planned multi-phase task to the end, approved and
 steered entirely from Friendly, with the Raw view showing the same history.
