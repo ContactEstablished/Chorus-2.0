@@ -190,3 +190,6 @@ search the Raw view; export the transcript; rename the session and Restart to se
 - **Front-end review:** search refocuses when reopened and Escape closes it from its buttons; j/k
   don't move the board behind the open notification panel; the strip's "!" clears after a later
   successful click; a live notification after a failed first load reads the history again.
+- **P6 images in the merged build:** a picture of "42" attached in Friendly showed its thumbnail;
+  Claude Code asked to read the managed image file (as D79 expects), and once allowed from the card it
+  answered "42".
