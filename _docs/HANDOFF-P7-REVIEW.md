@@ -121,6 +121,8 @@ Codex 0.163.0 (binary strings only, for shortcuts); Tauri 2.12.4; xterm 6.0.0 wi
 | P7-D3 | **Raw search** opens with a button or Ctrl+Shift+F; `allowProposedApi` only on the searchable terminal (xterm 6 decorations) | Proposed | Q7; Ctrl+F belongs to the terminal |
 | P7-D4 | **Claude sessions launch with `-n <name>`**; addresses are read from `~/.claude/sessions` only | Proposed | P7 Task 6 |
 
+| P7-D5 | **Each window may call only its own commands** (proposal, P7 plan §7; not built). Today `build.rs` has no `AppManifest` command list, so every custom command (102 of them, including `session_write` and `vault_*`) can be called from the fleet strip and the splash. Change: pass `tauri_build::AppManifest::new().commands(&[...])` listing every command, which generates an `allow-<command>` permission each; the main window's capability lists them all; `fleet.json` gets only `allow-sessions-list`, `allow-prefs-get` and `allow-fleet-open-session`; `splash.json` only `allow-restore-progress` (and what `splash_replay` needs). A test compares `ipc.rs`'s command list with the manifest list, so a new command can't be forgotten. Every phase's new commands then touch two lists, which is the cost | Proposed | A compromised or buggy small window could otherwise type into a session or read the vault list; the strip and splash need four commands between them |
+
 Lessons:
 - **P7-L1:** Claude Code 2.1.308 lets two live sessions hold the same `-n` name (both `nameSource:
   user`), unlike the version Chorus 1 measured, which renamed one. Chorus shows a shared name as a
