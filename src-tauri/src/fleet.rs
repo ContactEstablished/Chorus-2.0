@@ -236,10 +236,13 @@ fn keep_on_screen(app: &AppHandle) {
     let Some(w) = app.get_webview_window(LABEL) else { return };
     let (Ok(at), Ok(size)) = (w.outer_position(), w.outer_size()) else { return };
     let (areas, _) = work_areas(app);
-    if areas.is_empty() {
+    let size = (size.width as i32, size.height as i32);
+    // Only a strip whose centre is off every screen moves; one the user put across two monitors or
+    // a little over an edge stays.
+    if areas.is_empty() || chorus_core::strip::on_screen((at.x, at.y), size, &areas) {
         return;
     }
-    let (x, y) = chorus_core::strip::place(Some((at.x, at.y)), (size.width as i32, size.height as i32), &areas);
+    let (x, y) = chorus_core::strip::place(Some((at.x, at.y)), size, &areas);
     if (x, y) != (at.x, at.y) && w.set_position(PhysicalPosition::new(x, y)).is_ok()
         && let Some(manager) = app.try_state::<Arc<SessionManager>>()
     {

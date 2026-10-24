@@ -51,6 +51,17 @@ fn new_file_in(state_dir: &Path) -> PathBuf {
     state_dir.join(format!("{FILE_PREFIX}-{}-{n}.md", crate::store::now_ms()))
 }
 
+/// Instruction files in a session's state folder that no live run owns: left by a launch that
+/// failed after writing its file (it was never registered). A live run's file, an old run's
+/// included until its end is seen, is kept.
+fn sweep_orphans(state_dir: &Path) {
+    let Ok(files) = std::fs::read_dir(state_dir) else { return };
+    let owned: Vec<PathBuf> = RUN_FILES.lock().unwrap_or_else(std::sync::PoisonError::into_inner).values().cloned().collect();
+    for f in files.flatten().map(|f| f.path()).filter(|p| is_instruction_file(p) && !owned.contains(p)) {
+        let _ = std::fs::remove_file(f);
+    }
+}
+
 fn is_instruction_file(path: &Path) -> bool {
     path.extension().is_some_and(|e| e == "md")
         && path.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with(FILE_PREFIX))
@@ -88,6 +99,7 @@ fn conversation_hash(store: &Store, session_id: u32) -> Option<String> {
 /// Composes and writes the run's instructions. Never fails the launch: a problem launches without
 /// instructions and says so (D19).
 pub fn prepare(store: &Store, row: &SessionRow, state_dir: &Path, redact: &[Vec<u8>], parent: &[(String, String)]) -> Prepared {
+    sweep_orphans(state_dir);
     let file = new_file_in(state_dir);
     let mut written = None;
     let mut facts = RunInstructions::default();
@@ -358,10 +370,16 @@ mod tests {
         // Grok gets nothing, and says why.
         let p = prepare(&s, &session(&s, 3, "grok", Some(a)), &in_b, &[], &[]);
         assert!(p.args.is_empty() && !p.facts.given && p.note.is_some_and(|n| n.contains("Grok")) && p.file.is_none());
-        // A run's end removes its own file only: a Restart's newer file stays.
-        let (old, newer) = (pa.file.clone().unwrap(), prepare(&s, &row_a, &in_a, &[], &[]).file.unwrap());
+        // A run's end removes its own file only: a Restart's newer file stays, and the next launch
+        // keeps the old run's file (still owned) but sweeps one a failed launch left behind.
+        let old = pa.file.clone().unwrap();
+        RUN_FILES.lock().unwrap().insert(901, old.clone());
+        let stray = in_a.join("instructions-1-0.md");
+        std::fs::write(&stray, "left by a failed launch").unwrap();
+        let newer = prepare(&s, &row_a, &in_a, &[], &[]).file.unwrap();
         assert_ne!(old, newer);
-        RUN_FILES.lock().unwrap().extend([(901, old.clone()), (902, newer.clone())]);
+        assert!(old.exists() && !stray.exists());
+        RUN_FILES.lock().unwrap().insert(902, newer.clone());
         run_ended(901);
         assert!(!old.exists() && newer.exists());
         run_ended(902);

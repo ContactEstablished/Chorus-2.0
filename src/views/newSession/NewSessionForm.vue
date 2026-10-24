@@ -351,11 +351,22 @@ const profileName = ref('')
 // P8: the Bot the session starts from, whose instructions it copies.
 const botId = ref<number | null>(null)
 const botAgent = ref<AgentKind | null>(null)
-// A Bot belongs to its agent: choosing another agent leaves the Bot behind.
-watch(agent, (a) => {
-  if (botId.value !== null && a !== botAgent.value) botId.value = null
-})
 const savedNote = ref('')
+// A Bot belongs to its agent: choosing another agent leaves the Bot behind, and says so.
+watch(agent, (a) => {
+  if (botId.value !== null && a !== botAgent.value) {
+    botId.value = null
+    savedNote.value = `${profileName.value} is a ${AGENT_LABELS[botAgent.value!]} Bot, so this session won't use it.`
+  }
+})
+/** Archives a Bot from its chip; if it was the one applied, the session no longer uses it. */
+async function archiveBot(p: ProfileSummary): Promise<void> {
+  await profiles.archive(p.id)
+  if (botId.value === p.id) {
+    botId.value = null
+    savedNote.value = `${p.name} was archived, so this session won't use it.`
+  }
+}
 async function applyProfile(p: ProfileSummary): Promise<void> {
   agent.value = p.agent
   await nextTick()
@@ -450,7 +461,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
           <button type="button" :title="optionsText(p) || 'defaults'" @click="applyProfile(p)">
             {{ p.name }} <em>{{ AGENT_LABELS[p.agent] }}{{ p.providerName ? ` · ${p.providerName}` : '' }}</em>
           </button>
-          <button type="button" class="x" :title="`Archive ${p.name} (restore it on the Bots screen)`" @click="profiles.archive(p.id)">×</button>
+          <button type="button" class="x" :title="`Archive ${p.name} (restore it on the Bots screen)`" @click="archiveBot(p)">×</button>
         </span>
       </div>
       <p v-if="savedNote" class="hint">{{ savedNote }}</p>

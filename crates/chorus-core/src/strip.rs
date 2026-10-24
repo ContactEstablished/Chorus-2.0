@@ -42,6 +42,13 @@ pub fn place(saved: Option<(i32, i32)>, size: (i32, i32), areas: &[Area]) -> (i3
     (clamp(x, area.x, area.width, w), clamp(y, area.y, area.height, h))
 }
 
+/// Whether the strip's centre is on some screen's work area: a strip placed across two monitors,
+/// or a little over an edge, is still on screen and is left where the user put it.
+pub fn on_screen(at: (i32, i32), size: (i32, i32), areas: &[Area]) -> bool {
+    let (cx, cy) = (at.0 + size.0 / 2, at.1 + size.1 / 2);
+    areas.iter().any(|a| a.contains(cx, cy))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -70,6 +77,16 @@ mod tests {
     fn an_unplugged_monitor_moves_the_strip_to_the_nearest_screen() {
         // It was on the right monitor, which is gone.
         assert_eq!(place(Some((3000, 500)), (420, 64), &[MAIN]), (1920 - 420, 500));
+    }
+
+    #[test]
+    fn a_strip_across_two_monitors_is_still_on_screen() {
+        // Centre on the left monitor, right half over the right one.
+        assert!(on_screen((1800, 100), (420, 64), &[MAIN, RIGHT]));
+        // Hanging a little off the top edge.
+        assert!(on_screen((100, -20), (420, 64), &[MAIN]));
+        // Its monitor was unplugged.
+        assert!(!on_screen((3000, 500), (420, 64), &[MAIN]));
     }
 
     #[test]
