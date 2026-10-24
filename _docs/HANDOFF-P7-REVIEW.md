@@ -218,7 +218,7 @@ search the Raw view; export the transcript; rename the session and Restart to se
     for. Seen: a failed shell restarted three times with 40 writes in flight each time; every call
     answered and the tray redrew. The same script on the previous `attention.rs`/`tray.rs` hung
     the app: it never returned within 100 s and Windows reported Chorus not responding (stopped by
-    its PID). Which of the three rounds hung wasn't recorded.
+    its PID). It hung in the first round: on the next start only "Hang check 0" existed.
   - Two redraws could finish out of order and leave a stale count; the count is now taken and
     compared under one lock and the redraw draws the newest count when it runs.
   - The input shield kept its first size; it now follows the strip's size. Seen: the strip resized
