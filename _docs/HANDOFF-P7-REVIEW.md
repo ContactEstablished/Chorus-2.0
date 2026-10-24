@@ -159,6 +159,16 @@ Read `inbox.rs`, `badge.rs`, `fleet.rs` and `export.rs` in core, then `attention
 ask it to write a file; watch the strip chip, tray badge and bell; click the chip from another app;
 search the Raw view; export the transcript; rename the session and Restart to see its address change.
 
+Two checks need hardware or settings I didn't change here (each takes a minute):
+- **Another scale or a second monitor.** With a dictation app (or Notepad) focused, drag the strip
+  onto a screen at a different scale, then click near the strip's right and bottom edges, on empty
+  space. The other app must keep the focus and the strip must not flash active; that is the
+  shield following the strip's new size. Then unplug that monitor (or change its resolution): the
+  strip should come back onto a screen within about 5 s, without taking the focus.
+- **Swapped mouse buttons.** Settings → Bluetooth & devices → Mouse → Primary mouse button: Right.
+  Drag the strip with the right button (it should move), then click a chip with it (Chorus comes
+  forward). Set the primary button back to Left afterwards.
+
 ## 12. Follow-up on the integration branch (2026-10-24)
 
 - **Inbox, real keys, merged build:** three failed sessions stayed oldest first across an app restart;
