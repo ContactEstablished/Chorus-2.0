@@ -3,17 +3,29 @@ use crate::activity::Activity;
 
 pub const MAX_QUEUED: u32 = 32;
 
-/// Focus reports and cursor/device replies are terminal protocol, not edits to its prompt.
+/// `count` numbers separated by `;`.
+fn numbers(s: &str, count: usize) -> bool {
+    let parts: Vec<_> = s.split(';').collect();
+    parts.len() == count && parts.iter().all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
+}
+
+/// Focus reports, cursor/device replies and mouse reports are terminal protocol, not edits to its
+/// prompt. Claude Code 2.1.308 turns on any-motion mouse tracking, so merely moving the pointer
+/// over Raw sends reports.
 pub fn raw_changes_prompt(data: &str) -> bool {
     if data.is_empty() || matches!(data, "\x1b[I" | "\x1b[O") {
         return false;
     }
     if let Some(body) = data.strip_prefix("\x1b[") {
-        if let Some(coords) = body.strip_suffix('R') {
-            let parts: Vec<_> = coords.split(';').collect();
-            if parts.len() == 2 && parts.iter().all(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit())) {
-                return false;
-            }
+        if body.strip_suffix('R').is_some_and(|coords| numbers(coords, 2)) {
+            return false;
+        }
+        // SGR (1006) reports, then the older form: three bytes for the button and position.
+        if body.strip_prefix('<').and_then(|s| s.strip_suffix(['M', 'm'])).is_some_and(|report| numbers(report, 3)) {
+            return false;
+        }
+        if body.strip_prefix('M').is_some_and(|b| b.chars().count() == 3 && b.chars().all(|c| c >= ' ')) {
+            return false;
         }
         if let Some(attributes) = body.strip_prefix('?').and_then(|s| s.strip_suffix('c'))
             && !attributes.is_empty()
@@ -55,11 +67,12 @@ mod tests {
     use super::*;
     #[test]
     fn terminal_reports_are_not_user_drafts_but_mixed_input_is() {
-        for data in ["", "\x1b[I", "\x1b[O", "\x1b[1;2R", "\x1b[?1;2c"] {
-            assert!(!raw_changes_prompt(data));
+        // Mouse: pointer motion and a release as xterm.js reported them, the wheel, an older-form press.
+        for data in ["", "\x1b[I", "\x1b[O", "\x1b[1;2R", "\x1b[?1;2c", "\x1b[<35;73;23M", "\x1b[<0;10;5m", "\x1b[<64;1;1M", "\x1b[M #!"] {
+            assert!(!raw_changes_prompt(data), "{data:?}");
         }
-        for data in ["hello", "\r", "\x03", "\x1b[A", "\x1b[Ihello", "\x1b[1;2Rhello"] {
-            assert!(raw_changes_prompt(data));
+        for data in ["hello", "\r", "\x03", "\x1b[A", "\x1b[Ihello", "\x1b[1;2Rhello", "\x1b[<35;73;23Mhello", "\x1b[<35;73M", "\x1b[Mab"] {
+            assert!(raw_changes_prompt(data), "{data:?}");
         }
     }
     #[test]

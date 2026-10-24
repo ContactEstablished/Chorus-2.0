@@ -105,6 +105,13 @@ a folder for the user, D55). A session's warning now shows above both Friendly a
 the review instance: a temporary automation on an untrusted folder listed the reason, Run now
 started nothing, and a closed automation session's note showed in Friendly and once in Raw.
 
+**Also found then, and fixed:** a finished automation session Matthew had looked at in Raw was not
+closed. Claude Code 2.1.308 turns on any-motion mouse tracking, so moving the pointer over Raw sends
+mouse reports, and Chorus counted them as typing (which also marked Raw as edited for Friendly's
+Send). Mouse reports now count as terminal protocol, like focus and cursor reports. Seen in the
+review instance: with Raw open and the pointer moving over it through a whole run, 24 mouse reports
+reached the agent and Chorus still closed it about a second after its turn.
+
 **Proposed lesson (to number):** in Tauri 2.12, once `AppManifest::commands` is set, every app
 command is checked against the calling window's capabilities, the main window's included. Each
 command's permission is `allow-<name with hyphens>`. Debug builds say where a refused command is
