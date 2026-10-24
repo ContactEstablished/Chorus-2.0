@@ -195,6 +195,7 @@ export const events = {
 	fleetRosterChanged: makeEvent<FleetRosterChanged>("fleet-roster-changed"),
 	fleetShown: makeEvent<FleetShown>("fleet-shown"),
 	notificationAdded: makeEvent<NotificationAdded>("notification-added"),
+	prefsChanged: makeEvent<PrefsChanged>("prefs-changed"),
 	sessionUpdated: makeEvent<SessionUpdated>("session-updated"),
 };
 
@@ -1019,6 +1020,11 @@ export type Prefs = {
 	sessionStrip: boolean,
 	/**  Whether the 3D splash plays as Chorus starts. */
 	splash: boolean,
+};
+
+/**  The preferences changed: other windows (the fleet strip) follow the theme. */
+export type PrefsChanged = {
+	prefs: Prefs,
 };
 
 export type Preset = 

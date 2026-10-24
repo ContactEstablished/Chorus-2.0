@@ -135,6 +135,7 @@ pub fn builder() -> Builder<tauri::Wry> {
             attention::AttentionNavigate,
             fleet::FleetShown,
             fleet_registry::FleetRosterChanged,
+            prefs::PrefsChanged,
         ])
 }
 

@@ -4,9 +4,19 @@
 use std::sync::Arc;
 
 use chorus_core::prefs::Prefs;
+use serde::{Deserialize, Serialize};
+use specta::Type;
 use tauri::{AppHandle, Manager as _, State};
+use tauri_specta::Event;
 
 use crate::sessions::SessionManager;
+
+/// The preferences changed: other windows (the fleet strip) follow the theme.
+#[derive(Debug, Clone, Serialize, Deserialize, Type, Event)]
+#[serde(rename_all = "camelCase")]
+pub struct PrefsChanged {
+    pub prefs: Prefs,
+}
 use crate::store::{Store, settings};
 
 type Manager<'a> = State<'a, Arc<SessionManager>>;
@@ -40,5 +50,6 @@ pub fn prefs_set(app: AppHandle, state: Manager<'_>, prefs: Prefs) -> Result<Pre
     if (before.zoom - clean.zoom).abs() > f64::EPSILON {
         apply_zoom(&app, clean.zoom)?;
     }
+    let _ = PrefsChanged { prefs: clean.clone() }.emit(&app);
     Ok(clean)
 }

@@ -38,6 +38,8 @@ onMounted(async () => {
       else next.set(payload.session.id, payload.session)
       sessions.value = next
     }),
+    // The theme follows Settings while the strip is open.
+    await events.prefsChanged.listen(({ payload }) => (document.documentElement.dataset.theme = payload.prefs.theme)),
     await events.fleetClick.listen(({ payload }) => {
       const el = document.elementFromPoint(payload.x / devicePixelRatio, payload.y / devicePixelRatio)
       el?.closest<HTMLElement>('button')?.click()
