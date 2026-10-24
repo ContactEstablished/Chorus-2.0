@@ -294,15 +294,13 @@ fn view(m: &SessionManager, a: &AutoRow) -> Automation {
 }
 
 /// A prompt Chorus will keep and pass on the command line: one line or more, no control
-/// characters, and not something the CLI would read as an option or a subcommand.
+/// characters, and not something the CLI would read as a subcommand. It goes after `--`, so one
+/// starting with "-" (a Markdown list) is still a prompt, not an option.
 fn check_prompt(store: &Store, prompt: &str) -> Result<String, String> {
     let p = chorus_core::actions::clean_prompt(prompt)?;
     let p = p.trim().to_owned();
     if p.len() > MAX_PROMPT_BYTES {
         return Err("A prompt is up to 16 KiB.".into());
-    }
-    if p.starts_with('-') {
-        return Err("A prompt can't start with \"-\": the agent would read it as an option.".into());
     }
     if !p.contains(char::is_whitespace) {
         return Err("Write the prompt as a sentence: a single word could be read as one of the agent's commands.".into());
@@ -612,6 +610,8 @@ mod tests {
     fn a_prompt_is_checked_before_it_is_kept() {
         let s = Store::in_memory();
         assert!(check_prompt(&s, "--help").is_err());
+        // A Markdown list is a prompt: it goes after `--` on the command line.
+        assert_eq!(check_prompt(&s, "- check the build").unwrap(), "- check the build");
         assert!(check_prompt(&s, "update").is_err());
         assert!(check_prompt(&s, &format!("use sk-or-v1-{} now", "z9".repeat(20))).unwrap_err().contains("key"));
         assert_eq!(check_prompt(&s, "  Summarise the open issues  ").unwrap(), "Summarise the open issues");

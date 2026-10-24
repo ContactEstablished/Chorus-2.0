@@ -144,10 +144,11 @@ pub fn prepare(store: &Store, row: &SessionRow, state_dir: &Path, redact: &[Vec<
         args.extend(["--system-prompt-snapshot".to_owned(), "off".to_owned()]);
         facts.fresh_prompt = true;
     }
-    // An automation's first prompt goes last: it is the CLI's positional prompt.
+    // An automation's first prompt goes last: it is the CLI's positional prompt, after `--` so a
+    // prompt starting with "-" (a Markdown list, say) isn't read as an option (checked on 2.1.308).
     let first_prompt = crate::automations::staged(store, row);
     if let Some(p) = &first_prompt {
-        args.push(p.text.clone());
+        args.extend(["--".to_owned(), p.text.clone()]);
     }
     Prepared { args, facts, note, first_prompt, codex }
 }
@@ -331,6 +332,19 @@ mod tests {
         assert!(!file_in(&in_b).exists());
         run_ended(&in_a);
         assert!(!file_in(&in_a).exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_automation_prompt_starting_with_a_dash_follows_the_end_of_options() {
+        let s = Store::in_memory();
+        let row = session(&s, 1, "claude", None);
+        s.with(|c| c.execute("INSERT INTO prompts (session_id,run_id,source,text,created_at) VALUES (1,NULL,'automation','- check the build',1)", []))
+            .unwrap();
+        let dir = std::env::temp_dir().join(format!("chorus-instr-dash-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = prepare(&s, &row, &dir, &[], &[]);
+        assert_eq!(p.args[p.args.len() - 2..], ["--", "- check the build"]);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
