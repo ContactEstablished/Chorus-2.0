@@ -131,6 +131,11 @@ Lessons:
 - **P7-L2:** In xterm 6, `registerDecoration` is still proposed API; search highlights throw unless
   `allowProposedApi` is on. The addon also takes `#RRGGBB` colours only.
 - **P7-L3:** `procStart` in Claude's registry is the process creation FILETIME in decimal.
+- **P7-L4:** In Tauri 2.12.4 the tray and menu setters (`set_icon`, `set_tooltip`, `set_checked`)
+  post to the main thread and wait for it (`run_item_main_thread!`); so do window getters, the
+  monitor lists and building a window. Commands without `async` run on the main thread. Calling one
+  of those while holding a lock that a sync command takes hangs the app (reproduced, §12). Post
+  the work with `run_on_main_thread`, which runs at once when already on the main thread.
 
 PLAN: P7 built and verified as in §6; awaiting Matthew's review.
 
