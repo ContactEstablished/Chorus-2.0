@@ -11,6 +11,7 @@ import { useBotsStore } from '../stores/bots'
 import { useProjectsStore } from '../stores/projects'
 import { useViewStore } from '../stores/view'
 import { useNoticesStore } from '../stores/notices'
+import { automationStatus, runOutcome } from './botText'
 
 const bots = useBotsStore()
 const projects = useProjectsStore()
@@ -141,17 +142,11 @@ function at(secs: number | null): string {
 }
 
 function lastText(a: Automation): { text: string; cls: string } {
-  if (a.problem) return { text: 'can\u2019t run', cls: 'bad' }
-  if (!a.enabled) return { text: 'paused', cls: 'paused' }
-  const r = a.lastRun
-  if (!r) return { text: a.nextRunAtSecs ? `next ${at(a.nextRunAtSecs)}` : 'not run yet', cls: '' }
-  if (r.outcome === 'started') return { text: `last run \u2713 ${at(r.dueAtSecs)}`, cls: 'ok' }
-  return { text: `last run ${r.outcome} ${at(r.dueAtSecs)}`, cls: r.outcome === 'failed' ? 'bad' : 'paused' }
+  return automationStatus(a, at)
 }
 
 function outcomeText(r: AutomationRun): string {
-  if (r.outcome === 'started') return `Started a session${r.sessionStatus ? `, now ${r.sessionStatus}` : ''}`
-  return r.note ?? r.outcome
+  return runOutcome(r)
 }
 </script>
 

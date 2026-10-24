@@ -10,6 +10,7 @@ import TagInput from '../components/TagInput.vue'
 import { useBotsStore } from '../stores/bots'
 import { useAgentsStore } from '../stores/agents'
 import { AGENT_CHIPS } from '../shell/status'
+import { botUsage } from './botText'
 import { AGENT_LABELS, EFFORT_LABELS, PERMISSION_LABELS } from '../raw/labels'
 
 const bots = useBotsStore()
@@ -53,10 +54,7 @@ const PRESETS: { value: Preset | null; label: string }[] = [
 ]
 
 function usage(b: Bot): string {
-  if (b.openSessions > 0) return `Used by ${b.openSessions} session${b.openSessions === 1 ? '' : 's'}`
-  if (b.automations > 0) return `Triggered by ${b.automations === 1 ? 'an automation' : `${b.automations} automations`}`
-  if (b.sessions > 0) return `Started ${b.sessions} session${b.sessions === 1 ? '' : 's'}`
-  return 'Not used yet'
+  return botUsage(b)
 }
 
 function startNew(): void {

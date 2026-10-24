@@ -6,6 +6,7 @@
  */
 import { computed, onMounted, ref, watch } from 'vue'
 import Icon from '../components/Icon.vue'
+import { matchCount } from './search'
 
 interface Searchable {
   find: (text: string, backwards?: boolean, caseSensitive?: boolean) => boolean
@@ -23,12 +24,7 @@ const input = ref<HTMLInputElement | null>(null)
 // The addon reports results through an event, after the search; the terminal keeps them reactive.
 const results = computed(() => props.term?.results() ?? null)
 
-const count = computed(() => {
-  const r = results.value
-  if (!text.value || !r) return ''
-  if (!r.count) return 'No matches'
-  return r.index < 0 ? `${r.count}+ matches` : `${r.index + 1} of ${r.count}`
-})
+const count = computed(() => matchCount(text.value, results.value))
 
 function find(backwards = false): void {
   props.term?.find(text.value, backwards, caseSensitive.value)
