@@ -311,3 +311,11 @@ Checked again after merging with P7 (`evening/p6-p8`), in an isolated instance:
   a writing tool. Seen with Codex 0.163.0: a plan written with `apply_patch` appeared in Documents,
   linked to its session. A file written by a shell command (Codex's `pwsh`, Claude's `Bash`) has no
   recorded path and is still not found, for any agent; only the first file of a multi-file patch is.
+- **Automation prompts follow `--`.** The positional prompt now comes after the end-of-options
+  marker (checked on Claude Code 2.1.308), so the refusal of prompts starting with "-" was removed and
+  a Markdown list works; single-word prompts are still refused. Seen: "- Reply with only the canary
+  word." ran once with source `automation`.
+- **Reviewed:** the migration keeps every profile (rename plus defaulted columns), the instruction
+  file is scrubbed with every vault key and the built-in patterns before it is written and is deleted
+  at run end and start-up, and a long closure records one "missed" row per automation, not one per
+  slot.
