@@ -226,3 +226,6 @@ search the Raw view; export the transcript; rename the session and Restart to se
     then hide, one strip window after two shows.
   - With the mouse buttons swapped the strip couldn't be dragged; the press loop now follows the
     primary button. Not tried (it would change this machine's mouse setting).
+  - Checked for the same pattern elsewhere: the other calls that wait for the main thread (the
+    monitor lists, building the strip, the save and folder dialogs) run off it and hold no lock the
+    main thread takes; the strip's new open lock is only taken off the main thread.
