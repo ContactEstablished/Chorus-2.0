@@ -8,7 +8,6 @@ import Rail from '../shell/Rail.vue'
 import TitleBar from '../shell/TitleBar.vue'
 import StatusBar from '../shell/StatusBar.vue'
 import Notices from '../shell/Notices.vue'
-import PhasePlaceholder from '../shell/PhasePlaceholder.vue'
 import { useAppStore } from '../stores/app'
 import { useSessionsStore } from '../stores/sessions'
 import { useProjectsStore } from '../stores/projects'
@@ -26,6 +25,7 @@ const SettingsView = defineAsyncComponent(() => import('../views/SettingsView.vu
 const NotesView = defineAsyncComponent(() => import('../views/NotesView.vue'))
 const BotsView = defineAsyncComponent(() => import('../views/BotsView.vue'))
 const DocumentsView = defineAsyncComponent(() => import('../views/DocumentsView.vue'))
+const AutomationsView = defineAsyncComponent(() => import('../views/AutomationsView.vue'))
 const NewSessionDialog = defineAsyncComponent(() => import('../views/NewSessionDialog.vue'))
 const CommandPalette = defineAsyncComponent(() => import('../shell/CommandPalette.vue'))
 
@@ -85,13 +85,7 @@ watch(
         <SessionView v-else-if="view.name === 'session' && view.sessionId !== null" :session-id="view.sessionId" />
         <SessionsView v-else-if="view.name === 'sessions'" />
         <BotsView v-else-if="view.name === 'bots'" />
-        <PhasePlaceholder
-          v-else-if="view.name === 'automations'"
-          title="Automations"
-          icon="automations"
-          phase="Phase 8"
-          what="Run a Bot on a schedule, or later on a GitHub trigger. Each run is an ordinary session you can open."
-        />
+        <AutomationsView v-else-if="view.name === 'automations'" />
         <DocumentsView v-else-if="view.name === 'documents'" />
         <NotesView v-else-if="view.name === 'notes'" />
         <OverviewView v-else />
