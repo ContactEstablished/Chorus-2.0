@@ -2,11 +2,11 @@
 
 ## 1. Verdict
 
-Built: every P7 task. Seen working in an isolated dev instance (Claude Code 2.1.308): the 2 s
-exit gate, chip-click navigation, the D23 focus check with real OS input, notifications, search,
-export with a planted fake key, and fleet addressing. Not verified: the tray icon's left click and
-menu with real input, a failure notification end to end, other DPI scales and monitors, and opencode's
-shortcut bindings (not installed here). P7 is ready for Matthew's review, not closed.
+Built: every P7 task. Seen working in isolated dev instances (Claude Code 2.1.308): the 2 s exit
+gate, chip-click navigation, the D23 focus check with real OS input, the tray icon's left click with
+real input, approval and failure notifications, search, export with a planted fake key, and fleet
+addressing. Not verified: the tray menu, other DPI scales and monitors, and opencode's shortcut
+bindings (not installed here). P7 is ready for Matthew's review, not closed.
 
 ## 2. Branch
 
@@ -89,7 +89,11 @@ Runtime, isolated `eve7` instance, Claude Code 2.1.308 on haiku (Fast), scratch 
 - **Chip click:** real OS click on the chip brought Chorus forward on that session.
 - **D23 with real input:** an external test window kept the foreground through a click on empty
   strip space and an 80 px drag (and the drag back); typed text landed there ("abcd").
-- **Notifications:** one row per episode; unchanged after approving in Raw and after Restart.
+- **Notifications:** one row per episode; unchanged after approving in Raw and after Restart. In the
+  merged build, a shell exiting with code 3 notified "failed" once, and a Friendly approval notified
+  "approval".
+- **Tray (merged build):** the icon sat in Windows 11's hidden-icons flyout with the tooltip "Chorus:
+  1 session needs you"; a real click on it brought Chorus forward on the Overview filtered to Needs you.
 - **Search:** 3 matches for "hi" with highlights, Enter stepped to the next, a missing word said "No
   matches", Ctrl+Shift+F in the terminal opened the bar.
 - **Export:** a fake OpenRouter-shaped key planted in a prompt was in Claude's own transcript and in
@@ -97,8 +101,8 @@ Runtime, isolated `eve7` instance, Claude Code 2.1.308 on haiku (Fast), scratch 
 - **Fleet:** sessions verified; a rename plus Restart updated the address; two sessions given the same
   name both showed the collision. Another live Claude session (not Chorus's) was listed with no actions.
 
-Not verified: the tray icon's own click and menu with real input (new tray icons start in the
-overflow area on Windows 11); a failure notification end to end; question notifications; other DPI
+Not verified: the tray menu items with real input (new tray icons start in the overflow area on
+Windows 11); question notifications; other DPI
 scales or monitor changes (one monitor at 100 %); opencode's Ctrl+Shift+F (not installed). Codex's
 binary showed no Ctrl+Shift+F binding string and Claude Code's default table binds Ctrl+F, not
 Ctrl+Shift+F; neither was checked against docs.
