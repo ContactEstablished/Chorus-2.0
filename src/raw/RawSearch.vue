@@ -9,7 +9,7 @@ import Icon from '../components/Icon.vue'
 import { matchCount } from './search'
 
 interface Searchable {
-  find: (text: string, backwards?: boolean, caseSensitive?: boolean) => boolean
+  find: (text: string, backwards?: boolean, caseSensitive?: boolean, typing?: boolean) => boolean
   clearSearch: () => void
   results: () => { index: number; count: number } | null
   focus: () => void
@@ -26,8 +26,8 @@ const results = computed(() => props.term?.results() ?? null)
 
 const count = computed(() => matchCount(text.value, results.value))
 
-function find(backwards = false): void {
-  props.term?.find(text.value, backwards, caseSensitive.value)
+function find(backwards = false, typing = false): void {
+  props.term?.find(text.value, backwards, caseSensitive.value, typing)
 }
 
 function close(): void {
@@ -47,7 +47,8 @@ function onKey(e: KeyboardEvent): void {
   }
 }
 
-watch([text, caseSensitive], () => find())
+// Typing refines the current match; Enter and the arrows move to the next or previous.
+watch([text, caseSensitive], () => find(false, true))
 onMounted(() => input.value?.focus())
 defineExpose({ focus: () => input.value?.focus() })
 </script>

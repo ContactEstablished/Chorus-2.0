@@ -69,7 +69,7 @@ defineExpose({
   screenText,
   bufferText: () => term.value?.bufferText() ?? '',
   focus: () => term.value?.focus(),
-  find: (text: string, backwards = false, caseSensitive = false) => term.value?.find(text, backwards, caseSensitive) ?? false,
+  find: (text: string, backwards = false, caseSensitive = false, typing = false) => term.value?.find(text, backwards, caseSensitive, typing) ?? false,
   clearSearch: () => term.value?.clearSearch(),
   results: () => term.value?.results ?? null,
 })

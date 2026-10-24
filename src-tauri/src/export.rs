@@ -32,13 +32,16 @@ pub struct ExportResult {
     pub transcript_note: Option<String>,
 }
 
-fn scrubber(manager: &SessionManager) -> Result<impl Fn(&[u8]) -> Vec<u8> + Send + 'static, String> {
+/// Removes secrets from bytes: the built-in patterns and every vault key.
+type Scrub = Box<dyn Fn(&[u8]) -> Vec<u8> + Send>;
+
+fn scrubber(manager: &SessionManager) -> Result<Scrub, String> {
     let (keys, unreadable) = crate::vault::all_for_scrubbing(manager.store());
     if unreadable != 0 {
         return Err("A vault key could not be read for scrubbing, so nothing was exported.".into());
     }
     let patterns = chorus_core::scrub::builtin_patterns();
-    Ok(move |bytes: &[u8]| chorus_core::scrub::scrub_all(bytes, &keys, &patterns))
+    Ok(Box::new(move |bytes: &[u8]| chorus_core::scrub::scrub_all(bytes, &keys, &patterns)))
 }
 
 /// Where the copy of the agent's transcript goes: beside the export, with the source's extension.
@@ -53,6 +56,44 @@ fn transcript_target(export: &Path, source: &Path) -> PathBuf {
 #[specta::specta]
 pub async fn session_export(app: AppHandle, state: ManagerState<'_>, session_id: u32, include_transcript: bool) -> Result<Option<ExportResult>, String> {
     let manager = state.inner().clone();
+    // The history (every turn) is read, rendered and scrubbed off the async runtime.
+    let preparing = manager.clone();
+    let Rendered { text, file_name: default_name, turns, scrub } =
+        tauri::async_runtime::spawn_blocking(move || render(&preparing, session_id)).await.map_err(|e| e.to_string())??;
+
+    let chosen = tauri::async_runtime::spawn_blocking(move || {
+        use tauri_plugin_dialog::DialogExt;
+        let mut dialog =
+            app.dialog().file().set_title("Export transcript").set_file_name(default_name).add_filter("Markdown", &["md"]);
+        if let Some(window) = app.get_webview_window("main") {
+            dialog = dialog.set_parent(&window);
+        }
+        dialog.blocking_save_file().and_then(|p| p.into_path().ok())
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    let Some(path) = chosen else { return Ok(None) };
+    if !path.is_absolute() || !path.parent().is_some_and(Path::is_dir) {
+        return Err(format!("{} isn't in a folder that exists.", path.display()));
+    }
+    let transcript = if include_transcript { Some(history::session_transcript(manager.store(), session_id)?) } else { None };
+    // Reading and scrubbing a transcript of tens of MB mustn't hold up an async worker.
+    tauri::async_runtime::spawn_blocking(move || write_files(&path, &text, transcript, &scrub, turns))
+        .await
+        .map_err(|e| e.to_string())?
+        .map(Some)
+}
+
+/// The session's history as scrubbed Markdown, a file name for it, its turn count, and the scrubber
+/// for the agent's transcript.
+struct Rendered {
+    text: Vec<u8>,
+    file_name: String,
+    turns: u32,
+    scrub: Scrub,
+}
+
+fn render(manager: &SessionManager, session_id: u32) -> Result<Rendered, String> {
     let summary = manager.summary(session_id)?;
     let turns = history::recent_turns(manager.store(), session_id, MAX_TURNS)?;
     let rendered: Vec<ExportTurn> = turns
@@ -74,32 +115,9 @@ pub async fn session_export(app: AppHandle, state: ManagerState<'_>, session_id:
         .collect();
     let now = crate::store::now_ms() / 1000;
     let session = ExportSession { name: &summary.name, agent: summary.agent.display_name(), cwd: &summary.cwd, exported_at: now };
-    let scrub = scrubber(&manager)?;
+    let scrub = scrubber(manager)?;
     let text = scrub(export::markdown(&session, &rendered).as_bytes());
-    let default_name = export::file_name(&summary.name);
-
-    let chosen = tauri::async_runtime::spawn_blocking(move || {
-        use tauri_plugin_dialog::DialogExt;
-        let mut dialog =
-            app.dialog().file().set_title("Export transcript").set_file_name(default_name).add_filter("Markdown", &["md"]);
-        if let Some(window) = app.get_webview_window("main") {
-            dialog = dialog.set_parent(&window);
-        }
-        dialog.blocking_save_file().and_then(|p| p.into_path().ok())
-    })
-    .await
-    .map_err(|e| e.to_string())?;
-    let Some(path) = chosen else { return Ok(None) };
-    if !path.is_absolute() || !path.parent().is_some_and(Path::is_dir) {
-        return Err(format!("{} isn't in a folder that exists.", path.display()));
-    }
-    let turns = rendered.len() as u32;
-    let transcript = if include_transcript { Some(history::session_transcript(manager.store(), session_id)?) } else { None };
-    // Reading and scrubbing a transcript of tens of MB mustn't hold up an async worker.
-    tauri::async_runtime::spawn_blocking(move || write_files(&path, &text, transcript, &scrub, turns))
-        .await
-        .map_err(|e| e.to_string())?
-        .map(Some)
+    Ok(Rendered { text, file_name: export::file_name(&summary.name), turns: rendered.len() as u32, scrub })
 }
 
 /// Writes the export and, when asked (`transcript` is `Some`), the scrubbed agent transcript.

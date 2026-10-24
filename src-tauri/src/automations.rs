@@ -415,7 +415,7 @@ fn fire(m: &Arc<SessionManager>, a: &AutoRow, trigger: Trigger, due_at: i64) -> 
     let request = CreateSession {
         agent: bot.agent,
         cwd: a.cwd.clone(),
-        name: Some(format!("{} #{number}", a.name)),
+        name: Some(run_name(&a.name, number)),
         credential: bot.credential.clone(),
         cols: 120,
         rows: 30,
@@ -441,12 +441,23 @@ fn fire(m: &Arc<SessionManager>, a: &AutoRow, trigger: Trigger, due_at: i64) -> 
     }
 }
 
+/// A run's session name: the automation's, shortened if need be so " #N" still fits the session
+/// name limit (an 80-character automation name would otherwise fail every firing).
+fn run_name(name: &str, number: u32) -> String {
+    let suffix = format!(" #{number}");
+    let room = chorus_core::session::MAX_NAME_CHARS.saturating_sub(suffix.chars().count());
+    let base: String = name.chars().take(room).collect();
+    format!("{}{suffix}", base.trim_end())
+}
+
 /// One pass of the scheduler: everything due fires or is recorded as missed, and gets its next
 /// time. Returns the soonest next time.
 fn tick(m: &Arc<SessionManager>, app_started: i64) -> Option<i64> {
     let now = now_ms();
     let mut soonest: Option<i64> = None;
-    for a in rows(m.store()).unwrap_or_default().into_iter().filter(|a| a.enabled) {
+    for listed in rows(m.store()).unwrap_or_default() {
+        // Read again just before deciding: an edit, pause or delete since the list was read wins.
+        let Some(a) = row(m.store(), listed.id).ok().flatten().filter(|a| a.enabled) else { continue };
         let Some(next) = a.next_run_at else { continue };
         let fired = match sched::due(next, now, app_started) {
             Due::Wait => None,
@@ -458,7 +469,10 @@ fn tick(m: &Arc<SessionManager>, app_started: i64) -> Option<i64> {
                 eprintln!("chorus: automation {}: {e}", a.id);
             }
             let n = next_after(m.store(), &a.schedule, now, next);
-            let _ = m.store().with(|c| c.execute("UPDATE automations SET next_run_at = ?2 WHERE id = ?1", params![a.id, n]));
+            // Only if nobody saved or paused it meanwhile: their next time (or pause) stands.
+            let _ = m.store().with(|c| {
+                c.execute("UPDATE automations SET next_run_at = ?2 WHERE id = ?1 AND next_run_at = ?3 AND enabled = 1", params![a.id, n, next])
+            });
             n
         } else {
             next
@@ -526,15 +540,24 @@ pub fn staged(store: &Store, row: &SessionRow) -> Option<Staged> {
 /// echo of it is matched once (D75) rather than recorded again.
 pub fn launched(store: &Store, session_id: u32, run_id: u32, p: &Staged) {
     let request = chorus_core::agent::uuid_v4(vault::random_bytes(16).try_into().unwrap_or([0; 16]));
-    let _ = store.with(|c| {
-        let tx = c.unchecked_transaction()?;
-        tx.execute("UPDATE prompts SET run_id = ?2 WHERE id = ?1", params![p.prompt_id, run_id])?;
-        tx.execute(
-            "INSERT INTO prompt_deliveries (prompt_id, session_id, run_id, request_id, status, attempted_at) VALUES (?1, ?2, ?3, ?4, 'written', ?5)",
-            params![p.prompt_id, session_id, run_id, request, now_ms()],
-        )?;
-        tx.commit()
-    });
+    let link = || {
+        store.with(|c| {
+            let tx = c.unchecked_transaction()?;
+            tx.execute("UPDATE prompts SET run_id = ?2 WHERE id = ?1", params![p.prompt_id, run_id])?;
+            tx.execute(
+                "INSERT INTO prompt_deliveries (prompt_id, session_id, run_id, request_id, status, attempted_at) VALUES (?1, ?2, ?3, ?4, 'written', ?5)",
+                params![p.prompt_id, session_id, run_id, request, now_ms()],
+            )?;
+            tx.commit()
+        })
+    };
+    if (0..3).any(|_| link().is_ok()) {
+        return;
+    }
+    // The prompt was passed on, but couldn't be tied to its run. A staged prompt is passed again at
+    // the next start, which would run the task twice, so it goes; the hook's echo still records it.
+    eprintln!("chorus: automation prompt {} couldn't be linked to run {run_id}; unstaged", p.prompt_id);
+    unstage(store, session_id);
 }
 
 /// A staged prompt that no run passed on goes.
@@ -608,6 +631,16 @@ mod tests {
         let s = Store::in_memory();
         let o = offset_at(&s, 1_792_713_600_000);
         assert!((-14 * 60..=14 * 60).contains(&o));
+    }
+
+    #[test]
+    fn a_long_name_still_leaves_room_for_the_run_number() {
+        assert_eq!(run_name("Nightly", 3), "Nightly #3");
+        let long = "x".repeat(80);
+        let name = run_name(&long, 12);
+        assert_eq!(name.chars().count(), chorus_core::session::MAX_NAME_CHARS);
+        assert!(name.ends_with(" #12"));
+        assert!(chorus_core::session::clean_name(Some(&name), "s").is_ok());
     }
 
     #[test]

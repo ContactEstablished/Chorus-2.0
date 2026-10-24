@@ -11,12 +11,14 @@ pub struct WaitingFacts {
     pub run_ended_at: Option<i64>,
 }
 
-/// Missing evidence stays unknown. A stopped process takes precedence over its last turn.
+/// Missing evidence stays unknown. A failure starts when the run's last turn failed, if it did,
+/// else when the process stopped: a failed turn followed by the process exiting is one failure,
+/// with one start (and so one notification).
 pub fn needs_you_since(attention: Attention, facts: &WaitingFacts) -> Option<i64> {
     let at = match attention {
         Attention::Approval => facts.approval_at,
         Attention::Input => facts.question_at.or(facts.question_turn_ended_at),
-        Attention::Failed => facts.run_ended_at.or(facts.failed_turn_ended_at),
+        Attention::Failed => facts.failed_turn_ended_at.or(facts.run_ended_at),
         _ => None,
     };
     at.filter(|at| *at >= 0)
@@ -140,7 +142,10 @@ mod tests {
         };
         assert_eq!(needs_you_since(Attention::Approval, &facts), Some(10));
         assert_eq!(needs_you_since(Attention::Input, &facts), Some(20));
-        assert_eq!(needs_you_since(Attention::Failed, &facts), Some(50));
+        // A failed turn and then the process stopping are one failure, starting at the turn.
+        assert_eq!(needs_you_since(Attention::Failed, &facts), Some(40));
+        let exited_only = WaitingFacts { run_ended_at: Some(50), ..Default::default() };
+        assert_eq!(needs_you_since(Attention::Failed, &exited_only), Some(50));
         for attention in [
             Attention::Working,
             Attention::Ready,

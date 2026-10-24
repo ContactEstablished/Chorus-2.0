@@ -133,14 +133,16 @@ function bufferText(): string {
 // The addon takes #RRGGBB backgrounds only (no alpha).
 const MATCH = { matchBackground: '#5c4a12', matchOverviewRuler: '#ffc400', activeMatchBackground: '#136b80', activeMatchColorOverviewRuler: '#1ec8f0' }
 
-/** Finds `text` in the buffer, scrollback included, forwards or backwards from the last match. */
-function find(text: string, backwards = false, caseSensitive = false): boolean {
+/** Finds `text` in the buffer, scrollback included, forwards or backwards from the last match.
+ * `typing` (search as you type) keeps the match under the selection when it still matches, rather
+ * than moving past it. */
+function find(text: string, backwards = false, caseSensitive = false, typing = false): boolean {
   if (!search) return false
   if (!text) {
     clearSearch()
     return false
   }
-  const options = { caseSensitive, decorations: MATCH }
+  const options = { caseSensitive, decorations: MATCH, incremental: typing && !backwards }
   const found = backwards ? search.findPrevious(text, options) : search.findNext(text, options)
   if (!found) results.value = { index: -1, count: 0 }
   return found

@@ -217,24 +217,54 @@ pub fn text_hash(s: &str) -> String {
     format!("{h:016x}")
 }
 
+/// Longest skill name and description kept for the index, in characters, so one skill can't use
+/// up the instructions' size limit.
+pub const MAX_SKILL_NAME_CHARS: usize = 80;
+pub const MAX_SKILL_DESCRIPTION_CHARS: usize = 300;
+
+fn bounded(text: &str, max: usize) -> Option<String> {
+    let one_line = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut out: String = one_line.chars().take(max).collect();
+    if one_line.chars().count() > max {
+        out.push('…');
+    }
+    (!out.is_empty()).then_some(out)
+}
+
 /// A skill's name and description from its `SKILL.md` front matter (`---` … `---`, with `name:`
-/// and `description:` lines). Without a name, the folder's own name is used by the caller.
+/// and `description:` lines; a description may be a `|` or `>` block of indented lines). Without
+/// a name, the folder's own name is used by the caller. Both are bounded and kept on one line.
 pub fn parse_skill(text: &str) -> Option<(Option<String>, Option<String>)> {
-    let mut lines = text.lines();
+    let mut lines = text.lines().peekable();
     if lines.next()?.trim() != "---" {
         return None;
     }
     let (mut name, mut description) = (None, None);
-    for line in lines {
-        let line = line.trim();
+    let unquote = |v: &str| v.trim().trim_matches('"').trim_matches('\'').trim().to_owned();
+    while let Some(raw) = lines.next() {
+        let line = raw.trim();
         if line == "---" {
             return Some((name, description));
         }
-        let unquote = |v: &str| v.trim().trim_matches('"').trim_matches('\'').trim().to_owned();
         if let Some(v) = line.strip_prefix("name:") {
-            name = Some(unquote(v)).filter(|v| !v.is_empty());
+            name = bounded(&unquote(v), MAX_SKILL_NAME_CHARS);
         } else if let Some(v) = line.strip_prefix("description:") {
-            description = Some(unquote(v)).filter(|v| !v.is_empty());
+            let v = v.trim();
+            let text = if matches!(v, "|" | ">" | "|-" | ">-" | "|+" | ">+") {
+                // A block: the indented lines that follow.
+                let mut block = Vec::new();
+                while let Some(next) = lines.peek() {
+                    if next.trim() == "---" || !(next.starts_with(' ') || next.starts_with('\t') || next.trim().is_empty()) {
+                        break;
+                    }
+                    block.push(next.trim().to_owned());
+                    lines.next();
+                }
+                block.join(" ")
+            } else {
+                unquote(v)
+            };
+            description = bounded(&text, MAX_SKILL_DESCRIPTION_CHARS);
         }
     }
     None
@@ -328,6 +358,15 @@ mod tests {
         assert_eq!(parse_skill(text), Some((Some("deploy".into()), Some("Ship the app".into()))));
         assert_eq!(parse_skill("# No front matter"), None);
         assert_eq!(parse_skill("---\nname: open\n"), None);
+    }
+
+    #[test]
+    fn block_descriptions_are_read_and_long_ones_are_bounded() {
+        let block = "---\nname: review\ndescription: >\n  Reviews a change\n  for bugs.\nother: x\n---\n";
+        assert_eq!(parse_skill(block), Some((Some("review".into()), Some("Reviews a change for bugs.".into()))));
+        let long = format!("---\nname: big\ndescription: {}\n---\n", "word ".repeat(10_000));
+        let (_, d) = parse_skill(&long).unwrap();
+        assert_eq!(d.unwrap().chars().count(), MAX_SKILL_DESCRIPTION_CHARS + 1);
     }
 
     #[test]

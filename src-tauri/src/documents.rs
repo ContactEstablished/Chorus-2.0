@@ -90,6 +90,12 @@ pub fn scan(store: &Store) -> Result<u32, String> {
         last = w.id;
         let Some(target) = w.target.as_deref().map(str::trim).filter(|t| !t.is_empty()) else { continue };
         let path = if Path::new(target).is_absolute() { target.to_owned() } else { Path::new(&w.cwd).join(target).display().to_string() };
+        // One file, one row: Windows separators, and the spelling already listed if only the case
+        // differs (Codex reports "_docs/PLAN.md", Claude "C:\w\_docs\PLAN.md").
+        let path = path.replace('/', "\\");
+        let path = store
+            .with(|c| c.query_row("SELECT path FROM documents WHERE path = ?1 COLLATE NOCASE", [&path], |r| r.get::<_, String>(0)).optional())?
+            .unwrap_or(path);
         let Some(relative) = folders::relative(&path, &w.cwd) else { continue };
         let Some(kind) = classify(&relative) else { continue };
         if !Path::new(&path).is_file() {
@@ -220,13 +226,14 @@ mod tests {
         let cwd = dir.display().to_string();
         s.with(|c| {
             c.execute("INSERT INTO sessions (id,name,agent,cwd,state,cols,rows,created_at) VALUES (1,'Writer','claude',?1,'running',80,24,1)", [&cwd])?;
-            for (id, tool, target) in [(1, "Write", plan.display().to_string()), (2, "Write", dir.join("main.rs").display().to_string()), (3, "Read", plan.display().to_string()), (4, "Edit", plan.display().to_string())] {
+            // The same plan also written as a relative, forward-slash path in other case (Codex).
+            for (id, tool, target) in [(1, "Write", plan.display().to_string()), (2, "Write", dir.join("main.rs").display().to_string()), (3, "Read", plan.display().to_string()), (4, "Edit", plan.display().to_string()), (5, "fileChange", "_DOCS/plan-test.md".to_owned())] {
                 c.execute("INSERT INTO tool_calls (id,session_id,tool,target,started_at,ended_at) VALUES (?1,1,?2,?3,1,2)", params![id, tool, target])?;
             }
             Ok(())
         })
         .unwrap();
-        assert_eq!(scan(&s).unwrap(), 2);
+        assert_eq!(scan(&s).unwrap(), 3);
         assert_eq!(scan(&s).unwrap(), 0);
         let docs = list(&s).unwrap();
         assert_eq!(docs.len(), 1);

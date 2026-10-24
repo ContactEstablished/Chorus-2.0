@@ -125,13 +125,14 @@ mod tests {
             waiting_since(&store, 1, Attention::Failed, Some(&run)).unwrap(),
             Some(1800)
         );
+        // The process exiting after its turn failed is the same failure: it keeps its start.
         let ended = RunRow {
             ended_at: Some(1900),
             ..run
         };
         assert_eq!(
             waiting_since(&store, 1, Attention::Failed, Some(&ended)).unwrap(),
-            Some(1900)
+            Some(1800)
         );
         assert_eq!(
             waiting_since(&store, 1, Attention::Done, Some(&ended)).unwrap(),
