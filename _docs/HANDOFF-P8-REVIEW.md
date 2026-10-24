@@ -330,3 +330,8 @@ Checked again after merging with P7 (`evening/p6-p8`), in an isolated instance:
   Run now and the scheduler fire one at a time; no instructions warning on plain shells; a drive root
   accepted as a folder. Seen: Codex answered a changed note after Restart; a Claude session restarted
   at once kept its instructions with one file on disk; a Claude Bot didn't attach to Codex.
+- **Second code review fixes:** a long automation name keeps room for " #N"; the scheduler re-reads
+  an automation before acting and won't overwrite an edit or pause made meanwhile; a prompt that
+  can't be tied to its run is unstaged so a restart can't repeat the task; skill descriptions are
+  bounded and YAML block descriptions read; one file is one document whatever its path spelling.
+  Left for Matthew: an idle automation session isn't closed (decision 2).

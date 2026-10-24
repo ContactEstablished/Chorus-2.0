@@ -170,3 +170,10 @@ search the Raw view; export the transcript; rename the session and Restart to se
   5 s against the screens' work areas and pulled back if it is off them. Seen: moved by a program to
   (6000, 3000), it was back at the nearest corner of the primary work area within 7 s, without
   activating anything. A real monitor unplug or a DPI change still wasn't tried (one monitor).
+- **Second code review:** ten more candidates, eight fixed (commit "P7/P8: fixes from a second,
+  deeper code review"). For P7: a failed turn followed by the process exiting is one failure, so it
+  notifies once; search as you type keeps the current match (seen: "f" to "footb" stayed on "1 of
+  N", Enter moved to "2 of 2"); export renders off the async runtime (seen: a real save through the
+  dialog). Kept as a trade-off: whole file paths show in tool lists, where they wrap.
+- **Front-end tests:** notification store, fleet roster store and the search count wording (41 → 52
+  tests with P8's).
