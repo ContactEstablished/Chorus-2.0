@@ -49,6 +49,7 @@ const MIGRATION_FILES: &[(&str, &str)] = &[
     ("0018_p6_narrator.sql", include_str!("../../migrations/0018_p6_narrator.sql")),
     ("0019_p7_notifications.sql", include_str!("../../migrations/0019_p7_notifications.sql")),
     ("0020_p8_bots_notes.sql", include_str!("../../migrations/0020_p8_bots_notes.sql")),
+    ("0021_p8_automation_close.sql", include_str!("../../migrations/0021_p8_automation_close.sql")),
 ];
 
 pub struct Store {

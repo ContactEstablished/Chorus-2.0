@@ -52,7 +52,8 @@ impl Attention {
 }
 
 /// `last_end` and `last_exit_code` are the newest run's. An exited session whose newest run
-/// didn't end by exiting couldn't start again.
+/// didn't end by exiting couldn't start again, unless Chorus closed its agent after its
+/// automation run finished (D84): the agent was stopped, so its exit code says nothing.
 pub fn attention(state: SessionState, live: bool, activity: Activity, last_end: Option<RunEnd>, last_exit_code: Option<u32>) -> Attention {
     match state {
         SessionState::Running if live => match activity {
@@ -66,7 +67,7 @@ pub fn attention(state: SessionState, live: bool, activity: Activity, last_end: 
         // Between runs, for a moment, while a Restart or a relaunch is under way.
         SessionState::Running => Attention::Running,
         SessionState::Exited => match (last_end, last_exit_code) {
-            (Some(RunEnd::Exited), Some(0)) => Attention::Done,
+            (Some(RunEnd::Exited), Some(0)) | (Some(RunEnd::Closed), _) => Attention::Done,
             _ => Attention::Failed,
         },
         SessionState::Closed => Attention::Done,
@@ -94,6 +95,7 @@ mod tests {
         assert_eq!(exited(Some(RunEnd::Exited), Some(137)), Attention::Failed);
         assert_eq!(exited(Some(RunEnd::Restarted), Some(0)), Attention::Failed, "a Restart that couldn't start");
         assert_eq!(exited(None, None), Attention::Failed, "never started");
+        assert_eq!(exited(Some(RunEnd::Closed), Some(1)), Attention::Done, "closed after its automation run finished");
     }
 
     #[test]

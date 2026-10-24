@@ -1,7 +1,8 @@
 //! Automations (P8): a Bot run on a schedule, only while Chorus runs. Each firing creates an
 //! ordinary session through the normal launch path and records a row, including firings that
-//! started nothing and why: missed while Chorus was closed, skipped because the previous run is
-//! still busy, or failed (decision 3).
+//! started nothing and why: missed while Chorus was closed, skipped because a session an earlier
+//! run started is still busy (D85), or failed (decision 3). Once a run finished and nobody took
+//! its session over, Chorus closes its agent unless the automation says not to (D84).
 //!
 //! The first prompt is persisted (scrubbed, source `automation`) when the session is created and
 //! passed as Claude Code's positional prompt at launch, because no structured "ready" signal
@@ -13,9 +14,10 @@ use std::time::Duration;
 
 use chorus_core::activity::Activity;
 use chorus_core::agent::AgentKind;
+use chorus_core::automation::{self, RunSession};
 use chorus_core::schedule::{self as sched, Due, Schedule};
 use chorus_core::scrub::{builtin_patterns, scrub_all};
-use chorus_core::session::clean_name;
+use chorus_core::session::{RunEnd, clean_name};
 use rusqlite::{OptionalExtension, Row, params};
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -50,7 +52,7 @@ pub enum Outcome {
     Failed,
     /// It was due while Chorus was closed.
     Missed,
-    /// The previous run's session was still busy.
+    /// A session an earlier run started was still busy (D85).
     Skipped,
 }
 
@@ -82,6 +84,8 @@ pub struct Automation {
     pub cwd: String,
     pub project_id: Option<u32>,
     pub enabled: bool,
+    /// D84: close a run's agent once the run finished and nobody took it over.
+    pub close_on_success: bool,
     pub next_run_at_secs: Option<u32>,
     pub last_run: Option<AutomationRun>,
     pub runs_this_week: u32,
@@ -100,6 +104,7 @@ pub struct AutomationSave {
     pub cwd: String,
     pub project_id: Option<u32>,
     pub enabled: bool,
+    pub close_on_success: bool,
 }
 
 struct AutoRow {
@@ -112,9 +117,10 @@ struct AutoRow {
     project_id: Option<u32>,
     enabled: bool,
     next_run_at: Option<i64>,
+    close_on_success: bool,
 }
 
-const COLUMNS: &str = "id, name, bot_id, prompt, schedule, cwd, project_id, enabled, next_run_at";
+const COLUMNS: &str = "id, name, bot_id, prompt, schedule, cwd, project_id, enabled, next_run_at, close_on_success";
 
 fn row_from(r: &Row<'_>) -> rusqlite::Result<AutoRow> {
     let schedule: String = r.get(4)?;
@@ -129,6 +135,7 @@ fn row_from(r: &Row<'_>) -> rusqlite::Result<AutoRow> {
         project_id: r.get(6)?,
         enabled: r.get(7)?,
         next_run_at: r.get(8)?,
+        close_on_success: r.get(9)?,
     })
 }
 
@@ -173,6 +180,10 @@ fn session_status(m: &SessionManager, session_id: u32) -> Option<String> {
             Activity::Failed => "its turn failed".into(),
             _ => "running".into(),
         },
+        // Only `finish` ends a run as closed and leaves its session open (D84).
+        _ if crate::store::sessions::last_run(m.store(), session_id).ok().flatten().is_some_and(|r| r.end_reason == Some(RunEnd::Closed)) => {
+            "finished, and Chorus closed its agent".into()
+        }
         _ => match s.last_exit_code {
             Some(0) => "exited".into(),
             Some(code) => format!("exited with code {code}"),
@@ -286,6 +297,7 @@ fn view(m: &SessionManager, a: &AutoRow) -> Automation {
         cwd: a.cwd.clone(),
         project_id: a.project_id,
         enabled: a.enabled,
+        close_on_success: a.close_on_success,
         next_run_at_secs: a.next_run_at.filter(|_| a.enabled).map(secs),
         last_run,
         runs_this_week,
@@ -343,8 +355,8 @@ fn save(m: &SessionManager, input: &AutomationSave) -> Result<Automation, String
                 .with(|c| {
                     c.execute(
                         "UPDATE automations SET name = ?2, bot_id = ?3, prompt = ?4, schedule = ?5, cwd = ?6, project_id = ?7,
-                                enabled = ?8, next_run_at = ?9, updated_at = ?10 WHERE id = ?1",
-                        params![id, name, input.bot_id, prompt, schedule_json, cwd, input.project_id, input.enabled, next, now],
+                                enabled = ?8, next_run_at = ?9, updated_at = ?10, close_on_success = ?11 WHERE id = ?1",
+                        params![id, name, input.bot_id, prompt, schedule_json, cwd, input.project_id, input.enabled, next, now, input.close_on_success],
                     )
                 })
                 .map_err(unique)?;
@@ -358,9 +370,9 @@ fn save(m: &SessionManager, input: &AutomationSave) -> Result<Automation, String
             store
                 .with(|c| {
                     c.execute(
-                        "INSERT INTO automations (name, bot_id, prompt, schedule, cwd, project_id, enabled, next_run_at, created_at, updated_at)
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)",
-                        params![name, input.bot_id, prompt, schedule_json, cwd, input.project_id, input.enabled, next, now],
+                        "INSERT INTO automations (name, bot_id, prompt, schedule, cwd, project_id, enabled, next_run_at, created_at, updated_at, close_on_success)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9, ?10)",
+                        params![name, input.bot_id, prompt, schedule_json, cwd, input.project_id, input.enabled, next, now, input.close_on_success],
                     )?;
                     Ok(c.last_insert_rowid() as u32)
                 })
@@ -370,31 +382,67 @@ fn save(m: &SessionManager, input: &AutomationSave) -> Result<Automation, String
     Ok(view(m, &row(store, id)?.ok_or("That automation no longer exists.")?))
 }
 
-/// The previous run's session, when it is still busy: working, asking, or still starting.
-fn busy_session(m: &SessionManager, automation: u32) -> Option<String> {
-    let last: u32 = m
-        .store()
+/// The sessions this automation's runs started that are still running, newest first.
+fn running_sessions(store: &Store, automation: u32) -> Vec<u32> {
+    store
+        .with(|c| {
+            let mut stmt = c.prepare(
+                "SELECT DISTINCT r.session_id FROM automation_runs r JOIN sessions s ON s.id = r.session_id
+                 WHERE r.automation_id = ?1 AND s.state = 'running' ORDER BY r.session_id DESC",
+            )?;
+            stmt.query_map([automation], |r| r.get(0))?.collect()
+        })
+        .unwrap_or_default()
+}
+
+/// What Chorus knows about a live session an automation run started: its name, its current run
+/// and the facts D84 and D85 decide on.
+fn run_session(m: &SessionManager, session: u32) -> Option<(String, u32, RunSession)> {
+    let s = m.summary(session).ok().filter(|s| s.live)?;
+    let (run_id, typed) = m.run_input(session)?;
+    let store = m.store();
+    // The run's first prompt not yet seen: it is starting. A relaunched run has none to see.
+    let starting = crate::store::delivery::unobserved(store, run_id).unwrap_or(true);
+    let (runs, other_prompts): (u32, u32) = store
         .with(|c| {
             c.query_row(
-                "SELECT session_id FROM automation_runs WHERE automation_id = ?1 AND session_id IS NOT NULL ORDER BY id DESC LIMIT 1",
-                [automation],
-                |r| r.get(0),
+                "SELECT (SELECT COUNT(*) FROM runs WHERE session_id = ?1),
+                        (SELECT COUNT(*) FROM prompts WHERE session_id = ?1 AND source != 'automation')",
+                [session],
+                |r| Ok((r.get(0)?, r.get(1)?)),
             )
-            .optional()
         })
-        .ok()
-        .flatten()?;
-    let s = m.summary(last).ok()?;
-    // Unknown counts only while the run's first prompt hasn't been seen yet (it is starting); a
-    // session relaunched by a later Chorus is unknown until its next event, and idle.
-    let starting = || {
-        let run = crate::store::sessions::last_run(m.store(), last).ok().flatten();
-        run.is_some_and(|r| crate::store::delivery::unobserved(m.store(), r.id).unwrap_or(true))
-    };
-    let busy = s.live
-        && (matches!(s.activity, Activity::Working | Activity::AwaitingApproval | Activity::NeedsAnswer)
-            || (s.activity == Activity::Unknown && starting()));
-    busy.then(|| format!("Skipped: the previous run's session, {}, is still {}.", s.name, session_status(m, last).unwrap_or_else(|| "running".into())))
+        .ok()?;
+    let drafted = crate::store::composer::draft(store, session).is_ok_and(|d| !d.text.trim().is_empty() || !d.images.is_empty())
+        || crate::store::composer::oldest(store, session).ok().flatten().is_some();
+    let facts = RunSession { activity: s.activity, starting, first_run: runs == 1, other_prompts: other_prompts > 0, typed, drafted, locked: s.locked };
+    Some((s.name, run_id, facts))
+}
+
+/// A busy session from any of this automation's runs, not only the latest (D85).
+fn busy_session(m: &SessionManager, automation: u32) -> Option<String> {
+    running_sessions(m.store(), automation).into_iter().find_map(|id| {
+        let (name, _, facts) = run_session(m, id)?;
+        automation::busy(&facts)
+            .then(|| format!("Skipped: {name}, from an earlier run, is still {}.", session_status(m, id).unwrap_or_else(|| "running".into())))
+    })
+}
+
+const FINISHED_NOTE: &str = "Its automation run finished, so Chorus closed the agent. Restart to follow up.";
+
+/// D84: for each automation that asks for it, closes the agent of every run that finished with
+/// nobody taking it over. The session stays, exited, for review and follow-up.
+fn close_finished(m: &SessionManager) {
+    for a in rows(m.store()).unwrap_or_default().into_iter().filter(|a| a.close_on_success) {
+        for id in running_sessions(m.store(), a.id) {
+            let Some((_, run_id, facts)) = run_session(m, id) else { continue };
+            if automation::finished(&facts)
+                && let Err(e) = m.finish(id, run_id, FINISHED_NOTE)
+            {
+                eprintln!("chorus: automation {}: closing session {id}: {e}", a.id);
+            }
+        }
+    }
 }
 
 /// Starts one run of an automation now and records it. Never panics; every outcome has a row.
@@ -483,7 +531,8 @@ fn tick(m: &Arc<SessionManager>, app_started: i64) -> Option<i64> {
 }
 
 /// The scheduler thread: wakes at the next due time, and every 30 s as a backstop (a saved or
-/// enabled automation, or a clock change, is picked up then).
+/// enabled automation, or a clock change, is picked up then). Each pass first closes the agents of
+/// runs that finished (D84).
 pub fn start(manager: &Arc<SessionManager>) -> Result<(), String> {
     let app_started = now_ms();
     let m = manager.clone();
@@ -491,6 +540,7 @@ pub fn start(manager: &Arc<SessionManager>) -> Result<(), String> {
         .name("automations".into())
         .spawn(move || {
             while !m.is_quitting() {
+                close_finished(&m);
                 let soonest = tick(&m, app_started);
                 let wait = soonest.map_or(BACKSTOP, |t| Duration::from_millis(u64::try_from((t - now_ms()).max(1000)).unwrap_or(1000)));
                 std::thread::sleep(wait.min(BACKSTOP));

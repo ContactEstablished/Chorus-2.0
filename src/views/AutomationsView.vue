@@ -74,7 +74,7 @@ function startNew(): void {
   minutes.value = 60
   time.value = '09:00'
   days.value = [0, 1, 2, 3, 4]
-  editing.value = { id: null, name: '', botId: usableBots.value[0]?.id ?? 0, prompt: '', schedule: schedule(), cwd: '', projectId: null, enabled: true }
+  editing.value = { id: null, name: '', botId: usableBots.value[0]?.id ?? 0, prompt: '', schedule: schedule(), cwd: '', projectId: null, enabled: true, closeOnSuccess: true }
 }
 
 function edit(a: Automation): void {
@@ -85,7 +85,7 @@ function edit(a: Automation): void {
   if (s.kind === 'every') minutes.value = s.minutes
   else time.value = `${String(s.hour).padStart(2, '0')}:${String(s.minute).padStart(2, '0')}`
   if (s.kind === 'weekdays') days.value = [...s.days]
-  editing.value = { id: a.id, name: a.name, botId: a.botId ?? usableBots.value[0]?.id ?? 0, prompt: a.prompt, schedule: s, cwd: a.cwd, projectId: a.projectId, enabled: a.enabled }
+  editing.value = { id: a.id, name: a.name, botId: a.botId ?? usableBots.value[0]?.id ?? 0, prompt: a.prompt, schedule: s, cwd: a.cwd, projectId: a.projectId, enabled: a.enabled, closeOnSuccess: a.closeOnSuccess }
 }
 
 async function save(): Promise<void> {
@@ -221,6 +221,11 @@ function outcomeText(r: AutomationRun): string {
       <p class="hint">
         The prompt is recorded in the session's history as an automation prompt and passed to Claude Code when it starts. Automations start Claude
         Code Bots for now. Make sure Claude Code already trusts the folder, or the run waits at its trust question.
+      </p>
+      <label class="check"><input v-model="editing.closeOnSuccess" type="checkbox" /> Close after successful completion</label>
+      <p class="hint">
+        When a run's turn ends without an error or a question, and nobody typed, queued or locked anything in it, Chorus closes its agent. The
+        session stays with its history and documents; Restart it to follow up. Turned off, each run's session stays open.
       </p>
       <label class="check"><input v-model="editing.enabled" type="checkbox" /> Enabled</label>
       <p v-if="error" class="hint warn">{{ error }}</p>

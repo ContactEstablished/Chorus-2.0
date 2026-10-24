@@ -51,4 +51,5 @@ pub mod codex_protocol;
 pub mod codex_stream;
 pub mod instructions;
 pub mod schedule;
+pub mod automation;
 pub mod documents;

@@ -1640,6 +1640,29 @@ impl SessionManager {
         Ok(CloseReport { killed: outcome.killed.len() as u32, spared: outcome.spared.len() as u32, worktree_note })
     }
 
+    /// The current run's id, and whether Raw input changed the agent's prompt line during it.
+    pub fn run_input(&self, id: u32) -> Option<(u32, bool)> {
+        let run = self.open_live(id).ok()?.current_run()?;
+        let typed = run.recorder.lock().expect("recorder lock").input_epoch != 0;
+        Some((run.id, typed))
+    }
+
+    /// D84: closes run `run_id`'s agent after its automation run finished. The session stays,
+    /// exited, with its scrollback, history and documents; Restart follows up in the same
+    /// conversation. Refused when the session is locked, or was restarted or typed into since.
+    pub fn finish(&self, id: u32, run_id: u32, note: &str) -> Result<(), String> {
+        let live = self.open_live(id)?;
+        let _action = live.action.lock().expect("action lock");
+        self.refuse_if_locked(&self.row(id)?, "close")?;
+        if self.run_input(id) != Some((run_id, false)) {
+            return Err("The session changed since its run finished.".into());
+        }
+        self.end_run_for(&live, ExitCause::AutomationFinished);
+        rows::set_state(&self.store, id, SessionState::Exited, Some(note))?;
+        self.notify_id(id);
+        Ok(())
+    }
+
     pub fn restart(self: &Arc<Self>, id: u32) -> Result<SessionSummary, String> {
         if self.row(id)?.state == SessionState::Closed {
             return Err("a closed session can't be restarted".into());

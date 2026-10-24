@@ -332,6 +332,8 @@ export type Automation = {
 	cwd: string,
 	projectId: number | null,
 	enabled: boolean,
+	/**  D84: close a run's agent once the run finished and nobody took it over. */
+	closeOnSuccess: boolean,
 	nextRunAtSecs: number | null,
 	lastRun: AutomationRun | null,
 	runsThisWeek: number,
@@ -361,6 +363,7 @@ export type AutomationSave = {
 	cwd: string,
 	projectId: number | null,
 	enabled: boolean,
+	closeOnSuccess: boolean,
 };
 
 /**
@@ -975,7 +978,7 @@ export type Outcome =
 "failed" | 
 /**  It was due while Chorus was closed. */
 "missed" | 
-/**  The previous run's session was still busy. */
+/**  A session an earlier run started was still busy (D85). */
 "skipped";
 
 export type PendingReply = {

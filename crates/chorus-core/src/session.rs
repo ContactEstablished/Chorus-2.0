@@ -44,7 +44,7 @@ impl SessionState {
 pub enum RunEnd {
     /// The process exited by itself.
     Exited,
-    /// The user pressed Close.
+    /// The user pressed Close, or Chorus closed the agent after its automation run finished (D84).
     Closed,
     /// The user pressed Restart; a new run follows in the same session.
     Restarted,
@@ -88,6 +88,9 @@ pub enum ExitCause {
     ByItself,
     UserClose,
     UserRestart,
+    /// D84: the automation's run finished, so Chorus closed its agent. The session stays, exited,
+    /// for review and follow-up; the closer sets its state and note.
+    AutomationFinished,
     /// Chorus is quitting; every process in its jobs is about to die with it.
     ChorusQuitting,
     /// Windows reports it is shutting down. Children get their shutdown signal before Chorus does,
@@ -101,6 +104,7 @@ pub fn after_exit(cause: ExitCause) -> (RunEnd, Option<SessionState>) {
         ExitCause::ByItself => (RunEnd::Exited, Some(SessionState::Exited)),
         ExitCause::UserClose => (RunEnd::Closed, Some(SessionState::Closed)),
         ExitCause::UserRestart => (RunEnd::Restarted, None),
+        ExitCause::AutomationFinished => (RunEnd::Closed, None),
         ExitCause::ChorusQuitting => (RunEnd::ChorusClosed, None),
         ExitCause::SystemShuttingDown => (RunEnd::SystemShutdown, None),
     }
@@ -181,6 +185,7 @@ mod tests {
         assert_eq!(after_exit(ExitCause::ByItself), (RunEnd::Exited, Some(SessionState::Exited)));
         assert_eq!(after_exit(ExitCause::UserClose), (RunEnd::Closed, Some(SessionState::Closed)));
         assert_eq!(after_exit(ExitCause::UserRestart), (RunEnd::Restarted, None));
+        assert_eq!(after_exit(ExitCause::AutomationFinished), (RunEnd::Closed, None));
         assert_eq!(after_exit(ExitCause::ChorusQuitting), (RunEnd::ChorusClosed, None));
         assert_eq!(after_exit(ExitCause::SystemShuttingDown), (RunEnd::SystemShutdown, None));
     }
