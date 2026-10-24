@@ -193,3 +193,6 @@ search the Raw view; export the transcript; rename the session and Restart to se
 - **P6 images in the merged build:** a picture of "42" attached in Friendly showed its thumbnail;
   Claude Code asked to read the managed image file (as D79 expects), and once allowed from the card it
   answered "42".
+- **D23 again on the final merged build, real input:** a click on empty strip space and an 80 px drag
+  (and back) left an external window focused, typed text landed there, and a chip click brought
+  Chorus forward. Export with an agent transcript also rechecked after its refactor.
