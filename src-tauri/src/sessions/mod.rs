@@ -1142,6 +1142,7 @@ impl SessionManager {
             let conversation = renewed.as_deref().or(row.agent_session_id.as_deref());
             let exists = conversation.is_some_and(|id| agents::conversation_exists(row.agent, id, &parent));
             args.extend(spec.conversation_args(conversation, exists));
+            args.extend(spec.name_args(&row.name));
             (None, exists && spec.resume.kind() != ResumeKind::None)
         };
         let detected = self.agents.get(row.agent);

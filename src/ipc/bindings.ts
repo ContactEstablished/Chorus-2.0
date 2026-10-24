@@ -160,6 +160,9 @@ export const commands = {
 	/**  Why the agent's transcript wasn't copied, when it was asked for. */
 	transcriptNote: string | null,
 } | null, string>(__TAURI_INVOKE("session_export", { sessionId, includeTranscript })),
+	fleetRoster: () => __TAURI_INVOKE<FleetRoster>("fleet_roster"),
+	/**  The user has seen a changed address: the next poll shows the current state. */
+	fleetAcknowledge: (sessionId: number) => __TAURI_INVOKE<void>("fleet_acknowledge", { sessionId }),
 };
 
 /** Events */
@@ -167,6 +170,7 @@ export const events = {
 	attentionNavigate: makeEvent<AttentionNavigate>("attention-navigate"),
 	backendPulse: makeEvent<BackendPulse>("backend-pulse"),
 	fleetClick: makeEvent<FleetClick>("fleet-click"),
+	fleetRosterChanged: makeEvent<FleetRosterChanged>("fleet-roster-changed"),
 	fleetShown: makeEvent<FleetShown>("fleet-shown"),
 	notificationAdded: makeEvent<NotificationAdded>("notification-added"),
 	sessionUpdated: makeEvent<SessionUpdated>("session-updated"),
@@ -207,6 +211,12 @@ export type Activity =
 "ready" | 
 /**  The turn ended in an error. */
 "failed";
+
+/**
+ *  What Chorus can say about a session's address: exactly three states. A collision is a cause
+ *  on `changed`, given only when another live session holds the requested name.
+ */
+export type AddressState = { kind: "verified"; address: string } | { kind: "changed"; requested: string; current: string; collision: boolean } | { kind: "unknown"; reason: string };
 
 export type AgentInfo = {
 	kind: AgentKind,
@@ -553,6 +563,18 @@ export type FleetProbe = {
 	topmost: boolean,
 	shield: boolean,
 	foregroundHwnd: string,
+};
+
+export type FleetRoster = {
+	/**  Why the registry couldn't be read; the addresses are then unknown. */
+	unreadable: string | null,
+	rows: RosterRow[],
+	/**  Live Claude Code sessions Chorus didn't start, by name. Listed only; no actions. */
+	others: string[],
+};
+
+export type FleetRosterChanged = {
+	roster: FleetRoster,
 };
 
 /**  Whether the strip is shown, for Settings. */
@@ -1074,6 +1096,16 @@ export type ResumeKind =
 
 /**  What a session in a launch is for. A label, not a limit: a reviewer can write files too. */
 export type Role = "builder" | "reviewer" | "shell";
+
+/**  One open Chorus session in the roster. */
+export type RosterRow = {
+	sessionId: number,
+	name: string,
+	/**  The address state, for Claude Code sessions. */
+	address: AddressState | null,
+	/**  The address in words (Chorus 1's), or why the session has none. */
+	described: string,
+};
 
 /**
  *  What a launch can remember per model (K8): a tier, or `Default` for an eligible launch that

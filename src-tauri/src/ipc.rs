@@ -8,7 +8,7 @@ use specta_typescript::Typescript;
 use std::path::Path;
 use tauri_specta::{Builder, collect_commands, collect_events};
 
-use crate::{agents, app, attention, export, fleet, lock, narrator, prefs, projects, providers, routing, sessions, splash, vault};
+use crate::{agents, app, attention, export, fleet, fleet_registry, lock, narrator, prefs, projects, providers, routing, sessions, splash, vault};
 
 /// Where the generated bindings live, relative to this crate.
 #[cfg_attr(not(debug_assertions), allow(dead_code, reason = "debug builds and tests regenerate the bindings"))]
@@ -105,6 +105,8 @@ pub fn builder() -> Builder<tauri::Wry> {
             fleet::fleet_open_session,
             fleet::fleet_probe,
             export::session_export,
+            fleet_registry::fleet_roster,
+            fleet_registry::fleet_acknowledge,
         ])
         .events(collect_events![
             app::BackendPulse,
@@ -114,6 +116,7 @@ pub fn builder() -> Builder<tauri::Wry> {
             attention::NotificationAdded,
             attention::AttentionNavigate,
             fleet::FleetShown,
+            fleet_registry::FleetRosterChanged,
         ])
 }
 

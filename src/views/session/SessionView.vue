@@ -11,6 +11,8 @@ import { compactPath } from '../../shell/compactPath'
 import SessionTerminal from '../../raw/SessionTerminal.vue'
 import RawSearch from '../../raw/RawSearch.vue'
 import ExportTranscript from './ExportTranscript.vue'
+import AddressChip from './AddressChip.vue'
+import FleetRoster from './FleetRoster.vue'
 import SessionStrip from './SessionStrip.vue'
 import SessionFacts from './SessionFacts.vue'
 import PromptHistory from './PromptHistory.vue'
@@ -202,6 +204,7 @@ async function send(bytes: string): Promise<void> {
           <span v-if="project" class="project-tag" :style="{ '--tag': project.colour }">{{ project.name }}</span>
           <code :title="s.cwd">{{ compactPath(shortPath(s.cwd, app.info?.homeDir ?? null)) }}</code>
           <span v-if="s.providerName || s.options.model" class="mono">{{ s.providerName }}<template v-if="s.providerName && s.options.model"> / </template>{{ s.options.model }}</span>
+          <AddressChip v-if="s.agent === 'claude'" :session-id="s.id" />
         </p>
       </div>
       <span class="pill" :class="`st-${s.attention}`">
@@ -299,6 +302,7 @@ async function send(bytes: string): Promise<void> {
         </div>
         <PromptHistory :session="s" />
         <SessionFacts :session="s" />
+        <FleetRoster />
       </aside>
     </div>
   </section>

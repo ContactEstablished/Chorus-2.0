@@ -83,6 +83,10 @@ export type {
   NotificationAdded,
   AttentionNavigate,
   FleetShown,
+  FleetRoster,
+  RosterRow,
+  AddressState,
+  ExportResult,
 } from './bindings'
 
 /** The result shape of every fallible generated command. */

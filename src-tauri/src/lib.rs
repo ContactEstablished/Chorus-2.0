@@ -6,6 +6,7 @@ mod attention;
 mod events;
 mod export;
 mod fleet;
+mod fleet_registry;
 mod git;
 mod ipc;
 mod lock;
@@ -142,6 +143,7 @@ pub fn run() {
             let strip = manager.clone();
             app.manage(manager);
             fleet::start(app.handle(), &strip);
+            app.manage(fleet_registry::start(app.handle(), &strip));
             app::start_pulse(app.handle().clone());
             Ok(())
         })
