@@ -152,3 +152,17 @@ Read `inbox.rs`, `badge.rs`, `fleet.rs` and `export.rs` in core, then `attention
 `fleet.rs` and `fleet_registry.rs`. In the app: start a Claude Code session in Manual permission and
 ask it to write a file; watch the strip chip, tray badge and bell; click the chip from another app;
 search the Raw view; export the transcript; rename the session and Restart to see its address change.
+
+## 12. Follow-up on the integration branch (2026-10-24)
+
+- **Inbox, real keys, merged build:** three failed sessions stayed oldest first across an app restart;
+  j, j selected the second; Enter opened it; with the terminal focused Esc stayed with the shell
+  (D49); after clicking outside it, Esc returned to the Overview with the next card selected.
+- **Code review of `evening/p6-p8`:** ten findings, each checked against the code and fixed (commit
+  "P7/P8: fixes from a code review of the merged branch"). For P7: Escape now closes the notification
+  panel or Export popover before leaving an inbox-opened session; notifications check their episode
+  before querying the request; export reads and scrubs the agent transcript off the async runtime;
+  file-path tool targets are kept whole, so Documents finds long paths. The P8 fixes are listed in
+  that commit and checked in the app.
+- A test-method lesson for later runs: tapping Alt to bring a window forward opens its system menu,
+  which stalls the WebView's events until it closes; click the window instead.
