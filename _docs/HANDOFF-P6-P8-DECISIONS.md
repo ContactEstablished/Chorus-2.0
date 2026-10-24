@@ -59,13 +59,14 @@ verification remain pre-merge work.
   does not prove a successful call. Do not copy the credential into documentation or another
   instance's data directory. Running this branch on the Dev Build's data would apply migrations
   0019–0021, which `main` can't take back, so Matthew chose to enter the key again in the review
-  instance, through its Settings → Providers.
+  instance, through its Settings → Providers. **Verified 2026-10-24**, below.
 - **CLI installation — approved, 2026-10-24 (D87):** Matthew authorizes installing opencode and Grok
   if absent. Installation, launches and shortcut bindings still need verification; this documentation
   update does not claim either CLI has been installed or tested. The packages are `@opencode/cli`
   (the 2.x line D58 targets; `opencode-ai` is still the 1.x line) and xAI's installer at
   `https://x.ai/cli/install.ps1` (stable Grok 1.0.70; Chorus was last verified on 1.0.62). The agent
-  session's safety check blocked running either installer, so Matthew runs them.
+  session's safety check blocked running either installer, so Matthew runs them. **opencode 2.1.4
+  installed and verified**, below. Grok is not installed yet.
 - **Display check — deferred, low priority (D88):** Matthew defers the alternate display-scale and
   second-monitor checks in P7 §11. They are not pre-merge blockers. Later, confirm that empty strip
   space and dragging preserve the other app's focus, and that the strip returns to a visible screen
@@ -99,10 +100,31 @@ command is checked against the calling window's capabilities, the main window's 
 command's permission is `allow-<name with hyphens>`. Debug builds say where a refused command is
 allowed; release builds say only "Command X not allowed by ACL".
 
+## Checked with the provided access
+
+In the review instance, on Matthew's OpenRouter provider (its own key, plus a management key that
+mints a key per opencode run, capped at the provider's $3). Everything below spent about $0.0017 in
+total, as OpenRouter reported it.
+
+| Check | Seen working | Not covered |
+|---|---|---|
+| Narrator call (D82) | One automation turn each with `openai/gpt-4.1-nano` and `google/gemini-2.5-flash-lite`: a summary was stored about 8 s after the run started, and the session's panel shows it with the model, time and reported cost ($0.00008 and $0.00005). Two opencode turns were then summarized too. | Provider failures and restarts were checked on `main` (D82); not again here. |
+| Narrator output | Gemini 2.5 Flash Lite followed the prompt's rules: a finished task got no suggestions and "No further action is suggested". GPT-4.1 nano suggested sending the agent's own answer back, which the prompt forbids. | Not a Chorus defect, but the model choice matters; Gemini 2.5 Flash Lite is the better cheap default. |
+| opencode 2.1.4 launch | Detected as 2.1.4 ("newer" than the verified 2.1.1). A session on OpenRouter with `google/gemini-2.5-flash-lite` minted its own capped key, ran a turn (Working → Ready in about a second, reply "juniper", no tools) and reported the model it really used, matching the one asked for. Restart kept the opencode session id and the resumed conversation answered "juniper" about the earlier turn. Restart and Close each revoked the run's key, and each run's cost was read back from OpenRouter: $0.00073 and $0.00074. | Permissions, approvals and questions were not exercised on 2.1.4. A new session reads Running, not Ready, until its first turn, as before: opencode reports nothing until a turn. |
+| opencode keys (P7-D3) | In Raw, Ctrl+Shift+F sent as browser key events opened Chorus's search bar and wrote no key to opencode (only the focus-out report opencode asks for); Escape closed it and focus returned. Ctrl+F still reached opencode (`\x06`; in its prompt, "move cursor right"). The 2.1.4 binary has no `ctrl+shift+f` binding string. | Sent through the WebView's input pipeline (DevTools protocol), not a physical keyboard. |
+
+**Install notes:** npm 12.2.0 blocks package install scripts unless allowed, and `@opencode/cli`
+places its real binary in a postinstall step, so a plain `npm i -g @opencode/cli` leaves a 229-byte
+placeholder that only prints "postinstall script was not run". `npm install -g
+--allow-scripts=@opencode/cli @opencode/cli@2.1.4` completes it; the script only copies the platform
+package npm already downloaded. When npm's global folder (`%APPDATA%\npm` by default) isn't on
+PATH, Chorus reports "opencode.cmd not found on PATH"; it was missing here, so the review instance
+was started with that folder added to its own PATH. The user's PATH was not changed.
+
 ## Then
 
 The pre-merge fixes and the approved automation behavior are implemented and verified (above).
-Still to do: the narrator call, and the opencode and Grok launches and shortcuts once installed.
+The narrator and opencode checks are done (above). Still to do: Grok's install, launch and sign-in.
 Keep automatic compaction, display-scale/monitor and swapped-button checks tracked as deferred work;
 do not treat their deferral as successful verification. Reconcile the decision log when merging
 `evening/p6-p8` into `main` (D83 is reserved in the main checkout).
