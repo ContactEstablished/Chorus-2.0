@@ -26,6 +26,14 @@ describe('overview status', () => {
     expect(groupSessions([s(1, 'done')], 'status', []).map((x) => x.key)).toEqual(['finished'])
   })
 
+  it('puts older waiting episodes ahead of newer approvals, with unknown ages last', () => {
+    const items = [s(1, 'approval', { needsYouSince: 3000 }), s(2, 'failed', { needsYouSince: 1000 }),
+      s(3, 'input', { needsYouSince: 2000 }), s(4, 'approval', { needsYouSince: null })]
+    for (const grouping of ['status', 'none', 'project'] as const) {
+      expect(groupSessions(items, grouping, [])[0]!.sessions.map((x) => x.id)).toEqual([2, 3, 1, 4])
+    }
+  })
+
   it('groups by project in rail order, then sessions in none', () => {
     const g = groupSessions([s(1, 'done', { projectId: 9 }), s(2, 'ready'), s(3, 'input', { projectId: 7 })], 'project', [project(9, 'A'), project(7, 'B')])
     expect(g.map((x) => [x.title, x.sessions.map((y) => y.id)])).toEqual([

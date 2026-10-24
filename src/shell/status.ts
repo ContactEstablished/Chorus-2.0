@@ -60,8 +60,13 @@ export function headline(c: Counts): string {
   return parts.join(' · ')
 }
 
-/** Most urgent first, then the most recently active. */
+/** Needs-you episodes oldest first; unknown ages last. Other groups retain urgency order. */
 export function byUrgency(a: SessionSummary, b: SessionSummary): number {
+  if (needsYou(a.attention) && needsYou(b.attention)) {
+    const at = a.needsYouSince ?? Number.POSITIVE_INFINITY
+    const bt = b.needsYouSince ?? Number.POSITIVE_INFINITY
+    if (at !== bt) return at < bt ? -1 : 1
+  }
   return URGENCY.indexOf(a.attention) - URGENCY.indexOf(b.attention) || lastActive(b) - lastActive(a) || a.id - b.id
 }
 
@@ -81,10 +86,10 @@ export interface Group {
 /** The Overview's sections for a grouping. Empty status groups are left out. */
 export function groupSessions(list: SessionSummary[], by: GroupBy, projects: Project[]): Group[] {
   const sorted = [...list].sort(byUrgency)
-  if (by === 'none') return [{ key: 'all', title: 'All sessions', hint: 'most urgent first', colour: null, sessions: sorted }]
+  if (by === 'none') return [{ key: 'all', title: 'All sessions', hint: 'needs you first · oldest waiting first', colour: null, sessions: sorted }]
   if (by === 'status') {
     const groups: Group[] = [
-      { key: 'needs', title: 'Needs you', hint: 'approvals, questions and failures — most urgent first', colour: null, sessions: [] },
+      { key: 'needs', title: 'Needs you', hint: 'oldest waiting first', colour: null, sessions: [] },
       { key: 'flight', title: 'In flight', hint: 'working or ready for the next step', colour: null, sessions: [] },
       { key: 'finished', title: 'Finished', hint: 'completed', colour: null, sessions: [] },
     ]

@@ -4,6 +4,7 @@
 //! `chorus_core::migrate`). Typed queries for each area live in the submodules.
 
 pub mod credentials;
+pub mod attention;
 pub mod narrator;
 pub mod delivery;
 pub mod composer;

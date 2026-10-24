@@ -1103,6 +1103,8 @@ export type SessionSummary = {
 	noSignal: boolean,
 	/**  Whether it needs you, is busy or is finished, in the design's words (`chorus_core::attention`). */
 	attention: Attention,
+	/**  Start of this waiting episode, Unix milliseconds; null when no reliable evidence exists. */
+	needsYouSince: number | null,
 	/**  What the running agent's newest turn really used, read back from the agent (opencode). */
 	observed: Observed | null,
 	/**  How that turn differs from `options`, one phrase each; empty when it matches. */
