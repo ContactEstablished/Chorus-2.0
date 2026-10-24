@@ -5,19 +5,20 @@ One list of the decisions and checks for `evening/p6-p8`. The detail is in
 Updated 2026-10-24 with answers from review of those reports and the current implementation.
 **Matthew approved the full decision list on 2026-10-24. No questions in this document remain awaiting
 his answer.** Approvals and deferrals are recorded as D84–D93. The narrator key status below is
-reported by Matthew; this document records no new runtime tests. Approval does not mark the remaining
-implementation or verification complete.
+reported by Matthew. Approval does not mark the remaining implementation or verification complete.
+The pre-merge work and the two automation changes are now built and were seen working; see
+[Implemented after approval](#implemented-after-approval).
 
 ## Decisions
 
 | # | Question | Approved answer / remaining work | Where |
 |---|---|---|---|
-| 1 | Keep Codex instructions over the app-server (`thread/inject_items`)? | **Approved by Matthew, 2026-10-24 (D89): keep it, with a readiness-ordering fix before merge.** The review records successful delivery and survival through forced `/compact`. The claim that Friendly always waits is too strong; see the code finding below. Automatic compaction remains unverified and deferred under D86. | P8 §9 Q1, §12; [D89](DECISIONS.md) |
-| 2 | Automation sessions stay open after their turn, one more every run | **Approved by Matthew, 2026-10-24 (D84): close after successful completion by default.** Provide a per-automation "Close after successful completion" setting, on by default; turning it off keeps sessions open. Close the running agent while retaining conversation history, results and documents. Keep sessions open while awaiting an answer or approval, after failure, or when the user has taken over, queued follow-up work or locked the session. A turn ending alone is not proof the task finished. Implementation and runtime verification remain outstanding. | P8 §9 Q2; [D84](DECISIONS.md) |
-| 3 | What counts as "still active" when runs overlap? | **Approved by Matthew, 2026-10-24 (D85): busy only.** Working, waiting for approval/answer, or still starting with its first prompt unobserved blocks the next run. Idle sessions do not block. An older session from the same automation that the user resumes manually also blocks while busy. The current implementation checks only the latest automation session; extend it to cover older busy sessions and verify the behavior. | P8 §9 Q3; `src-tauri/src/automations.rs`, `busy_session`; [D85](DECISIONS.md) |
+| 1 | Keep Codex instructions over the app-server (`thread/inject_items`)? | **Approved by Matthew, 2026-10-24 (D89): keep it, with a readiness-ordering fix before merge.** The review records successful delivery and survival through forced `/compact`. The claim that Friendly always waits is too strong; see the code finding below. Automatic compaction remains unverified and deferred under D86. **Done:** `e4a83b5`, below. | P8 §9 Q1, §12; [D89](DECISIONS.md) |
+| 2 | Automation sessions stay open after their turn, one more every run | **Approved by Matthew, 2026-10-24 (D84): close after successful completion by default.** Provide a per-automation "Close after successful completion" setting, on by default; turning it off keeps sessions open. Close the running agent while retaining conversation history, results and documents. Keep sessions open while awaiting an answer or approval, after failure, or when the user has taken over, queued follow-up work or locked the session. A turn ending alone is not proof the task finished. **Done:** `cf12c05`, below. | P8 §9 Q2; [D84](DECISIONS.md) |
+| 3 | What counts as "still active" when runs overlap? | **Approved by Matthew, 2026-10-24 (D85): busy only.** Working, waiting for approval/answer, or still starting with its first prompt unobserved blocks the next run. Idle sessions do not block. An older session from the same automation that the user resumes manually also blocks while busy. The current implementation checks only the latest automation session; extend it to cover older busy sessions and verify the behavior. **Done:** `cf12c05`, below. | P8 §9 Q3; `src-tauri/src/automations.rs`, `busy_session`; [D85](DECISIONS.md) |
 | 4 | Native Claude skills through `--plugin-dir`? | **Approved by Matthew, 2026-10-24 (D90): try in a separate follow-up after merge**, behind the same per-agent carrier table. Keep the existing skill index meanwhile: P8 §12 records an agent reading a listed `SKILL.md`. Native plugin loading is not built or verified, so do not promise it works yet. | P8 §9 Q4, §12; [D90](DECISIONS.md) |
 | 5 | Codex automations? | **Approved by Matthew, 2026-10-24 (D91): Claude Code only for now.** Add Codex after verifying that the bridge delivers instructions before sending the first prompt, including failure handling and duplicate prevention. Do not use an unverified positional prompt that can race instruction delivery. | P8 §9 Q5; [D91](DECISIONS.md) |
-| 6 | Each window may call only its own commands (P7-D5)? | **Approved by Matthew, 2026-10-24 (D92): yes; implement before merge.** Register the application command manifest and grant commands per window. The strip needs `sessionsList`, `prefsGet` and `fleetOpenSession`; the splash needs `restoreProgress`, plus its required Tauri window API. Test that unauthorized commands are refused and that the manifest stays aligned with IPC registration. | P7 §8; [D92](DECISIONS.md) |
+| 6 | Each window may call only its own commands (P7-D5)? | **Approved by Matthew, 2026-10-24 (D92): yes; implement before merge.** Register the application command manifest and grant commands per window. The strip needs `sessionsList`, `prefsGet` and `fleetOpenSession`; the splash needs `restoreProgress`, plus its required Tauri window API. Test that unauthorized commands are refused and that the manifest stays aligned with IPC registration. **Done:** `31bc962`, below. | P7 §8; [D92](DECISIONS.md) |
 
 **Keep `fleet_probe` in release builds — approved by Matthew, 2026-10-24 (D93):** yes, restricted to
 the main window by the command permissions above. It reads diagnostic window information and is useful
@@ -36,7 +37,9 @@ verification limits when reconciling their proposal rows; approval is not proof 
 before `thread/resume` and its subsequent `inject_instructions` call. When resuming a thread that is
 not yet loaded, the earlier injection is skipped, so Friendly can become available while instructions
 are still pending. Both `composer.rs` and `delivery.rs` check this ready flag. This ordering was
-confirmed in code; the race has not been reproduced in the app.
+confirmed in code; the race has not been reproduced in the app. **Fixed in `e4a83b5`**; it was also
+wider than described: when `thread/resume` failed, the retry loop kept Friendly open with the
+instructions still pending.
 
 Fix the ordering and verify the resumed-thread path before merge. Instruction failure must remain
 visible, without silently treating instructions as delivered or automatically replaying an uncertain
@@ -52,12 +55,17 @@ verification remain pre-merge work.
 ## Access and verification status
 
 - **Narrator access — provided:** Matthew reports that a key has been entered in **Chorus 2
-  (Dev Build)**. No further key-entry request is pending. A real narrator call still needs verification
-  in that build with the stated $3 cap; key entry alone does not prove a successful call. Do not copy
-  the credential into documentation or another instance's data directory.
+  (Dev Build)**. A real narrator call still needs verification with the stated $3 cap; key entry alone
+  does not prove a successful call. Do not copy the credential into documentation or another
+  instance's data directory. Running this branch on the Dev Build's data would apply migrations
+  0019–0021, which `main` can't take back, so Matthew chose to enter the key again in the review
+  instance, through its Settings → Providers.
 - **CLI installation — approved, 2026-10-24 (D87):** Matthew authorizes installing opencode and Grok
   if absent. Installation, launches and shortcut bindings still need verification; this documentation
-  update does not claim either CLI has been installed or tested.
+  update does not claim either CLI has been installed or tested. The packages are `@opencode/cli`
+  (the 2.x line D58 targets; `opencode-ai` is still the 1.x line) and xAI's installer at
+  `https://x.ai/cli/install.ps1` (stable Grok 1.0.70; Chorus was last verified on 1.0.62). The agent
+  session's safety check blocked running either installer, so Matthew runs them.
 - **Display check — deferred, low priority (D88):** Matthew defers the alternate display-scale and
   second-monitor checks in P7 §11. They are not pre-merge blockers. Later, confirm that empty strip
   space and dragging preserve the other app's focus, and that the strip returns to a visible screen
@@ -66,10 +74,35 @@ verification remain pre-merge work.
   It is not a pre-merge blocker. Later, verify dragging and chip clicks with swapped primary buttons,
   then restore the original setting. The code change exists; real-input behavior remains unverified.
 
+## Implemented after approval
+
+Each was seen in the review instance (`com.contactestablished.chorus2.dev.eve`), driven through its
+own IPC and UI. `npm run check` passed before each commit.
+
+| Decision | Commit | Seen working | Not covered |
+|---|---|---|---|
+| D89 Codex readiness | `e4a83b5` | On Restart with changed notes, twice, the bridge logged "Friendly waits for its instructions", gave them about 430 ms later, then opened Friendly. Polling from the page never saw Friendly ready before the instructions were marked given, and Codex answered with the new note's canary word. A new thread opens Friendly 1–2 ms after its instructions. | A failed injection was not forced in the app. In code it is recorded visibly (session note, not given), is not retried, and then Friendly opens. |
+| D92, D93 window commands | `31bc962` | From the strip, `sessions_list` and `prefs_get` answer and `fleet_open_session` switches the main window; `app_info`, `fleet_probe`, `vault_list`, `notifications_list`, `automations_list` and `restore_progress` are refused as "not allowed on window fleet". The splash may call only `restore_progress` and still closes itself. The main window can call every command. | A release build was not run. Its access list is the same; only the refusal message is shorter. |
+| D84 close after success | `cf12c05` | With the setting on and nobody touching the run, Chorus closed the agent 7–20 s after the turn ended. The session stays exited and reads Done, with no notification, and the run reads "finished, and Chorus closed its agent". Restart then repeated the earlier reply. With Raw typing during the run, or with the setting off, the session was still open 40 s after its turn. The editor shows the checkbox with each automation's value. | A Friendly follow-up, a queued prompt and a lock are covered by the rule's unit tests, not by app runs. Background work an agent leaves running after its turn is stopped with it. |
+| D85 overlap | `cf12c05` | With an older session from the same automation working and the latest idle, Run now was skipped: "Skipped: Dash prompt run #2, from an earlier run, is still working." | — |
+
+**What "close" does (D84):** it stops the agent and leaves the session *exited*, not *closed*. A
+closed session leaves the UI and can't be restarted, which would lose the follow-up D84 keeps.
+Exited sessions are not relaunched when Chorus starts.
+
+**Found and fixed while verifying D84:** the first run read as failed and raised a failure
+notification, because a stopped agent exits non-zero. A run Chorus closed after it finished now
+counts as done.
+
+**Proposed lesson (to number):** in Tauri 2.12, once `AppManifest::commands` is set, every app
+command is checked against the calling window's capabilities, the main window's included. Each
+command's permission is `allow-<name with hyphens>`. Debug builds say where a refused command is
+allowed; release builds say only "Command X not allowed by ACL".
+
 ## Then
 
-Implement the pre-merge fixes above and the approved automation behavior, and verify the changes.
-Use the provided narrator access and CLI installation authorization for the remaining runtime checks.
+The pre-merge fixes and the approved automation behavior are implemented and verified (above).
+Still to do: the narrator call, and the opencode and Grok launches and shortcuts once installed.
 Keep automatic compaction, display-scale/monitor and swapped-button checks tracked as deferred work;
 do not treat their deferral as successful verification. Reconcile the decision log when merging
 `evening/p6-p8` into `main` (D83 is reserved in the main checkout).
