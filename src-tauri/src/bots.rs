@@ -152,7 +152,7 @@ pub fn get(store: &Store, id: u32) -> Result<Option<Bot>, String> {
 pub fn refuse_secrets(store: &Store, what: &str, text: &str) -> Result<(), String> {
     let (keys, _) = vault::all_for_scrubbing(store);
     if scrub_all(text.as_bytes(), &keys, &builtin_patterns()) != text.as_bytes() {
-        return Err(format!("{what} holds what looks like a key. Chorus doesn't keep keys there: remove it, or store it under Settings → Keys."));
+        return Err(format!("That looks like a key in {what}. Chorus doesn't keep keys there: remove it, or store it under Settings → Keys."));
     }
     Ok(())
 }
@@ -196,9 +196,9 @@ pub fn save(m: &SessionManager, input: &BotSave) -> Result<Bot, String> {
     if instructions.chars().any(|c| c.is_control() && c != '\n' && c != '\t') {
         return Err("Instructions can't hold control characters.".into());
     }
-    refuse_secrets(m.store(), "The instructions", &instructions)?;
+    refuse_secrets(m.store(), "the instructions", &instructions)?;
     if let Some(d) = &description {
-        refuse_secrets(m.store(), "The description", d)?;
+        refuse_secrets(m.store(), "the description", d)?;
     }
     let tags = chorus_core::tags::clean_tags(&input.tags)?;
     let skills = check_skills(&input.skills)?;
@@ -320,7 +320,7 @@ mod tests {
     fn a_planted_key_is_refused() {
         let s = Store::in_memory();
         let fake = format!("sk-or-v1-{}", "a1".repeat(32));
-        assert!(refuse_secrets(&s, "The note", &format!("use {fake} here")).unwrap_err().contains("looks like a key"));
-        assert!(refuse_secrets(&s, "The note", "no keys here").is_ok());
+        assert!(refuse_secrets(&s, "the note", &format!("use {fake} here")).unwrap_err().contains("looks like a key"));
+        assert!(refuse_secrets(&s, "the note", "no keys here").is_ok());
     }
 }

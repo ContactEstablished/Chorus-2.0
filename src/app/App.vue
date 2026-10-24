@@ -24,6 +24,7 @@ import SessionView from '../views/session/SessionView.vue'
 const SettingsView = defineAsyncComponent(() => import('../views/SettingsView.vue'))
 // P8's screens.
 const NotesView = defineAsyncComponent(() => import('../views/NotesView.vue'))
+const BotsView = defineAsyncComponent(() => import('../views/BotsView.vue'))
 const NewSessionDialog = defineAsyncComponent(() => import('../views/NewSessionDialog.vue'))
 const CommandPalette = defineAsyncComponent(() => import('../shell/CommandPalette.vue'))
 
@@ -82,13 +83,7 @@ watch(
         <SettingsView v-if="view.name === 'settings'" />
         <SessionView v-else-if="view.name === 'session' && view.sessionId !== null" :session-id="view.sessionId" />
         <SessionsView v-else-if="view.name === 'sessions'" />
-        <PhasePlaceholder
-          v-else-if="view.name === 'bots'"
-          title="Bots"
-          icon="bots"
-          phase="Phase 8"
-          what="Reusable agents: agent, model, effort, permissions and instructions, started as a session in one click. They grow out of launch profiles."
-        />
+        <BotsView v-else-if="view.name === 'bots'" />
         <PhasePlaceholder
           v-else-if="view.name === 'automations'"
           title="Automations"

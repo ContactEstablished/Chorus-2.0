@@ -92,7 +92,7 @@ pub fn for_project(store: &Store, project: Option<u32>) -> Result<Vec<NoteInput>
 
 fn save(store: &Store, input: &NoteSave) -> Result<Note, String> {
     let (title, body) = check_note(&input.title, &input.body)?;
-    crate::bots::refuse_secrets(store, "The note", &format!("{title}\n{body}"))?;
+    crate::bots::refuse_secrets(store, "the note", &format!("{title}\n{body}"))?;
     if let Some(p) = input.project_id {
         project_rows::get(store, p)?.ok_or("That project no longer exists.")?;
     }

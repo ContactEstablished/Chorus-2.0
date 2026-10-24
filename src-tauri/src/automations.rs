@@ -307,7 +307,7 @@ fn check_prompt(store: &Store, prompt: &str) -> Result<String, String> {
     if !p.contains(char::is_whitespace) {
         return Err("Write the prompt as a sentence: a single word could be read as one of the agent's commands.".into());
     }
-    crate::bots::refuse_secrets(store, "The prompt", &p)?;
+    crate::bots::refuse_secrets(store, "the prompt", &p)?;
     Ok(p)
 }
 

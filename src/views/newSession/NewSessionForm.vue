@@ -31,6 +31,7 @@ import Icon from '../../components/Icon.vue'
 import type { Choice } from '../../components/choice'
 import { useAgentsStore } from '../../stores/agents'
 import { useProfilesStore } from '../../stores/profiles'
+import { useBotsStore } from '../../stores/bots'
 import { useProvidersStore } from '../../stores/providers'
 import { useProjectsStore } from '../../stores/projects'
 import { AGENT_LABELS, EFFORT_LABELS, PERMISSION_LABELS, money, optionsText } from '../../raw/labels'
@@ -48,6 +49,7 @@ const emit = defineEmits<{ launch: [request: LaunchRequest]; cancel: [] }>()
 const agents = useAgentsStore()
 const providers = useProvidersStore()
 const profiles = useProfilesStore()
+const bots = useBotsStore()
 const projects = useProjectsStore()
 
 // Drawn in the theme's colours: each logo is a mask.
@@ -117,6 +119,12 @@ onMounted(async () => {
   void agents.load(true)
   void providers.load()
   void profiles.load()
+  // P8: Start session on the Bots screen opens this form filled from that Bot.
+  if (bots.startWith) {
+    const b = bots.startWith
+    bots.startWith = null
+    void applyProfile(b).then(() => { if (b.preset) preset.value = b.preset })
+  }
   void loadPresets()
   void suggestName()
   commands.tagsKnown().then((r) => {
@@ -340,6 +348,8 @@ watch(
 // Profiles: fill the form from one, or save the form as one. The agent goes first, because
 // changing it clears the other choices.
 const profileName = ref('')
+// P8: the Bot the session starts from, whose instructions it copies.
+const botId = ref<number | null>(null)
 const savedNote = ref('')
 async function applyProfile(p: ProfileSummary): Promise<void> {
   agent.value = p.agent
@@ -351,6 +361,7 @@ async function applyProfile(p: ProfileSummary): Promise<void> {
   keyId.value = p.credential?.id ?? null
   envVar.value = p.credential?.envVar ?? ''
   profileName.value = p.name
+  botId.value = p.id
   if (p.providerId !== null || p.credential) runsOnOpen.value = true
   savedNote.value = p.providerName === '(deleted provider)' ? 'Its provider was deleted: choose another.' : `Filled from ${p.name}.`
 }
@@ -406,6 +417,7 @@ function submit(): void {
     tags: tags.value,
     workspace: preset.value === 'swarm' ? 'new-worktree' : workspace.value === 'existing' ? { 'existing-worktree': retainedId.value! } : workspace.value,
     routing: routingApplies.value ? routing.value : null,
+    botId: botId.value,
   }
   emit('launch', { preset: preset.value, session, count: preset.value === 'swarm' ? swarmCount.value : null })
 }
@@ -427,7 +439,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
       <h2>New session</h2>
 
       <div v-if="profiles.list.length" class="chips">
-        <span class="small">Profiles</span>
+        <span class="small">Bots</span>
         <span v-for="p in profiles.list" :key="p.id" class="chip">
           <button type="button" :title="optionsText(p) || 'defaults'" @click="applyProfile(p)">
             {{ p.name }} <em>{{ AGENT_LABELS[p.agent] }}{{ p.providerName ? ` · ${p.providerName}` : '' }}</em>
@@ -591,9 +603,9 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
               <span class="hint">The key reaches the process only as this environment variable, and is redacted from its output.</span>
             </label>
             <div class="row">
-              <input v-model="profileName" placeholder="Profile name" maxlength="80" autocomplete="off" aria-label="Profile name" />
+              <input v-model="profileName" placeholder="Bot name" maxlength="80" autocomplete="off" aria-label="Bot name" />
               <button type="button" :disabled="!profileName.trim()" @click="saveProfile">
-                {{ profiles.list.some((p) => p.name === profileName.trim()) ? 'Update profile' : 'Save as profile' }}
+                {{ profiles.list.some((p) => p.name === profileName.trim()) ? 'Update Bot' : 'Save as Bot' }}
               </button>
             </div>
             <p v-if="profiles.error" class="hint warn">{{ profiles.error }}</p>
