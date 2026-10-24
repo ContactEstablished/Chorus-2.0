@@ -9,10 +9,12 @@ project's session and not another project's, editing a Bot reached a new session
 one, a plan a session wrote appeared in Documents linked to it, and an automation started sessions on
 schedule and with Run now, each first prompt recorded once with source `automation`.
 
-Limits: automations start Claude Code Bots only; Documents finds files Claude Code wrote (Codex's
-patch writes aren't recorded as file paths); opencode and Grok aren't installed here, so their
-instructions are declared unsupported with the reason shown. Codex instructions use a route found
-tonight (`thread/inject_items`, not argv). It is built, but it is a decision for Matthew (§9 Q1).
+Limits: automations start Claude Code Bots only; Documents finds files Claude Code and Codex wrote
+with their file tools (Codex's patches since §12), not files written by a shell command; opencode
+and Grok aren't installed here, so their instructions are declared unsupported with the reason
+shown. Codex instructions use a route found tonight (`thread/inject_items`, not argv). It is built,
+but it is a decision for Matthew (§9 Q1). Everything waiting for Matthew across P6–P8 is gathered in
+[HANDOFF-P6-P8-DECISIONS](HANDOFF-P6-P8-DECISIONS.md).
 
 ## 2. Branch
 
