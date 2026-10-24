@@ -80,7 +80,22 @@ impl Bridge {
         let Some((text,run_id))=self.instructions.lock().expect("bridge instructions").take() else { return };
         let items=json!([{"type":"message","role":"developer","content":[{"type":"input_text","text":text}]}]);
         let result=self.rpc("thread/inject_items",json!({"threadId":thread,"items":items})).map(|_|());
+        #[cfg(debug_assertions)]
+        eprintln!("codex: session {session} instructions {} at {}", if result.is_ok() {"given"} else {"failed"}, now_ms());
         crate::instructions::codex_injected(&manager.store,session,run_id,result);
+        manager.notify_id(session);
+    }
+    /// D89: Friendly opens only once the run's instructions are no longer pending, given or failed
+    /// visibly, so no prompt of Chorus's reaches the thread before them.
+    fn open_friendly(&self, manager:&SessionManager, session:u32) {
+        if self.instructions.lock().expect("bridge instructions").is_some() {
+            #[cfg(debug_assertions)]
+            eprintln!("codex: session {session} Friendly waits for its instructions at {}", now_ms());
+            return;
+        }
+        if self.ready.swap(true,Ordering::SeqCst) { return; }
+        #[cfg(debug_assertions)]
+        eprintln!("codex: session {session} Friendly ready at {}", now_ms());
         manager.notify_id(session);
     }
     pub(super) fn bind(self:&Arc<Self>, manager:&Arc<SessionManager>, session:u32, run:&Arc<Run>) {
@@ -97,11 +112,14 @@ impl Bridge {
                     if let Some(id) = id.filter(|id|chorus_core::agent::is_uuid(id)) {
                         // P8: once the TUI has the thread loaded, before its first prompt where possible.
                         if loaded["data"].as_array().is_some_and(|a|a.iter().any(|t|t.as_str()==Some(id))) { bridge.inject_instructions(&manager,session,id); }
-                        bridge.ready.store(true,Ordering::SeqCst);
+                        // A new thread's resume fails until its first prompt, so Friendly must open
+                        // here once its instructions are given; a resumed thread not loaded yet waits.
+                        bridge.open_friendly(&manager,session);
                         if let Ok(resumed) = bridge.rpc("thread/resume",json!({"threadId":id})) {
                             // A resumed thread the TUI hadn't loaded yet at the first poll is loaded
                             // now; give it what is still pending (a no-op once given).
                             bridge.inject_instructions(&manager,session,id);
+                            bridge.open_friendly(&manager,session);
                             let _=crate::store::sessions::set_agent_session_id(&manager.store,session,id);
                             manager.notify_id(session);
                             break (id.to_owned(),chorus_core::codex_stream::hydrate(id,&resumed,bridge.resume.is_none()));
