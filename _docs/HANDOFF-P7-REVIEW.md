@@ -180,3 +180,8 @@ search the Raw view; export the transcript; rename the session and Restart to se
 - **Through the UI:** Settings → Appearance's strip switch hid and reshowed the strip; Mark all read
   took the unread count from 9 to 0 and cleared the bell's badge; with one failed session the main
   window's taskbar button showed the red "1" overlay (screen capture before and after).
+- **Later fixes, each seen in the app:** the strip follows a theme change while open (it kept the old
+  theme); keyboard focus moves into the bell panel and Export popover and returns on Escape; the
+  strip's screen check leaves a strip placed across monitors or a little over an edge alone.
+- **P6 in the merged build:** Friendly's Send and Queue each delivered once, in order, to Claude Code
+  and to Codex (with P8's bridge change), recorded as `composer`.
