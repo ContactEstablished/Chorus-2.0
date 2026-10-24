@@ -349,3 +349,8 @@ Checked again after merging with P7 (`evening/p6-p8`), in an isolated instance:
   never entered the conversation. After `/compact` (recorded as a turn with no prompt), asked for
   the canary word, it answered "marigold": the injected instructions survived. Not measured: an
   automatic compaction late in a long session.
+- **Can a first prompt beat Codex's instructions (§9 Q1)?** One timing, no prompt sent: Codex's
+  input box ("Ask Codex to do anything") appeared about 1.0 s after the session was created and the
+  run's instructions were marked given at about 1.7 s. Friendly's Send and queue wait for the
+  bridge's ready flag, which is set right after that injection (`composer.rs`, `delivery.rs`), so
+  only text typed in Raw and sent within about 0.6 s of the box appearing could arrive first.

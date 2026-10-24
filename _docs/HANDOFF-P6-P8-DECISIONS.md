@@ -8,7 +8,7 @@ gathers them, with a recommendation each. Nothing here is decided until Matthew 
 
 | # | Question | Recommendation | Where |
 |---|---|---|---|
-| 1 | Keep Codex instructions over the app-server (`thread/inject_items`)? Seen working; a prompt typed in the first ~0.5 s could beat it. They survived a forced `/compact` (P8 §12); an automatic compaction late in a long session is still unmeasured | Keep it | P8 §9 Q1 |
+| 1 | Keep Codex instructions over the app-server (`thread/inject_items`)? Seen working; Friendly waits for it, and only text typed in Raw within ~0.6 s of Codex's input box appearing could arrive first (P8 §12). They survived a forced `/compact` (P8 §12); an automatic compaction late in a long session is still unmeasured | Keep it | P8 §9 Q1 |
 | 2 | Automation sessions stay open after their turn, one more every run | A per-automation "close when the first turn ends", on by default | P8 §9 Q2 |
 | 3 | What counts as "still active" when runs overlap | Busy only: working, waiting for you, or not past its first prompt | P8 §9 Q3 |
 | 4 | Native Claude skills through `--plugin-dir` (not built or tried) | Try after this merges, behind the same carrier table | P8 §9 Q4 |
