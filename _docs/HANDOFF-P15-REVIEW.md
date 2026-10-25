@@ -158,11 +158,9 @@ spike doc); codex-cli 0.163.0; opencode 2.1.4; Node 24.15; git on PATH.
 
 **Lessons:** P15-L1 to P15-L6 are in [spikes/P15.md](spikes/P15.md). From slice 2:
 
-- **P15-L7 — Claude Code 2.1.310 trusts a git repository, worktrees included, only through its main
-  working tree's own entry.** A trusted folder above the repository doesn't count, unlike for a plain
-  folder; answering the question in a worktree records the main working tree. Chorus's
-  `folder_trusted` walks up parents, which is right for plain folders only. (D55's entry for
-  `<parent>\.chorus2\<repo>` may therefore do nothing for git worktrees: see question 3.)
+- **P15-L7** became **L66** with the fix on `fix/claude-repo-trust` (D100, merged into this branch):
+  Claude Code 2.1.310 trusts a git repository, worktrees included, only through its main working
+  tree's own entry. P15's run Start uses the fixed check.
 - **P15-L8 — A prompt passed at launch can be echoed long after launch:** 103 s behind a trust
   question on 2.1.310, past D75's 60 s window.
 - **P15-L9 — `tauri dev` rebuilds and restarts the app on any source change;** an instance that runs
@@ -178,7 +176,7 @@ spike doc); codex-cli 0.163.0; opencode 2.1.4; Node 24.15; git on PATH.
 **Answered 2026-10-25 (D99):** 1, yes, and the spec's last resort through OpenRouter is withdrawn: never
 GPT or Claude through OpenRouter; an OpenRouter last resort is one of `~z-ai/glm-flash-latest`,
 `~deepseek/deepseek-v4-flash-latest` or `~moonshotai/kimi-latest`. 2, yes. 3, yes, as its own fix
-after slice 3.
+after slice 3: done as D100 on `fix/claude-repo-trust`, merged into this branch.
 
 1. **Claude and GPT models through OpenRouter in loop roles.** You said they should always use your
    subscriptions. Is that only for testing (my reading), or should Settings → Models refuse an

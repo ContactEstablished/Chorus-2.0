@@ -508,3 +508,12 @@ proposed fix, Gemini 2.5 Flash Lite once wrote its own diff, against lines the f
 Tell it never to write code, diffs or replacement text and to ask the agent to make the change it
 proposed instead; the agent has the files. The same model also sometimes marks a review-only turn
 finished, so treat its suggestions as usually present, not guaranteed.
+
+**L66 — Claude Code 2.1.310 trusts a git repository only through its main working tree's own
+entry.** Its config keeps one `projects["C:/path"].hasTrustDialogAccepted` per folder. A plain folder
+(not in a repository) is trusted when it or a folder above it is. A folder in a git repository,
+worktrees included, is trusted only when the repository's main working tree has its own entry: a
+trusted folder above the repository doesn't count, and an entry for the folder that holds its
+worktrees does nothing. Answering the question in a worktree records the main working tree. Measured
+with fixtures under one trusted folder: a plain subfolder opened without asking; a repository there,
+and its worktree, both asked; once the repository was trusted, its worktrees didn't (D100).

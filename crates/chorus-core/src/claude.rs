@@ -1,9 +1,9 @@
-//! What Chorus reads from Claude Code's own config, and the one thing it writes there. Claude Code
-//! 2.1.300 asks whether to trust a folder it hasn't seen, and the default answer, No, exits (LESSONS
-//! L33). Its config (`.claude.json`) records the answer per folder,
-//! `projects["C:/path"].hasTrustDialogAccepted`, and a folder inside a trusted one isn't asked
-//! (measured on 2.1.300). A worktree is always a new folder, so Chorus records trust for the folder
-//! its worktrees live in, and only when Claude Code already trusts their repository (D55).
+//! What Chorus reads from Claude Code's own config. Chorus writes nothing there (D100). Claude Code
+//! asks whether to trust a folder it hasn't seen, and the default answer, No, exits (LESSONS L33).
+//! Its config (`.claude.json`) records the answer per folder,
+//! `projects["C:/path"].hasTrustDialogAccepted`. Measured on 2.1.310 (L66): inside a git repository,
+//! worktrees included, only the main working tree's own entry counts; a plain folder is also trusted
+//! through a trusted folder above it.
 
 use serde_json::Value;
 
@@ -79,23 +79,8 @@ fn norm(path: &str) -> String {
     path.replace('\\', "/").trim_end_matches('/').to_lowercase()
 }
 
-/// How Claude Code names a folder in its config: forward slashes, no trailing one.
-pub fn project_key(folder: &str) -> String {
-    folder.trim().replace('\\', "/").trim_end_matches('/').to_owned()
-}
-
-/// The config with `folder` marked trusted and everything else kept, as Claude Code writes it
-/// (two-space indent, no final newline). `None` when the config isn't a JSON object, or its
-/// `projects` or that folder's entry isn't one.
-pub fn with_folder_trusted(config: &str, folder: &str) -> Option<String> {
-    let mut v: Value = serde_json::from_str(config).ok()?;
-    let projects = v.as_object_mut()?.entry("projects").or_insert_with(|| Value::Object(Default::default()));
-    let entry = projects.as_object_mut()?.entry(project_key(folder)).or_insert_with(|| Value::Object(Default::default()));
-    entry.as_object_mut()?.insert("hasTrustDialogAccepted".into(), Value::Bool(true));
-    serde_json::to_string_pretty(&v).ok()
-}
-
-/// Whether Claude Code trusts `cwd` or a folder above it. `None` when the config can't be read.
+/// Whether Claude Code trusts a plain folder (not in a git repository): `cwd` or a folder above it.
+/// `None` when the config can't be read.
 pub fn folder_trusted(config: &str, cwd: &str) -> Option<bool> {
     let v: Value = serde_json::from_str(config).ok()?;
     let Some(projects) = v.get("projects").and_then(Value::as_object) else { return Some(false) };
@@ -116,15 +101,22 @@ pub fn folder_trusted(config: &str, cwd: &str) -> Option<bool> {
     }
 }
 
-/// Whether Claude Code trusts sessions in a git repository and its worktrees. Measured on 2.1.310
-/// (P15): it keys a repository, worktrees included, by the main working tree's own entry, and a
-/// trusted folder above the repository doesn't count, unlike a plain folder's. Answering its
-/// question in a worktree records the main working tree.
+/// Whether Claude Code trusts a git repository, and so its worktrees: the main working tree's own
+/// entry, not a trusted folder above it. `None` when the config can't be read.
 pub fn repo_trusted(config: &str, main_root: &str) -> Option<bool> {
     let v: Value = serde_json::from_str(config).ok()?;
     let Some(projects) = v.get("projects").and_then(Value::as_object) else { return Some(false) };
     let want = norm(main_root);
     Some(projects.iter().any(|(k, p)| norm(k) == want && p.get("hasTrustDialogAccepted").and_then(Value::as_bool) == Some(true)))
+}
+
+/// Whether Claude Code will start in `cwd` without asking: through its repository's main working
+/// tree when `cwd` is in one (`main_root`), else through `cwd` or a folder above it.
+pub fn trusted_at(config: &str, cwd: &str, main_root: Option<&str>) -> Option<bool> {
+    match main_root {
+        Some(root) => repo_trusted(config, root),
+        None => folder_trusted(config, cwd),
+    }
 }
 
 #[cfg(test)]
@@ -134,9 +126,13 @@ mod tests {
     #[test]
     fn a_repository_needs_its_own_entry() {
         let config = r#"{"projects":{"C:/tmp/p15":{"hasTrustDialogAccepted":true},"C:/tmp/p15/b":{"hasTrustDialogAccepted":true}}}"#;
-        assert_eq!(repo_trusted(config, r"C:\tmp\p15\a"), Some(false), "a trusted parent doesn't count");
-        assert_eq!(folder_trusted(config, r"C:\tmp\p15\a"), Some(true), "it does for a plain folder");
-        assert_eq!(repo_trusted(config, r"c:\TMP\p15\b\"), Some(true));
+        // A repository inside a trusted folder, and a worktree of it: both asked (2.1.310).
+        assert_eq!(trusted_at(config, r"C:\tmp\p15\a", Some(r"C:\tmp\p15\a")), Some(false));
+        assert_eq!(trusted_at(config, r"C:\tmp\p15\.chorus2\a\x", Some(r"C:\tmp\p15\a")), Some(false));
+        // Its main working tree trusted: every worktree is.
+        assert_eq!(trusted_at(config, r"C:\tmp\p15\.chorus2\b\x", Some(r"c:\TMP\p15\b\")), Some(true));
+        // A plain folder inside a trusted one isn't asked.
+        assert_eq!(trusted_at(config, r"C:\tmp\p15\plain", None), Some(true));
         assert_eq!(repo_trusted("{}", r"C:\x"), Some(false));
         assert_eq!(repo_trusted("nope", r"C:\x"), None);
     }
@@ -155,24 +151,6 @@ mod tests {
         assert_eq!(folder_trusted(CONFIG, r"D:\other"), Some(false));
         assert_eq!(folder_trusted("{}", r"C:\x"), Some(false));
         assert_eq!(folder_trusted("not json", r"C:\x"), None);
-    }
-
-    #[test]
-    fn trusting_a_folder_keeps_everything_else() {
-        let config = r#"{"numStartups":12,"projects":{"C:/Users/a/work":{"hasTrustDialogAccepted":true,"allowedTools":["Bash"]},
-            "C:/Users/a/.chorus2/ledger":{"allowedTools":[],"hasTrustDialogAccepted":false}},"theme":"dark"}"#;
-        let before: Value = serde_json::from_str(config).unwrap();
-        let after_text = with_folder_trusted(config, r"C:\Users\a\.chorus2\ledger\").unwrap();
-        assert!(after_text.starts_with("{\n  \"") && !after_text.ends_with('\n'), "Claude Code's own layout");
-        let mut after: Value = serde_json::from_str(&after_text).unwrap();
-        let entry = after.pointer_mut("/projects/C:~1Users~1a~1.chorus2~1ledger").unwrap();
-        assert_eq!(entry["hasTrustDialogAccepted"], Value::Bool(true));
-        assert_eq!(entry["allowedTools"], serde_json::json!([]), "its other fields stay");
-        entry["hasTrustDialogAccepted"] = Value::Bool(false);
-        assert_eq!(after, before, "nothing else changed");
-        assert_eq!(folder_trusted(&with_folder_trusted("{}", r"D:\x").unwrap(), r"D:\x\wt\1a2b"), Some(true));
-        assert_eq!(with_folder_trusted("[]", r"D:\x"), None);
-        assert_eq!(with_folder_trusted(r#"{"projects":[]}"#, r"D:\x"), None);
     }
 
     #[test]
