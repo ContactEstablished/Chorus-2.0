@@ -259,9 +259,9 @@ fn a_blocking_question_waits_for_its_answer_and_can_become_a_rule() {
     let wt = f.worktree(id);
     assert_eq!(std::fs::read_to_string(wt.join("src/sum.txt")).unwrap(), "return a + b // short");
     let decisions = std::fs::read_to_string(wt.join(".chorus/run/decisions.md")).unwrap();
-    assert!(decisions.contains("## Rules from your answers") && decisions.contains("- Which wording for errors?: short ([P01 T1])"), "{decisions}");
+    assert!(decisions.contains("## Rules from your answers") && decisions.contains("- short\n  (Asked [P01 T1]: Which wording for errors?)"), "{decisions}");
     // The rule is committed with the task, so later phases read it.
-    assert!(git(&wt, &["show", "HEAD:.chorus/run/decisions.md"]).contains("Which wording for errors?: short"));
+    assert!(git(&wt, &["show", "HEAD:.chorus/run/decisions.md"]).contains("(Asked [P01 T1]: Which wording for errors?)"));
     let q = db::questions(f.manager.store(), id).unwrap();
     assert_eq!((q[0].state.as_str(), q[0].made_rule), ("answered", true));
 }

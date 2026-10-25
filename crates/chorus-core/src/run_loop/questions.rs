@@ -10,9 +10,11 @@ pub fn tag(phase: u32, task: Option<&str>) -> String {
     }
 }
 
-/// One line for `assumptions.md`, on one line whatever the agent wrote.
+/// One line for `assumptions.md`, on one line whatever the agent wrote, and tagged once even when
+/// the agent copied the tag into its text.
 pub fn assumption_line(tag: &str, text: &str) -> String {
     let one = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let one = one.strip_prefix(tag).map_or(one.as_str(), str::trim_start);
     format!("- {tag} {one}")
 }
 
@@ -28,10 +30,13 @@ pub fn append_assumption(existing: &str, line: &str) -> String {
 pub const RULES_HEADING: &str = "## Rules from your answers";
 
 /// `decisions.md` with a rule from one of Matthew's answers, under its own heading at the end, so
-/// the agents' next read finds it and the question isn't asked again.
+/// the agents' next read finds it and the question isn't asked again. The rule comes first; the
+/// question it answered follows, shortened, for context.
 pub fn append_rule(decisions: &str, question: &str, answer: &str, tag: &str) -> String {
     let one = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ");
-    let line = format!("- {}: {} ({tag})", one(question).trim_end_matches('?').to_owned() + "?", one(answer));
+    let asked = one(question);
+    let asked = if asked.chars().count() > 200 { format!("{}…", asked.chars().take(200).collect::<String>().trim_end()) } else { asked };
+    let line = format!("- {}\n  (Asked {tag}: {asked})", one(answer));
     let mut out = if decisions.trim().is_empty() { "# Decisions\n".to_owned() } else { decisions.to_owned() };
     if !out.ends_with('\n') {
         out.push('\n');
@@ -76,6 +81,7 @@ mod tests {
         assert_eq!(tag(3, Some("T2")), "[P03 T2]");
         assert_eq!(tag(1, None), "[P01 plan]");
         assert_eq!(assumption_line("[P01 T1]", "used\n Number()  for parsing"), "- [P01 T1] used Number() for parsing");
+        assert_eq!(assumption_line("[P01 T1]", "[P01 T1] sum is a plain function"), "- [P01 T1] sum is a plain function");
     }
 
     #[test]
@@ -92,11 +98,13 @@ mod tests {
         let one = append_rule(d, "Error wording?", "Use \"<command>: <problem>\"", "[P01 T2]");
         assert!(one.starts_with(d));
         assert!(one.contains("\n## Rules from your answers\n"));
-        assert!(one.ends_with("- Error wording?: Use \"<command>: <problem>\" ([P01 T2])\n"), "{one}");
+        assert!(one.ends_with("- Use \"<command>: <problem>\"\n  (Asked [P01 T2]: Error wording?)\n"), "{one}");
         let two = append_rule(&one, "Exit codes", "1 on error", "[P02 T1]");
         assert_eq!(two.matches(RULES_HEADING).count(), 1);
-        assert!(two.ends_with("- Exit codes?: 1 on error ([P02 T1])\n"));
+        assert!(two.ends_with("- 1 on error\n  (Asked [P02 T1]: Exit codes)\n"));
         assert!(append_rule("", "q", "a", "[P01 plan]").starts_with("# Decisions\n"));
+        let long = append_rule("", &format!("What wording?\n{}", "x ".repeat(200)), "Short.", "[P01 plan]");
+        assert!(long.contains("(Asked [P01 plan]: What wording? x x") && long.contains("…)"), "{long}");
     }
 
     #[test]
