@@ -196,6 +196,16 @@ export const commands = {
 	loopRunApprove: (id: number) => typedError<RunView, string>(__TAURI_INVOKE("loop_run_approve", { id })),
 	loopRunDelete: (id: number) => typedError<boolean, string>(__TAURI_INVOKE("loop_run_delete", { id })),
 	loopQuestionAnswer: (questionId: number, answer: string, makeRule: boolean) => typedError<RunView, string>(__TAURI_INVOKE("loop_question_answer", { questionId, answer, makeRule })),
+	relayStatus: () => typedError<RelayView, string>(__TAURI_INVOKE("relay_status")),
+	/**  Stores a bot token after Telegram accepts it (`getMe`). A new bot means pairing again. */
+	relaySetToken: (token: string) => typedError<RelayView, string>(__TAURI_INVOKE("relay_set_token", { token })),
+	relayClearToken: () => typedError<RelayView, string>(__TAURI_INVOKE("relay_clear_token")),
+	relaySetEnabled: (enabled: boolean) => typedError<RelayView, string>(__TAURI_INVOKE("relay_set_enabled", { enabled })),
+	/**  A pairing code to send from the phone as `/pair 123456`, for ten minutes. */
+	relayPairStart: () => typedError<RelayView, string>(__TAURI_INVOKE("relay_pair_start")),
+	relayUnpair: (id: string) => typedError<RelayView, string>(__TAURI_INVOKE("relay_unpair", { id })),
+	/**  Sends one test message to every paired phone. */
+	relayTest: () => typedError<RelayView, string>(__TAURI_INVOKE("relay_test")),
 };
 
 /** Events */
@@ -1084,6 +1094,11 @@ export type Outcome =
 /**  A session an earlier run started was still busy (D85). */
 "skipped";
 
+export type PairingCode = {
+	code: string,
+	expiresAtSecs: number,
+};
+
 export type PendingReply = {
 	askId: number,
 	runId: number,
@@ -1390,6 +1405,27 @@ export type RegistrySource =
 /**  Not listed: derived from the model's endpoints by [`entry_for`]. */
 "derived";
 
+export type RelayUser = {
+	/**  Telegram's user id, as text: it can pass 32 bits. */
+	id: string,
+	name: string,
+	pairedAtSecs: number,
+};
+
+export type RelayView = {
+	hasToken: boolean,
+	enabled: boolean,
+	botName: string | null,
+	/**  off | no-token | connecting | connected | conflict | rejected | offline */
+	state: string,
+	/**  Why, when it isn't connected. */
+	note: string | null,
+	users: RelayUser[],
+	pairing: PairingCode | null,
+	/**  Messages waiting to go. */
+	queued: number,
+};
+
 export type ReplyDetails = { kind: "approval"; tool: string; input: string } | { kind: "question"; questions: Question[] };
 
 export type ReplyReceipt = {
@@ -1467,6 +1503,8 @@ export type RunConfig = {
 	milestoneEvery: number,
 	/**  Debug builds only: steps are played from this script file instead of being run by agents. */
 	script?: string | null,
+	/**  The phone gets no question text for this run, only that a question waits (D98). */
+	phoneStatusOnly?: boolean,
 };
 
 /**  What a run's instructions held, kept on the run and shown in session facts. */

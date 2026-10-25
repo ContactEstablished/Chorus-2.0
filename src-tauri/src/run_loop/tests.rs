@@ -87,6 +87,7 @@ impl Fixture {
             limits: Limits::default(),
             milestone_every: 3,
             script: Some(script.display().to_string()),
+            phone_status_only: false,
         };
         let input = NewRun { name: "Sums".into(), folder: self.repo.display().to_string(), base_branch: None, config };
         let created = super::create(&self.manager, &input).unwrap();
@@ -220,6 +221,7 @@ fn checks_and_roles_are_required() {
         limits: Limits::default(),
         milestone_every: 3,
         script: None,
+        phone_status_only: false,
     };
     let input = NewRun { name: "x".into(), folder: f.repo.display().to_string(), base_branch: None, config: config.clone() };
     assert!(super::create(&f.manager, &input).unwrap_err().contains("Builder role"));

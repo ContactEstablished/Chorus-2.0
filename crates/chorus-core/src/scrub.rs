@@ -403,7 +403,7 @@ mod tests {
         let names: Vec<_> = builtin_patterns().into_iter().map(|p| p.name).collect();
         assert_eq!(
             names,
-            ["anthropic", "openrouter", "openai-project", "openai-classic", "github", "aws-access-key-id", "google-api-key"]
+            ["anthropic", "openrouter", "openai-project", "openai-classic", "github", "aws-access-key-id", "google-api-key", "telegram-bot-token"]
         );
     }
 

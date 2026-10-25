@@ -121,7 +121,7 @@ fn run_tool(m: &SessionManager, step_id: u32, name: &str, args: &serde_json::Val
             let options: Vec<String> = ask.options.iter().map(|o| scrub(m, o)).collect();
             let default = ask.default.as_deref().map(|d| scrub(m, d));
             let deadline = (ask.class == AskClass::Timed).then(|| now_ms() + i64::from(run.config.limits.timed_minutes) * 60_000);
-            db::insert_question(
+            let id = db::insert_question(
                 store,
                 &NewQuestion {
                     run_id,
@@ -136,6 +136,7 @@ fn run_tool(m: &SessionManager, step_id: u32, name: &str, args: &serde_json::Val
                 },
             )?;
             worker::notify(run_id);
+            crate::relay::outbound::question_asked(m, id);
             Ok(ToolResult::ok(reply))
         }
         "log_assumption" => {

@@ -53,4 +53,5 @@ pub mod instructions;
 pub mod schedule;
 pub mod automation;
 pub mod documents;
+pub mod relay;
 pub mod run_loop;

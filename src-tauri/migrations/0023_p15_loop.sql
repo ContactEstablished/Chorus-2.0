@@ -104,3 +104,69 @@ CREATE TABLE loop_questions (
     delivered_at INTEGER
 );
 CREATE INDEX loop_questions_run ON loop_questions(run_id, state);
+
+-- The Telegram relay (slice 4, HANDOFF-P13's design). One bot, long polling only, DM only.
+-- The token is a credential (DPAPI); nothing here holds it.
+CREATE TABLE relay_config (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    credential_id INTEGER REFERENCES credentials(id) ON DELETE SET NULL,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    bot_name TEXT,
+    poll_offset INTEGER NOT NULL DEFAULT 0
+);
+INSERT INTO relay_config (id) VALUES (1);
+
+-- Paired phones: Telegram users whose private chat with the bot is heard.
+CREATE TABLE relay_users (
+    telegram_id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    paired_at INTEGER NOT NULL
+);
+
+-- Messages waiting to go, rendered and scrubbed. kind: question | settled | stopped | milestone |
+-- phase-done | done | reply | test. A settled question edits the messages its question was sent as.
+CREATE TABLE relay_outbox (
+    id INTEGER PRIMARY KEY,
+    kind TEXT NOT NULL,
+    run_id INTEGER,
+    question_id INTEGER,
+    chat_id INTEGER,
+    reply_to INTEGER,
+    html TEXT NOT NULL,
+    silent INTEGER NOT NULL DEFAULT 0,
+    buttons TEXT NOT NULL DEFAULT '[]',
+    created_at INTEGER NOT NULL,
+    sent_at INTEGER,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    error TEXT
+);
+
+-- What each message the bot sent was about, so a reply finds its question.
+CREATE TABLE relay_messages (
+    chat_id INTEGER NOT NULL,
+    message_id INTEGER NOT NULL,
+    kind TEXT NOT NULL,
+    run_id INTEGER,
+    question_id INTEGER,
+    sent_at INTEGER NOT NULL,
+    PRIMARY KEY (chat_id, message_id)
+);
+
+-- A button's token and what it does; text never goes in callback_data.
+CREATE TABLE relay_buttons (
+    token TEXT PRIMARY KEY,
+    act TEXT NOT NULL,
+    run_id INTEGER,
+    question_id INTEGER,
+    created_at INTEGER NOT NULL,
+    used_at INTEGER
+);
+
+-- What arrived and what was done about it. Never the text.
+CREATE TABLE relay_audit (
+    id INTEGER PRIMARY KEY,
+    at INTEGER NOT NULL,
+    kind TEXT NOT NULL,
+    telegram_id INTEGER,
+    note TEXT
+);

@@ -22,6 +22,9 @@ pub struct RunConfig {
     /// Debug builds only: steps are played from this script file instead of being run by agents.
     #[serde(default)]
     pub script: Option<String>,
+    /// The phone gets no question text for this run, only that a question waits (D98).
+    #[serde(default)]
+    pub phone_status_only: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -524,6 +527,14 @@ pub fn set_delivered(store: &Store, ids: &[u32]) -> Result<(), String> {
             c.execute("UPDATE loop_questions SET delivered_at = ?2 WHERE id = ?1", params![id, now])?;
         }
         Ok(())
+    })
+}
+
+/// A run's open questions, or one step's.
+pub fn open_question_ids(store: &Store, run_id: u32, step_id: Option<u32>) -> Result<Vec<u32>, String> {
+    store.with(|c| {
+        let mut stmt = c.prepare("SELECT id FROM loop_questions WHERE run_id = ?1 AND state = 'open' AND (?2 IS NULL OR step_id = ?2)")?;
+        stmt.query_map(params![run_id, step_id], |r| r.get(0))?.collect()
     })
 }
 

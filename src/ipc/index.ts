@@ -137,4 +137,6 @@ export type {
   RunView as LoopRun,
   StepView as LoopStep,
   TaskProgress as LoopTask,
+  RelayView,
+  RelayUser,
 } from './bindings'

@@ -27,6 +27,7 @@ mod documents;
 mod instructions;
 mod notes;
 mod p8;
+mod relay;
 mod run_loop;
 
 use std::sync::Arc;
@@ -131,6 +132,8 @@ pub fn run() {
             let relaunching = manager.clone();
             std::thread::Builder::new().name("relaunch".into()).spawn(move || relaunching.relaunch(&relaunch))?;
             run_loop::start(&manager);
+            // P15: the Telegram relay, for the loop's questions and stops.
+            relay::start(&manager)?;
             // Look for the agent CLIs without holding up the window. Runs relaunched before this
             // finishes get their CLI version filled in afterwards.
             let detecting = manager.clone();

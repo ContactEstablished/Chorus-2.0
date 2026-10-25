@@ -6,6 +6,7 @@ import AppearanceSettings from './settings/AppearanceSettings.vue'
 import ProjectsSettings from './settings/ProjectsSettings.vue'
 import AgentsSettings from './settings/AgentsSettings.vue'
 import NarratorSettings from './settings/NarratorSettings.vue'
+import PhoneSettings from './settings/PhoneSettings.vue'
 import ProvidersPanel from '../raw/ProvidersPanel.vue'
 import KeysPanel from '../raw/KeysPanel.vue'
 import { useViewStore, type SettingsSection } from '../stores/view'
@@ -17,6 +18,7 @@ const SECTIONS: { key: SettingsSection; label: string; icon: IconName }[] = [
   { key: 'projects', label: 'Projects', icon: 'folder' },
   { key: 'providers', label: 'Providers', icon: 'plug' },
   { key: 'narrator', label: 'Narrator', icon: 'agents' },
+  { key: 'phone', label: 'Phone', icon: 'bell' },
   { key: 'keys', label: 'Keys and lock', icon: 'key' },
   { key: 'agents', label: 'Agents', icon: 'agents' },
 ]
@@ -43,6 +45,7 @@ const SECTIONS: { key: SettingsSection; label: string; icon: IconName }[] = [
         <ProjectsSettings v-else-if="view.settingsSection === 'projects'" />
         <ProvidersPanel v-else-if="view.settingsSection === 'providers'" />
         <NarratorSettings v-else-if="view.settingsSection === 'narrator'" />
+        <PhoneSettings v-else-if="view.settingsSection === 'phone'" />
         <KeysPanel v-else-if="view.settingsSection === 'keys'" />
         <AgentsSettings v-else />
       </div>

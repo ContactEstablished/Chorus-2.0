@@ -543,7 +543,7 @@ fn stop(m: &SessionManager, id: u32) -> Result<(), String> {
         }
     }
     db::set_state(m.store(), id, RunState::Stopped, Some("Stopped by you. The worktree keeps what the last step left."))?;
-    db::cancel_questions(m.store(), id, None)?;
+    worker::cancel_questions(m, id, None)?;
     worker::notify(id);
     Ok(())
 }
@@ -578,7 +578,7 @@ pub fn loop_question_answer(state: Manager<'_>, question_id: u32, answer: String
 
 /// Records Matthew's answer to an open question; the run's worker gives it back to the step. "Make
 /// it a rule" adds it to the run's decisions.md too, so no step asks it again.
-fn answer_question(m: &SessionManager, id: u32, answer: &str, make_rule: bool) -> Result<u32, String> {
+pub(crate) fn answer_question(m: &SessionManager, id: u32, answer: &str, make_rule: bool) -> Result<u32, String> {
     let store = m.store();
     let (run_id, q) = db::question(store, id)?.ok_or("That question no longer exists.")?;
     if q.state != "open" {
@@ -598,7 +598,89 @@ fn answer_question(m: &SessionManager, id: u32, answer: &str, make_rule: bool) -
         let tag = chorus_core::run_loop::questions::tag(q.phase, q.task.as_deref());
         tools::add_rule(Path::new(&dir), &q.question, answer, &tag)?;
     }
+    crate::relay::outbound::question_settled(m, id);
     Ok(run_id)
+}
+
+/// An answer from the phone: a button or a reply. Returns the question's tag, `[P01 T1]`.
+pub fn answer_from_phone(m: &Arc<SessionManager>, question_id: u32, answer: &str, make_rule: bool) -> Result<String, String> {
+    let (_, q) = db::question(m.store(), question_id)?.ok_or("That question no longer exists.")?;
+    let run_id = answer_question(m, question_id, answer, make_rule)?;
+    worker::notify(run_id);
+    Ok(chorus_core::run_loop::questions::tag(q.phase, q.task.as_deref()))
+}
+
+/// Each run's line for the phone's /status, newest first.
+pub fn status_lines(m: &SessionManager) -> Vec<chorus_core::relay::render::RunLine> {
+    let store = m.store();
+    db::runs(store)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|r| r.state != RunState::Draft)
+        .take(5)
+        .map(|r| {
+            let phase = db::phases(store, r.id).ok().and_then(|mut p| p.pop());
+            let step = phase.as_ref().and_then(|p| db::running_step(store, p.id).ok().flatten()).map(|s| match s.kind {
+                StepKind::Plan => "planning".to_owned(),
+                StepKind::Build if s.attempt == 0 => format!("building {}", s.task.clone().unwrap_or_default()),
+                StepKind::Build => format!("fixing {} (attempt {})", s.task.clone().unwrap_or_default(), s.attempt),
+                StepKind::Check => "running the checks".to_owned(),
+                StepKind::Tag => "tagging".to_owned(),
+            });
+            chorus_core::relay::render::RunLine {
+                name: r.name.clone(),
+                state: r.state.as_str().to_owned(),
+                phase: phase.map(|p| (p.number, p.title)),
+                step,
+                open_questions: db::open_question_ids(store, r.id, None).map_or(0, |v| v.len() as u32),
+            }
+        })
+        .collect()
+}
+
+/// A phone command for the one run it can mean: the only run that is running, paused or waiting.
+pub fn phone_command(m: &Arc<SessionManager>, cmd: &chorus_core::relay::Command) -> String {
+    let active: Vec<RunRow> = db::runs(m.store())
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|r| matches!(r.state, RunState::Running | RunState::Paused | RunState::Waiting))
+        .collect();
+    match active.as_slice() {
+        [] => "No run is going.".into(),
+        [one] => phone_command_for(m, one.id, cmd),
+        many => format!(
+            "Several runs are going ({}). Manage them in Chorus for now.",
+            many.iter().map(|r| r.name.as_str()).collect::<Vec<_>>().join(", ")
+        ),
+    }
+}
+
+/// A phone command for one run, answered in words.
+pub fn phone_command_for(m: &Arc<SessionManager>, run_id: u32, cmd: &chorus_core::relay::Command) -> String {
+    use chorus_core::relay::Command;
+    let Ok(run) = get(m, run_id) else { return "That run no longer exists.".into() };
+    let name = run.name.clone();
+    let done = match cmd {
+        Command::Pause if run.state == RunState::Running => db::set_state(m.store(), run_id, RunState::Paused, Some("Paused from the phone: the step that is running finishes, and nothing new starts.")).map(|()| format!("Pausing {name}: the step that is running finishes first.")),
+        Command::Pause => Ok(format!("{name} isn't running.")),
+        Command::Resume if run.state == RunState::Paused => ready_to_run(m, run_id).map(|_| {
+            worker::ensure_worker(m, run_id);
+            format!("{name} is running again.")
+        }),
+        Command::Resume => Ok(format!("{name} isn't paused.")),
+        Command::Approve if run.state == RunState::Waiting => approve(m, run_id).map(|()| {
+            worker::ensure_worker(m, run_id);
+            format!("Approved: {name} goes on to its next phase.")
+        }),
+        Command::Approve => Ok(format!("{name} isn't waiting for your review.")),
+        Command::Stop(phase) => stop(m, run_id).map(|()| match phase {
+            Some(_) => format!("Stopped {name}. Rolling a phase back from the phone comes later; its tags are on the run branch."),
+            None => format!("Stopped {name}."),
+        }),
+        _ => Ok("Send /help.".to_owned()),
+    };
+    worker::notify(run_id);
+    done.unwrap_or_else(|e| format!("Couldn't do that: {e}"))
 }
 
 #[tauri::command]

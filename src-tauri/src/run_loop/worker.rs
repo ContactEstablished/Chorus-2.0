@@ -459,7 +459,10 @@ fn play(m: &SessionManager, run: &RunRow, entry: &PhaseEntry, step_id: u32, scri
                     },
                 );
                 return match asked {
-                    Ok(_) => Played::Asked,
+                    Ok(id) => {
+                        crate::relay::outbound::question_asked(m, id);
+                        Played::Asked
+                    }
                     Err(why) => Played::Done(Event::StepFailed { why }),
                 };
             }
@@ -502,6 +505,7 @@ fn take_defaults(m: &SessionManager, run: &RunRow, step: &StepRow) -> Result<(),
             let line = format!("Nobody answered \"{}\" within {} minutes; took the default: {default}", q.question, run.config.limits.timed_minutes);
             tools::log_assumption(worktree(run)?, &questions::assumption_line(&questions::tag(q.phase, q.task.as_deref()), &line))?;
             notify(run.id);
+            crate::relay::outbound::question_settled(m, q.id);
         }
     }
     Ok(())
@@ -553,7 +557,7 @@ fn poll(m: &Arc<SessionManager>, run: &RunRow, _phase: &PhaseRow, entry: &PhaseE
     let store = m.store();
     let failed = |why: &str| -> Result<Option<Event>, String> {
         db::end_step(store, step.id, StepState::Failed, Some(why), None)?;
-        db::cancel_questions(store, run.id, Some(step.id))?;
+        cancel_questions(m, run.id, Some(step.id))?;
         Ok(Some(Event::StepFailed { why: why.to_owned() }))
     };
     take_defaults(m, run, step)?;
@@ -718,14 +722,22 @@ fn after_pass(m: &Arc<SessionManager>, run: &RunRow, phases: &[PhaseRow], plan: 
             let note = format!("P{:02} · {} passed and is tagged {tag}. Review the {} branch; {then}.", last.number, last.title, run.run_branch);
             db::set_state(m.store(), run.id, RunState::Waiting, Some(&note))?;
             notify(run.id);
+            crate::relay::outbound::milestone(m, run.id, &run.name, last.number, &last.title, &tag, next.is_some());
             return Ok(());
         }
     }
     match next {
-        Some(n) => begin_phase(m, run, &n),
+        Some(n) => {
+            // Once per phase: a phase approved at a milestone was already announced.
+            if last.number > run.reviewed_phase {
+                crate::relay::outbound::phase_done(m, run.id, &run.name, last.number, &last.title, &tag);
+            }
+            begin_phase(m, run, &n)
+        }
         None => {
             db::set_state(m.store(), run.id, RunState::Done, Some(&format!("Every phase passed; the last is tagged {tag}. Review and merge {} yourself.", run.run_branch)))?;
             notify(run.id);
+            crate::relay::outbound::run_done(m, run.id, &run.name, &tag);
             Ok(())
         }
     }
@@ -757,8 +769,20 @@ fn stop_run(m: &Arc<SessionManager>, run: &RunRow, phase: &PhaseRow, stop: Optio
         run.worktree_path.as_deref().unwrap_or("?")
     );
     db::set_state(m.store(), run.id, RunState::Stopped, Some(&note))?;
-    db::cancel_questions(m.store(), run.id, None)?;
+    cancel_questions(m, run.id, None)?;
     notify(run.id);
+    let phone_why = stop.map_or_else(|| "it was stopped".to_owned(), |s| format!("{}. {}", condition_text(s.condition), s.detail));
+    crate::relay::outbound::run_stopped(m, run.id, &run.name, phase.number, &phase.title, &phone_why, &last_good);
+    Ok(())
+}
+
+/// Closes open questions, and tells the phone they're closed.
+pub fn cancel_questions(m: &SessionManager, run_id: u32, step_id: Option<u32>) -> Result<(), String> {
+    let ids = db::open_question_ids(m.store(), run_id, step_id)?;
+    db::cancel_questions(m.store(), run_id, step_id)?;
+    for id in ids {
+        crate::relay::outbound::question_settled(m, id);
+    }
     Ok(())
 }
 

@@ -112,6 +112,7 @@ function startNew(): void {
       limits: { fixAttempts: 3, sameSignature: 3, planRetries: 1, stepRetries: 1, phaseMinutes: 240 },
       milestoneEvery: 3,
       script: null,
+      phoneStatusOnly: false,
     },
   }
 }
@@ -323,6 +324,11 @@ async function answer(q: LoopQuestion): Promise<void> {
         <button type="button" class="quiet add" @click="addCheck">Add a check</button>
       </fieldset>
 
+      <label class="inline">
+        <input v-model="editing.config.phoneStatusOnly" type="checkbox" />
+        Phone: tell me a question is waiting, without its text (Settings → Phone)
+      </label>
+
       <label v-if="flavor === 'dev'">
         Scripted steps (testing only)
         <input v-model="editing.config.script" class="mono" spellcheck="false" autocomplete="off" placeholder="a script file; empty runs real agents" />
@@ -483,6 +489,11 @@ h1 {
   gap: 4px;
   font-size: 12.5px;
   color: var(--text-2);
+}
+.editor label.inline {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
 }
 .grid {
   display: grid;
