@@ -36,17 +36,43 @@ impl Failure {
     }
 }
 
-/// One method call with a JSON body.
+/// One method call with a JSON body. A connection that never opened carried nothing, so it is tried
+/// twice more: a first TLS connection to Telegram can be reset.
 pub fn call(token: &str, method: &str, body: &Value) -> Result<Value, Failure> {
     let url = format!("https://api.telegram.org/bot{token}/{method}");
     let body = body.to_string();
     let client = client().map_err(Failure::Network)?;
-    let sent = tauri::async_runtime::block_on(async move {
-        let response = client.post(&url).header(reqwest::header::CONTENT_TYPE, "application/json").body(body).send().await?;
-        response.text().await
-    });
-    let text = sent.map_err(|e| Failure::Network(e.without_url().to_string().replace(token, "[token]")))?;
+    let mut retries = 0;
+    let text = loop {
+        let sent = tauri::async_runtime::block_on(async {
+            let response = client.post(&url).header(reqwest::header::CONTENT_TYPE, "application/json").body(body.clone()).send().await?;
+            response.text().await
+        });
+        match sent {
+            Ok(text) => break text,
+            Err(e) if e.is_connect() && retries < 2 => {
+                retries += 1;
+                std::thread::sleep(Duration::from_millis(500 * retries));
+            }
+            Err(e) => return Err(network(e, token)),
+        }
+    };
     relay::result(&text).map_err(Failure::Api)
+}
+
+/// A network failure in words: its innermost cause, such as a reset connection, never the URL.
+fn network(e: reqwest::Error, token: &str) -> Failure {
+    let what = if e.is_timeout() {
+        "it timed out".to_owned()
+    } else {
+        let e = e.without_url();
+        let mut cause: &dyn std::error::Error = &e;
+        while let Some(next) = cause.source() {
+            cause = next;
+        }
+        cause.to_string()
+    };
+    Failure::Network(what.replace(token, "[token]"))
 }
 
 pub fn get_me(token: &str) -> Result<String, Failure> {

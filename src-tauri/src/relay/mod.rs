@@ -158,7 +158,13 @@ fn set_token(m: &SessionManager, token: &str) -> Result<RelayView, String> {
     if !relay::token_shape_ok(token) {
         return Err("That doesn't look like a bot token: BotFather's is digits, a colon, then about 35 letters, digits, - and _.".into());
     }
-    let name = client::get_me(token).map_err(|e| format!("Telegram didn't accept it: {}", e.text().replace(token, "[token]")))?;
+    let name = client::get_me(token).map_err(|e| {
+        match &e {
+            client::Failure::Api(_) => format!("Telegram didn't accept it: {}", e.text()),
+            client::Failure::Network(why) => format!("Chorus couldn't reach Telegram to check it ({why}). Nothing was saved: try Save again."),
+        }
+        .replace(token, "[token]")
+    })?;
     let store = m.store();
     forget_token(m)?;
     let id = vault::add(store, TOKEN_LABEL, token)?;

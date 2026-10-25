@@ -47,10 +47,13 @@ async function run(f: () => Promise<RelayView>, done?: string): Promise<void> {
   }
 }
 
+// The field keeps the token until Telegram accepts it, so a failed check can be tried again.
 async function saveToken(): Promise<void> {
-  const t = token.value
-  token.value = ''
-  await run(() => unwrap(commands.relaySetToken(t)), 'Telegram accepted the token.')
+  await run(async () => {
+    const view = await unwrap(commands.relaySetToken(token.value))
+    token.value = ''
+    return view
+  }, 'Telegram accepted the token.')
 }
 
 const clearToken = () => run(() => unwrap(commands.relayClearToken()), 'Token removed.')

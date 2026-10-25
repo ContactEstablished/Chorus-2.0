@@ -165,6 +165,9 @@ spike doc); codex-cli 0.163.0; opencode 2.1.4; Node 24.15; git on PATH.
   question on 2.1.310, past D75's 60 s window.
 - **P15-L9 — `tauri dev` rebuilds and restarts the app on any source change;** an instance that runs
   long jobs needs `--no-watch`.
+- **P15-L12 — A first TLS connection from Windows (Schannel) to api.telegram.org can be reset,** and
+  the next one succeed, with curl as well as `reqwest`. A connect error carried no request, so retry
+  it, and say "couldn't reach" rather than "didn't accept" when the token was never checked.
 - **P15-L11 — Told in decisions.md to ask before wording user-facing messages, Claude Code (Sonnet)
   asks at planning time, once, with its proposal,** and a rule from the answer kept the next phase from
   asking (F1, 2.1.310).
