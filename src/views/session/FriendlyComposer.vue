@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useComposerStore } from '../../stores/composer'
+import { useSessionsStore } from '../../stores/sessions'
 import ImageAttachments from '../../components/ImageAttachments.vue'
 import QueuedImages from '../../components/QueuedImages.vue'
 import { clipboardImages, prepareImage } from '../../components/composerImages'
@@ -23,8 +24,13 @@ const imagesDisabled = computed(() => !entry.value.loaded || entry.value.busy ||
 // Clicking a manual Send is the readiness override; automatic queue dispatch still requires Ready.
 const canSend = computed(() => !!state.value?.runId && (!state.value.sendReason || (!waiting.value.length && state.value.canConfirmReady)))
 const canSendNext = computed(() => !!state.value?.runId && (!state.value.nextSendReason || state.value.canConfirmReady))
+// D96: a stopped Claude Code session (an automation's, say) restarts with the draft as its first prompt.
+const sessions = useSessionsStore()
+const session = computed(() => sessions.byId[props.sessionId])
+const restartable = computed(() => !!state.value && !state.value.runId && session.value?.agent === 'claude' &&
+  session.value.status === 'exited' && !session.value.live && !session.value.locked)
 const sendBlocker = computed(() => {
-  if (canSend.value) return null
+  if (canSend.value || restartable.value) return null
   const reason = state.value?.sendReason
   return reason === 'Raw input may contain a draft. Check that its prompt is empty before sending.'
     ? 'Send is unavailable right now. Queue this instruction for a later pause.' : reason
@@ -88,11 +94,14 @@ async function removeImage(id: number) {
     <p v-if="entry.error" class="error" role="alert">{{ entry.error }}</p>
     <p v-if="sendBlocker" class="hint">{{ sendBlocker }} <button class="quiet" @click="emit('raw')">Open Raw</button></p>
     <div class="buttons">
-      <button class="primary" :disabled="!valid || (!entry.pending && !canSend)" @click="send(false)">{{ entry.pending ? 'Retry same request' : 'Send' }}</button>
+      <button v-if="restartable" class="primary" :disabled="!valid || entry.images.length > 0" @click="store.restartSend(sessionId)">{{ entry.busy ? 'Restarting…' : 'Restart and send' }}</button>
+      <button v-else class="primary" :disabled="!valid || (!entry.pending && !canSend)" @click="send(false)">{{ entry.pending ? 'Retry same request' : 'Send' }}</button>
       <button :disabled="!valid || !!entry.pending || !state || !!state.queueReason" @click="send(true)">Queue</button>
       <button v-if="entry.error && !entry.pending" class="quiet" :disabled="entry.saving || entry.busy" @click="store.reloadDraft(sessionId)">Reload saved draft</button>
     </div>
-    <p v-if="state?.queueReason" class="hint">{{ state.queueReason }}</p>
+    <p v-if="restartable && entry.images.length" class="hint">Images can't go with Restart and send. Restart the session, then Send.</p>
+    <p v-else-if="restartable" class="hint">The session is stopped. Restart and send restarts it in the same conversation, with this as its next message.</p>
+    <p v-else-if="state?.queueReason" class="hint">{{ state.queueReason }}</p>
     <div v-if="waiting.length" class="queue">
       <h3>Instruction queue <span>{{ waiting.length }} / 32</span></h3>
       <p class="hint">Runs in order at a confirmed pause. Questions and approvals pause the queue. After a restart, review held instructions before resuming.</p>

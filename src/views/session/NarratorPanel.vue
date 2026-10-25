@@ -7,6 +7,8 @@ const props = defineProps<{ session: SessionSummary; narrator: NarratorView | nu
 const emit = defineEmits<{ refresh: [] }>()
 const composer = useComposerStore(), view = useViewStore()
 const busy = ref(false), notice = ref(''), actionError = ref('')
+// D96: the composer can restart a stopped Claude Code session with the draft as its first prompt.
+const restartSends = computed(() => props.session.agent === 'claude')
 // "Restart, then Send" is out of date once the session runs again.
 watch(() => props.session.live, () => { notice.value = '' })
 const summary = computed(() => props.narrator?.job?.summary)
@@ -32,7 +34,7 @@ async function use(a: NarratorAction) {
     await composer.addSuggestion(props.session.id, a.suggestion.sends || a.suggestion.what)
     // A stopped session keeps its draft, so an automation's closed session can still take one.
     notice.value = props.session.live ? 'Added to your draft below. Review it, then Send or Queue.'
-      : 'Added to your draft below. Nothing is sent yet: Restart the session, then Send.'
+      : `Added to your draft below. Nothing is sent yet: ${restartSends.value ? 'review it, then Restart and send' : 'Restart the session, then Send'}.`
   } catch (e) { actionError.value = String(e) }
 }
 async function summarize() {
@@ -74,7 +76,7 @@ async function toggle() {
         <h3>Suggested next steps <span v-if="!usableSummary">· General suggestions</span></h3>
         <p v-if="!actions.length" class="muted">No open suggestions.</p>
         <p v-else-if="session.locked" class="muted">This session is locked, so suggestions can't be added to its draft. Unlock it first.</p>
-        <p v-else-if="!session.live" class="muted">The session is stopped. Add to prompt puts a suggestion in your draft; Restart the session to send it.</p>
+        <p v-else-if="!session.live" class="muted">The session is stopped. Add to prompt puts a suggestion in your draft; {{ restartSends ? 'Restart and send there sends it in the same conversation' : 'Restart the session to send it' }}.</p>
         <article v-for="a in actions" :key="a.id">
           <strong>{{ a.suggestion.title }}</strong><p>{{ a.suggestion.what }}</p>
           <small v-if="a.suggestion.eta">{{ a.suggestion.eta }}</small>

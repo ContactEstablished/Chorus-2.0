@@ -136,6 +136,7 @@ export const commands = {
 	sessionComposer: (sessionId: number) => typedError<ComposerState, string>(__TAURI_INVOKE("session_composer", { sessionId })),
 	sessionDraftSave: (sessionId: number, revision: number, text: string) => typedError<Draft, string>(__TAURI_INVOKE("session_draft_save", { sessionId, revision, text })),
 	sessionComposerSubmit: (sessionId: number, request: ComposerSubmit) => typedError<ComposerState, string>(__TAURI_INVOKE("session_composer_submit", { sessionId, request })),
+	sessionRestartSend: (sessionId: number, draftRevision: number) => typedError<ComposerState, string>(__TAURI_INVOKE("session_restart_send", { sessionId, draftRevision })),
 	sessionQueueChange: (sessionId: number, itemId: number, resumeRunId: number | null) => typedError<ComposerState, string>(__TAURI_INVOKE("session_queue_change", { sessionId, itemId, resumeRunId })),
 	sessionQueueSend: (sessionId: number, itemId: number, runId: number, inputEpoch: number, confirmReady: boolean) => typedError<ComposerState, string>(__TAURI_INVOKE("session_queue_send", { sessionId, itemId, runId, inputEpoch, confirmReady })),
 	sessionImageAdd: (sessionId: number, revision: number, name: string, png: number[]) => typedError<Draft, string>(__TAURI_INVOKE("session_image_add", { sessionId, revision, name, png })),

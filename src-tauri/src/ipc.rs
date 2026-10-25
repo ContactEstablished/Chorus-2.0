@@ -92,6 +92,7 @@ pub fn builder() -> Builder<tauri::Wry> {
             sessions::composer::session_composer,
             sessions::composer::session_draft_save,
             sessions::composer::session_composer_submit,
+            sessions::composer::session_restart_send,
             sessions::composer::session_queue_change,
             sessions::composer::session_queue_send,
             sessions::images::session_image_add,

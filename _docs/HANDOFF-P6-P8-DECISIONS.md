@@ -142,6 +142,15 @@ Send was available. Four automation runs after the change read "Completed" in th
 closed, matching the back end. Two Opus runs each got "Make the fix you proposed for the tip
 calculation in tip.py.", and the canary got none.
 
+**Added at Matthew's request: Restart and send (D96).** A stopped Claude Code session's composer
+shows Restart and send in place of Send. It restarts the session in the same conversation with the
+draft as the new run's first prompt, passed the way an automation's is, so nothing is typed into a
+terminal that is still starting. The draft is checked like an automation prompt, emptied once a run
+takes it, and given back if the session doesn't start; images still need Restart, then Send. Seen in
+the review instance: Tip script review #10, closed by its automation, resumed with "Make the fix
+you proposed for the tip calculation in tip.py." as its first prompt (recorded once, draft emptied),
+and Opus asked to change `/ 10` to `/ 100` in tip.py, a line the prompt didn't contain.
+
 **Proposed lessons (to number), Claude Code 2.1.308:** every reply line in its transcript records
 `message.model`, `requestedModel` and `effort` (a subagent's lines say `isSidechain: true`); and
 it turns on any-motion mouse tracking (`?1003h` with SGR `?1006h`), so a terminal showing it sends

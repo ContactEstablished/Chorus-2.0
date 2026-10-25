@@ -558,6 +558,48 @@ fn restart_and_close_are_refused_while_locked() {
 }
 
 #[test]
+fn restart_and_send_checks_the_draft_and_gives_it_back_when_nothing_started() {
+    // D96 on a stopped Claude Code session with no run left to restart (the test can't launch
+    // Claude Code): each refusal keeps the draft, and a restart that starts nothing sends nothing.
+    let f = Fixture::new("restart-send");
+    let store = f.manager.store();
+    assert!(composer::restart_send(&f.manager, f.shell(None), 0).unwrap_err().contains("Claude Code"));
+    let cwd = f.dir.join("work").display().to_string();
+    let options = LaunchOptions::default();
+    let id = rows::insert(store, &NewSession {
+        name: "Tip script review #7", agent: AgentKind::Claude, cwd: &cwd, credential_id: None, credential_env: None,
+        cols: 100, rows: 30, options: &options, agent_session_id: None, provider_id: None, description: None,
+        project_id: None, worktree_id: None, routing: None,
+    })
+    .unwrap();
+    rows::set_state(store, id, SessionState::Exited, None).unwrap();
+    let draft = |text: &str| {
+        let d = crate::store::composer::draft(store, id).unwrap();
+        crate::store::composer::save(store, id, d.revision, text).unwrap()
+    };
+    let prompts = || store.with(|c| c.query_row("SELECT COUNT(*) FROM prompts WHERE session_id = ?1", [id], |r| r.get::<_, u32>(0))).unwrap();
+
+    // Checked like an automation's prompt: a single word could be read as a CLI command.
+    let d = draft("update");
+    assert!(composer::restart_send(&f.manager, id, d.revision).unwrap_err().contains("sentence"));
+    let d = draft("Make the fix you proposed.");
+    assert!(composer::restart_send(&f.manager, id, d.revision - 1).unwrap_err().contains("draft changed"));
+    rows::set_locked(store, id, true).unwrap();
+    assert!(composer::restart_send(&f.manager, id, d.revision).unwrap_err().contains("locked"));
+    rows::set_locked(store, id, false).unwrap();
+    let e = composer::restart_send(&f.manager, id, d.revision).unwrap_err();
+    assert!(e.contains("Nothing was sent"), "{e}");
+    assert_eq!(prompts(), 0, "a prompt no run passed on stayed staged");
+    assert_eq!(crate::store::composer::draft(store, id).unwrap().text, "Make the fix you proposed.");
+
+    // What a launch would pass: the composer's staged prompt, until a run takes it.
+    let p = crate::automations::stage(store, id, "composer", "Make the fix you proposed.").unwrap();
+    let row = rows::get(store, id).unwrap().unwrap();
+    assert_eq!(crate::automations::staged(store, &row).map(|s| s.text).as_deref(), Some("Make the fix you proposed."));
+    assert!(!crate::automations::passed(store, p));
+}
+
+#[test]
 fn a_quit_then_restore_relaunches_with_history() {
     let f = Fixture::new("restore");
     let id = f.shell(None);

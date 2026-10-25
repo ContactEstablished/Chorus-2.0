@@ -3,7 +3,9 @@ use super::{SessionManager, commands::Manager};
 use crate::store::{composer as db, delivery};
 use chorus_core::{
     actions::{ActionCapability, PromptSource, capabilities},
+    agent::AgentKind,
     composer::send_blocker,
+    session::SessionState,
 };
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -258,6 +260,67 @@ pub fn start(manager: &Arc<SessionManager>) -> Result<(), String> {
         })
         .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+/// D96: restarts a stopped Claude Code session with its saved draft as the new run's first prompt,
+/// in the same conversation. Claude Code gives no ready signal before a first turn and D78 forbids
+/// inferring one, so the draft goes as the CLI's positional prompt, as an automation's does, never
+/// typed into a terminal that is still starting. It is checked like an automation's prompt, kept
+/// (scrubbed) before the run starts, and given back to the draft if the run didn't start.
+pub(super) fn restart_send(manager: &Arc<SessionManager>, session: u32, draft_revision: u32) -> Result<(), String> {
+    let row = manager.row(session)?;
+    if row.agent != AgentKind::Claude {
+        return Err("Restart and send works for Claude Code sessions. Restart, then Send.".into());
+    }
+    if row.state == SessionState::Closed {
+        return Err("A closed session can't be restarted.".into());
+    }
+    manager.refuse_if_locked(&row, "send to")?;
+    if manager.open_live(session).ok().and_then(|l| l.current_run()).is_some() {
+        return Err("The session is running. Use Send.".into());
+    }
+    let draft = db::draft(&manager.store, session)?;
+    if draft.revision != draft_revision {
+        return Err("The saved draft changed. Review it before sending.".into());
+    }
+    if !draft.images.is_empty() {
+        return Err("Restart and send can't carry images. Restart, then Send.".into());
+    }
+    if draft.text.trim().is_empty() {
+        return Err("Write an instruction first.".into());
+    }
+    let text = crate::automations::check_prompt(&manager.store, &draft.text)?;
+    let prompt = crate::automations::stage(&manager.store, session, PromptSource::Composer.as_str(), &text)?;
+    // The draft is emptied before the run starts, so a draft left showing can't be sent twice.
+    let empty = match db::save(&manager.store, session, draft.revision, "") {
+        Ok(empty) => empty,
+        Err(e) => {
+            crate::automations::unstage(&manager.store, session);
+            return Err(e);
+        }
+    };
+    let restarted = manager.restart(session);
+    if crate::automations::passed(&manager.store, prompt) {
+        return Ok(());
+    }
+    crate::automations::unstage(&manager.store, session);
+    let _ = db::save(&manager.store, session, empty.revision, &draft.text);
+    Err(match restarted {
+        Err(e) => format!("Couldn't restart: {e}. Nothing was sent; your draft is back."),
+        Ok(_) => "The session didn't start, so nothing was sent. Your draft is back.".into(),
+    })
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn session_restart_send(state: Manager<'_>, session_id: u32, draft_revision: u32) -> Result<ComposerState, String> {
+    let m = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        restart_send(&m, session_id, draft_revision)?;
+        self::state(&m, session_id)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]

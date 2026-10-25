@@ -2,7 +2,7 @@ import { beforeEach, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import type { ComposerState } from '../ipc'
 
-const ipc = vi.hoisted(() => ({ sessionComposer: vi.fn(), sessionDraftSave: vi.fn(), sessionComposerSubmit: vi.fn(), sessionImageAdd: vi.fn(), sessionImageRemove: vi.fn() }))
+const ipc = vi.hoisted(() => ({ sessionComposer: vi.fn(), sessionDraftSave: vi.fn(), sessionComposerSubmit: vi.fn(), sessionRestartSend: vi.fn(), sessionImageAdd: vi.fn(), sessionImageRemove: vi.fn() }))
 vi.mock('../ipc', async (original) => ({ ...(await original<typeof import('../ipc')>()), commands: ipc }))
 const { useComposerStore } = await import('./composer')
 const snapshot = (text = '', revision = 0): ComposerState => ({ draft: { text, revision, images: [] }, items: [], runId: 1, inputEpoch: 0, sendReason: null, nextSendReason: null, queueReason: null, canConfirmReady: false, dispatchReason: null, imageReason: null })
@@ -32,6 +32,28 @@ it("adds a suggestion to a stopped session's draft, for Restart then Send", asyn
   ipc.sessionDraftSave.mockImplementation(async (_id, revision, text) => ok({ text, revision: revision + 1, images: [] }))
   await store.addSuggestion(1, 'Make the fix you proposed.')
   expect(store.entry(1).saved).toBe('Make the fix you proposed.')
+  expect(ipc.sessionComposerSubmit).not.toHaveBeenCalled()
+})
+
+it('Restart and send saves the draft first, sends that revision and shows the draft the back end kept', async () => {
+  const store = useComposerStore()
+  const stopped = { ...snapshot('', 0), runId: null }
+  ipc.sessionComposer.mockResolvedValue(ok(stopped))
+  await store.refresh(1)
+  ipc.sessionDraftSave.mockImplementation(async (_id, revision, text) => ok({ text, revision: revision + 1, images: [] }))
+  store.edit(1, 'Make the fix you proposed.')
+  ipc.sessionRestartSend.mockResolvedValueOnce(ok({ ...snapshot('', 2), runId: 7 }))
+  await store.restartSend(1)
+  expect(ipc.sessionRestartSend).toHaveBeenCalledWith(1, 1)
+  expect(store.entry(1).text).toBe('')
+  // A run that didn't start gives the draft back, with the reason.
+  store.entry(1).state = stopped
+  store.edit(1, 'Make the fix you proposed, then run it.')
+  ipc.sessionRestartSend.mockResolvedValueOnce({ status: 'error', error: 'The session didn\'t start, so nothing was sent. Your draft is back.' })
+  ipc.sessionComposer.mockResolvedValue(ok({ ...stopped, draft: { text: 'Make the fix you proposed, then run it.', revision: 4, images: [] } }))
+  await store.restartSend(1)
+  expect(store.entry(1).error).toContain('nothing was sent')
+  expect(store.entry(1).text).toBe('Make the fix you proposed, then run it.')
   expect(ipc.sessionComposerSubmit).not.toHaveBeenCalled()
 })
 

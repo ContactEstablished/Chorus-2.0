@@ -319,7 +319,7 @@ fn view(m: &SessionManager, a: &AutoRow) -> Automation {
 /// A prompt Chorus will keep and pass on the command line: one line or more, no control
 /// characters, and not something the CLI would read as a subcommand. It goes after `--`, so one
 /// starting with "-" (a Markdown list) is still a prompt, not an option.
-fn check_prompt(store: &Store, prompt: &str) -> Result<String, String> {
+pub(crate) fn check_prompt(store: &Store, prompt: &str) -> Result<String, String> {
     let p = chorus_core::actions::clean_prompt(prompt)?;
     let p = p.trim().to_owned();
     if p.len() > MAX_PROMPT_BYTES {
@@ -565,9 +565,24 @@ pub fn start(manager: &Arc<SessionManager>) -> Result<(), String> {
 /// with no run yet. The run that passes it links it (`launched`).
 pub fn stage_prompt(store: &Store, session_id: u32, prompt: Option<&str>) -> Result<(), String> {
     let Some(p) = prompt else { return Ok(()) };
+    stage(store, session_id, "automation", p).map(|_| ())
+}
+
+/// Persists a first prompt for the session's next run, scrubbed, with no run yet: an
+/// automation's, or the composer's for Restart and send (D96). Returns its id.
+pub fn stage(store: &Store, session_id: u32, source: &str, prompt: &str) -> Result<i64, String> {
     let (keys, _) = vault::all_for_scrubbing(store);
-    let text = String::from_utf8_lossy(&scrub_all(p.as_bytes(), &keys, &builtin_patterns())).into_owned();
-    crate::store::history::insert_prompt(store, session_id, None, "automation", &text).map(|_| ())
+    let text = String::from_utf8_lossy(&scrub_all(prompt.as_bytes(), &keys, &builtin_patterns())).into_owned();
+    crate::store::history::insert_prompt(store, session_id, None, source, &text)
+}
+
+/// Whether a run passed staged prompt `id` on.
+pub fn passed(store: &Store, id: i64) -> bool {
+    store
+        .with(|c| c.query_row("SELECT run_id IS NOT NULL FROM prompts WHERE id = ?1", [id], |r| r.get(0)).optional())
+        .ok()
+        .flatten()
+        .unwrap_or(false)
 }
 
 /// A staged first prompt, as the launch passes it.
@@ -585,7 +600,7 @@ pub fn staged(store: &Store, row: &SessionRow) -> Option<Staged> {
     store
         .with(|c| {
             c.query_row(
-                "SELECT p.id, p.text FROM prompts p WHERE p.session_id = ?1 AND p.run_id IS NULL AND p.source = 'automation'
+                "SELECT p.id, p.text FROM prompts p WHERE p.session_id = ?1 AND p.run_id IS NULL AND p.source IN ('automation', 'composer')
                    AND NOT EXISTS (SELECT 1 FROM prompt_deliveries d WHERE d.prompt_id = p.id)
                  ORDER BY p.id LIMIT 1",
                 [row.id],
@@ -617,15 +632,15 @@ pub fn launched(store: &Store, session_id: u32, run_id: u32, p: &Staged) {
     }
     // The prompt was passed on, but couldn't be tied to its run. A staged prompt is passed again at
     // the next start, which would run the task twice, so it goes; the hook's echo still records it.
-    eprintln!("chorus: automation prompt {} couldn't be linked to run {run_id}; unstaged", p.prompt_id);
+    eprintln!("chorus: first prompt {} couldn't be linked to run {run_id}; unstaged", p.prompt_id);
     unstage(store, session_id);
 }
 
 /// A staged prompt that no run passed on goes.
-fn unstage(store: &Store, session_id: u32) {
+pub fn unstage(store: &Store, session_id: u32) {
     let _ = store.with(|c| {
         c.execute(
-            "DELETE FROM prompts WHERE session_id = ?1 AND run_id IS NULL AND source = 'automation'
+            "DELETE FROM prompts WHERE session_id = ?1 AND run_id IS NULL AND source IN ('automation', 'composer')
                AND NOT EXISTS (SELECT 1 FROM prompt_deliveries d WHERE d.prompt_id = prompts.id)",
             [session_id],
         )

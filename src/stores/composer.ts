@@ -80,6 +80,20 @@ export const useComposerStore = defineStore('composer', () => {
       } catch { /* Keep the same request for Retry; do not permit a second submit. */ }
     } finally { e.busy = false }
   }
+  /** D96: a stopped Claude Code session restarts with the saved draft as its first prompt. */
+  async function restartSend(id: number) {
+    const e = entry(id)
+    if (e.busy || e.pending || e.state?.runId) return
+    e.busy = true; e.error = ''; e.generation++
+    try {
+      await persist(id)
+      adopt(id, await unwrap(commands.sessionRestartSend(id, e.revision)), true)
+    } catch (error) {
+      e.error = String(error)
+      // The draft is given back when nothing was sent; show what the back end kept either way.
+      try { adopt(id, await unwrap(commands.sessionComposer(id)), true) } catch { /* Keep the local draft. */ }
+    } finally { e.busy = false }
+  }
   async function change(id: number, item: number, action: 'cancel' | 'resume' | 'send', confirmReady = false) {
     const e = entry(id), snapshot = e.state
     if (e.busy || !snapshot) return
@@ -130,5 +144,5 @@ export const useComposerStore = defineStore('composer', () => {
     e.error = ''
     await persist(id)
   }
-  return { entry, refresh, edit, submit, change, reloadDraft, imageChange, addSuggestion }
+  return { entry, refresh, edit, submit, restartSend, change, reloadDraft, imageChange, addSuggestion }
 })
