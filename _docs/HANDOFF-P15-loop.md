@@ -64,6 +64,13 @@ Telegram is in the first version (D97).
   `used_percentage` and `resets_at`, plus a `StopFailure` hook and `rate_limit_error`. This is string
   evidence only. Spike S2 finds where they are delivered (likely the status line's input) before
   anything relies on them.
+- **Measured in slice 1 ([spikes/P15.md](spikes/P15.md), 2026-10-25):** `dontAsk` with an allowlist refuses
+  without prompting in print mode; `--restricted --tools …` (new in 2.1.308) leaves only the named
+  tools, ignores user and project settings and confines file tools to the working folders; the
+  account's claude.ai connectors load unless `--strict-mcp-config` is passed. Claude Code reports
+  both windows in a `rate_limit_event`. All three CLIs call tools on a loopback MCP endpoint with the
+  token only in the environment, but Claude Code gives up on a call after about 60 s. Codex's
+  `workspace-write` blocks network and writes outside the workspace (and `%TEMP%`), not reads.
 - **No new dependency is needed for the main pieces.** `reqwest` (Telegram's Bot API) and `axum` (a
   loopback server) are on the approved list (ARCHITECTURE §10, D30).
 
@@ -93,6 +100,9 @@ Telegram is in the first version (D97).
   and writes `gate-report.md`. Commands come only from the run's config, which Matthew writes.
 - **Agent tools:** a loopback MCP endpoint on the existing listener, with a per-run token. It offers
   `ask(class, question, options, default)`, `log_assumption`, `task_done` and `request_counsel`.
+  `ask` never holds the call while a person decides (Claude Code gives up after about 60 s): it
+  records the question and returns at once, the agent ends its turn, and the answer or the timed
+  default arrives as the session's next prompt, so a question also survives a Chorus restart.
   Sessions get it through a config file in app data (`--mcp-config` for Claude Code, `-c mcp_servers…`
   for Codex, opencode's config), never through the repo. Spike S3 confirms each CLI (decision 2).
 - **Git:** the run branch, task branches in P5 worktrees, squash merges, `phase-NN` tags and rollback.
@@ -119,19 +129,23 @@ counts, the model per step, Telegram message ids) lives in Chorus's database, wi
 
 ## 6. Slices, in order (each ends seen working in the app; commit after each)
 
-1. **Spikes, no product code.** Results go in the review file.
+1. **Spikes, no product code.** Done 2026-10-25 except where noted: results in
+   [spikes/P15.md](spikes/P15.md).
    - S1: does `dontAsk` with an allowlist refuse unlisted tools without prompting? What do Codex's
      approval and sandbox settings do unattended?
    - S2: Claude Code's allowance: where `rate_limits` arrives, and what `StopFailure` carries.
    - S3: the loopback MCP endpoint seen as tools by Claude Code, Codex and opencode, with the token
      kept out of argv.
-   - S4: a Telegram dev bot (decision 11): long polling and buttons from Windows.
+   - S4: a Telegram dev bot (decision 11): long polling and buttons from Windows. *Moved to the
+     start of slice 4, where the token has a Settings field to go in.*
+   - Still to see in a terminal (slice 2's first run in the app): `dontAsk` draws no dialog, and
+     the status line receives `rate_limits`. Both need Claude Code to trust the fixture folder.
 2. **One phase, one task.** The orchestrator, run state, the gatekeeper's checks, roles from Bots, the
    model logged per step, and every stop condition. Prove it with the scripted agent (§7), then with
    one real run on fixture F1.
 3. **Agent tools and questions in Chorus.** `ask`, `log_assumption` and `task_done`; the three
    classes, timed defaults, the assumptions log, and "make it a rule".
-4. **Telegram.** HANDOFF-P13's P13a, with phone answers now possible (P6 built the reply channels),
+4. **Telegram.** Spike S4 first, then HANDOFF-P13's P13a, with phone answers now possible (P6 built the reply channels),
    plus the loop's message types, buttons, reply routing and commands.
 5. **Chaining and the plan grill.** Kickoff files, the planner reading the code the last phase left,
    the plan griller on a second vendor, and GRILL ROUND batches.
