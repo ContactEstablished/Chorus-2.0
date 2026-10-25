@@ -162,7 +162,7 @@ const minutesLeft = computed(() => {
         <h3>Sessions</h3>
         <p class="muted">
           A session that needs you sends the phone its name, project, state, and an approval's tool or a question's text, with buttons while Claude
-          Code holds the ask (about two minutes). A finished turn is sent when the phone started it, or when this computer has been idle for 5
+          Code holds the ask (about five minutes). A finished turn is sent when the phone started it, or when this computer has been idle for 5
           minutes. A reply to a session's message is its next prompt; so is a plain message once you pick a session with /use.
         </p>
         <p>

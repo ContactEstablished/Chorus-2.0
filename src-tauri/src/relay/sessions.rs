@@ -9,7 +9,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use chorus_core::actions::{ApprovalDecision, PromptSource, SessionAction};
 use chorus_core::attention::Attention;
@@ -63,7 +63,18 @@ fn loop_step(s: &SessionSummary) -> bool {
 
 fn watch(m: &Arc<SessionManager>, rx: &Receiver<SessionSummary>) {
     let mut prev: HashMap<u32, Attention> = HashMap::new();
+    // Each session's newest ask card with buttons: the ask, and when its hold ends.
+    let mut held: HashMap<u32, (u32, Instant)> = HashMap::new();
     while !m.is_quitting() {
+        // A card whose hold ended says so and loses its buttons, unless the ask was settled first
+        // (its messages are settled by then, so nothing is edited).
+        held.retain(|&session, &mut (_, ends)| {
+            if Instant::now() < ends {
+                return true;
+            }
+            outbound::settle(m, Subject::Session(session), "session-ask", view::PHONE_TOO_LATE);
+            false
+        });
         let s = match rx.recv_timeout(Duration::from_secs(1)) {
             Ok(s) => s,
             Err(RecvTimeoutError::Timeout) => continue,
@@ -80,10 +91,15 @@ fn watch(m: &Arc<SessionManager>, rx: &Receiver<SessionSummary>) {
         }
         let seen = view::change(before, now);
         if seen.settle {
+            held.remove(&s.id);
             outbound::settle(m, Subject::Session(s.id), "session-ask", view::NO_LONGER_WAITING);
         }
         let sent = match seen.send {
-            Some(Change::Asked(a)) => ask(m, &s, a),
+            Some(Change::Asked(a)) => ask(m, &s, a).map(|hold| {
+                if let Some(hold) = hold {
+                    held.insert(s.id, hold);
+                }
+            }),
             Some(Change::Failed) => send(m, &s, "session-failed", &view::failed(&reference(m, &s).as_ref(), s.note.as_deref())),
             Some(Change::TurnDone) => turn_done(m, &s),
             None => Ok(()),
@@ -139,7 +155,8 @@ fn held_reply(m: &SessionManager, session: u32, attention: Attention) -> Option<
     None
 }
 
-fn ask(m: &SessionManager, s: &SessionSummary, attention: Attention) -> Result<(), String> {
+/// Sends a session's ask; returns the ask and when its hold ends, when the card has buttons.
+fn ask(m: &SessionManager, s: &SessionSummary, attention: Attention) -> Result<Option<(u32, Instant)>, String> {
     let pending = held_reply(m, s.id, attention);
     let named = reference(m, s);
     let held = pending.as_ref().filter(|p| p.blocked_reason.is_none()).map(|p| Held { session: s.id, run: p.run_id, ask: p.ask_id });
@@ -152,7 +169,10 @@ fn ask(m: &SessionManager, s: &SessionSummary, attention: Attention) -> Result<(
         latest: s.latest.as_deref(),
     };
     let about = About { session_id: Some(s.id), ask_id: pending.as_ref().map(|p| p.ask_id), ..About::default() };
-    outbound::enqueue(m, "session-ask", about, &view::ask_card(&card))
+    let out = view::ask_card(&card);
+    outbound::enqueue(m, "session-ask", about, &out)?;
+    let ends = pending.filter(|_| !out.buttons.is_empty()).map(|p| (p.ask_id, Instant::now() + Duration::from_secs(u64::from(p.remaining_secs))));
+    Ok(ends)
 }
 
 fn turn_done(m: &SessionManager, s: &SessionSummary) -> Result<(), String> {

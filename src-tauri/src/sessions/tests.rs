@@ -312,7 +312,7 @@ fn expired_raw_answered_locked_and_stale_requests_cannot_reply() {
     assert_eq!(receiver.try_recv(), Err(tokio::sync::oneshot::error::TryRecvError::Closed));
     let (ask, receiver) = held_approval(&f, &run, "a2");
     let request = actions::ActionRequest { run_id: run.id, request_id: OTHER_REQUEST.into(), action: SessionAction::Release { ask_id: ask }};
-    run.recorder.lock().unwrap().replies.get_mut(&i64::from(ask)).unwrap().opened -= Duration::from_secs(121);
+    run.recorder.lock().unwrap().replies.get_mut(&i64::from(ask)).unwrap().opened -= Duration::from_secs(chorus_core::replies::REPLY_WAIT_SECS + 1);
     assert!(actions::ActionRouter::dispatch(&f.manager, id, request.clone()).is_err());
     assert!(run.recorder.lock().unwrap().pending_replies()[0].blocked_reason.is_some());
     drop(receiver);

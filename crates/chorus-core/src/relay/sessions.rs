@@ -177,6 +177,8 @@ pub fn answered_from_phone(act: &Act) -> String {
 }
 
 pub const NO_LONGER_WAITING: &str = "No longer waiting: answered at the desk, or the agent moved on.";
+/// The agent's hold on an ask ended before the phone answered: its own prompt is live at the desk.
+pub const PHONE_TOO_LATE: &str = "The phone's time to answer is up: answer it at your desk.";
 
 /// One open session, for `/sessions` and the digest.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -321,6 +323,8 @@ pub fn prompt_refusal(name: &str, locked: bool, live: bool, activity: Activity) 
         Some(format!("{name} is waiting for an approval. Answer that first."))
     } else if activity == Activity::Working {
         Some(format!("{name} is working; send again when it's ready."))
+    } else if activity == Activity::Unknown {
+        Some(format!("{name} hasn't said it's ready for a prompt yet. Send its first one at your desk."))
     } else {
         None
     }
@@ -441,6 +445,7 @@ mod tests {
         assert!(prompt_refusal("api", true, true, Activity::Ready).unwrap().contains("locked"));
         assert!(prompt_refusal("api", false, false, Activity::Ready).unwrap().contains("isn't running"));
         assert!(prompt_refusal("api", false, true, Activity::AwaitingApproval).unwrap().contains("approval"));
+        assert!(prompt_refusal("api", false, true, Activity::Unknown).unwrap().contains("first one at your desk"));
         assert_eq!(prompt_refusal("api", false, true, Activity::Ready), None);
         assert_eq!(prompt_refusal("api", false, true, Activity::NeedsAnswer), None);
     }
