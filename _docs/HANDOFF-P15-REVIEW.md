@@ -5,20 +5,28 @@ HANDOFF-COMMON §6's sections. Raw evidence is in `_verify/p15/`, which is never
 
 ## 1. Verdict
 
-**Partly done: slices 1 to 3 of 9, and slice 4's loop half.** The spikes are done (Telegram's ran in
-slice 4). One phase at a time, task after task, runs end to end in the app: scripted and with real
-Claude Code steps. Steps call Chorus's own tools to ask questions, log assumptions and report they're
-done; questions are answered on the Loop screen or from Matthew's phone, and "make it a rule" stops a
-later phase asking again. Two real runs on fixture F1 worked all three phases to Done. The Telegram
-relay carries the loop's questions, stops, milestones and finished runs, with buttons, replies and
-commands, seen working with a real bot. Still to come in slice 4: HANDOFF-P13's session features
-(D101). Slices 5 to 9 (the plan grill, parallel builders, review, Counsel, limits) are not started.
+**Partly done: slices 1 to 4 of 9.** The spikes are done (Telegram's ran in slice 4). One phase at
+a time, task after task, runs end to end in the app: scripted and with real Claude Code steps. Steps
+call Chorus's own tools to ask questions, log assumptions and report they're done; questions are
+answered on the Loop screen or from Matthew's phone, and "make it a rule" stops a later phase asking
+again. Two real runs on fixture F1 worked all three phases to Done. The Telegram relay carries the
+loop's questions, stops, milestones and finished runs, with buttons, replies and commands, and
+ordinary sessions' approvals, questions, failures and finished turns (D101), all seen working with
+a real bot; a Claude Code approval was allowed from the phone. Slices 5 to 9 (the plan grill,
+parallel builders, review, Counsel, limits) are not started. Matthew is installing a release built
+from this branch to run the loop on Chorus 2 itself (P12, P14), so migrations 0023 and 0024 are
+frozen from here on.
 
 ## 2. Branch
 
 `p15/loop`, from `main` at `d4f4298`.
 
 ```
+0ba5d58 P15: how to start a loop run by hand until slice 5, with Chorus 2's own run settings
+d29a7bb Hold a Claude Code ask for five minutes so the phone can answer (D103)
+86e0654 Relay: say Connecting, then Connected, straight after a start
+abc016a P15 slice 4: ordinary sessions on the phone (HANDOFF-P13's P13a, D101)
+8fa373f P15: spike S4 with the real bot, the review draft for slice 4's loop half, and D101
 51f4e45 Relay: a milestone loses its Approve button once settled; the last one can be approved
 454cf5a F1 fixture: a three-phase scripted run with a blocking and a timed question (--phone)
 45eb295 Relay: retry a reset connection to Telegram and say so when the token wasn't checked
@@ -72,6 +80,10 @@ aa01550 P15: the Loop screen, fixture F1, and fixes from the first real run
 | `src-tauri/src/relay/outbound.rs` | What the loop queues for the phone, and the sender thread |
 | `src-tauri/src/relay/db.rs`, `tests.rs` | The relay's rows; the no-network test |
 | `src/views/settings/PhoneSettings.vue` | Settings → Phone |
+| `crates/chorus-core/src/relay/sessions.rs` | Sessions on the phone: what a change means, the cards, `/sessions`, `/use`, the digest, the phone's refusals |
+| `src-tauri/src/relay/sessions.rs` | The relay's session subscription and thread, answers through P6's router, prompts through delivery, the daily digest, desk idleness |
+| `src-tauri/migrations/0024_relay_sessions.sql` | The `/use` target, the digest time, session and ask ids on messages, per-project full text |
+| `_docs/loop/KICKOFF.md` | Starting a run by hand until slice 5, with Chorus 2's own run settings |
 
 **Modified** (hot files from HANDOFF-COMMON §3 marked ★)
 
@@ -117,7 +129,12 @@ aa01550 P15: the Loop screen, fixture F1, and fixes from the first real run
   `relay_buttons` (single-use, a week) and `relay_audit` (no message text), in 0023. Commands
   `relay_status`, `relay_set_token`, `relay_clear_token`, `relay_set_enabled`, `relay_pair_start`,
   `relay_unpair`, `relay_test`. Outbound HTTPS to `api.telegram.org` only; no port opened. Run config
-  `phoneStatusOnly`.
+  `phoneStatusOnly`. Sessions (migration 0024): `relay_config.target_session` and `digest_at`,
+  `session_id` and `ask_id` on the outbox and sent messages, `relay_projects`; commands
+  `relay_set_digest`, `relay_set_full_text`; `sessions::actions::pending_replies` and
+  `current_run_id` for callers outside the views; `automations::offset_at` is crate-visible; the
+  `windows` crate gains `Win32_System_SystemInformation` (`GetTickCount`). `REPLY_WAIT_SECS` is 300
+  (D103).
 - No dependency added.
 
 ## 5. Plan against result
@@ -127,7 +144,7 @@ aa01550 P15: the Loop screen, fixture F1, and fixes from the first real run
 | 1. Spikes | Done: S1 (permissions), S2 (allowances), S3 (agent tools); S4 (Telegram) ran in slice 4 |
 | 2. One phase, one task | Done, and beyond: tasks run one after another in dependency order, and passing phases chain to the next until a milestone. Roles are the planner and builder; the reviewer comes in slice 7. The core decides every stop condition the slice has signals for (fix attempts, same signature, wall clock, invalid plan, failing step, stopped task); the others arrive with their slices |
 | 3. Agent tools and questions | Done: `ask` (blocking, timed, log only), `log_assumption`, `task_done`; answers and timed defaults go back by resuming the step's conversation; the Loop screen's answer panel and "make it a rule". Claude Code steps only, like slice 2 |
-| 4. Telegram | Loop half done: S4; pairing, the token in the vault, long polling; question cards with option buttons, "…and make it a rule" and reply answers; STOPPED, MILESTONE (Approve), phase done (silent), DONE; `/status`, `/pause`, `/resume`, `/approve`, `/stop`; Settings → Phone. To do: HANDOFF-P13's session features as D101 decided |
+| 4. Telegram | Done: S4; pairing, the token in the vault, long polling; question cards with option buttons, "…and make it a rule" and reply answers; STOPPED, MILESTONE (Approve), phase done (silent), DONE; `/status`, `/pause`, `/resume`, `/approve`, `/stop`; Settings → Phone. Sessions (HANDOFF-P13's P13a, D101): approvals and questions with Allow once / Deny or option buttons through P6's router while Claude Code holds the ask (five minutes, D103), failures, finished turns (phone turns or an idle desk), prompts by reply or `/use`, `/sessions`, `/digest` and a daily digest, per-project full text. P13's tasks 9 and 10 (remote-control modes write-up, P13b interface) are moot or deferred: answers are built, through P6 |
 | 5 to 9 | Not started |
 
 Differences from the plan: fixture F1 uses Node's own test runner instead of Vitest, so it needs no
@@ -189,6 +206,10 @@ spike doc); codex-cli 0.163.0; opencode 2.1.4; Node 24.15; git on PATH.
 | P15-D18 | Every milestone has Approve, the last one finishing the run; approved or stopped from anywhere, its message is edited to say which and loses the button |
 | P15-D19 | Nothing is queued while no phone is paired, so a backlog never floods a newly paired phone; a message not sent within a day or 30 tries is dropped with the reason; a command more than 120 s old is refused |
 | P15-D20 | A Bot API call whose connection never opened is tried twice more (it carried nothing); a timeout or a refusal is not |
+| P15-D21 | The relay's subscription to session summaries only queues them (they're published under session locks); its own thread reads asks and sends. The first summary of a session after a start is only remembered, so a restart never repeats a message. Loop steps' sessions (tag `loop`) are left to the loop |
+| P15-D22 | A session's ask card is settled however the ask ends: from the phone (what was chosen), elsewhere ("No longer waiting"), or when the hold ends ("answer it at your desk"); its buttons go |
+| P15-D23 | A phone prompt goes through P6's delivery path with source `telegram`; a session that hasn't reported it's ready (no event yet) refuses it, so a session's first prompt comes from the desk |
+| P15-D24 | Migrations 0023 and 0024 are frozen from the first release built from this branch (Matthew's real data runs them); later schema changes are new migrations |
 
 **Lessons:** P15-L1 to P15-L6 are in [spikes/P15.md](spikes/P15.md). From slice 2:
 
@@ -214,6 +235,10 @@ spike doc); codex-cli 0.163.0; opencode 2.1.4; Node 24.15; git on PATH.
 - **P15-L15 — On a phone, an answer typed under a bot's message isn't a reply unless it is sent as
   one** (swipe the message, or tap it and choose Reply); a bot can only tell what it answers by
   `reply_to_message`.
+- **P15-L16 — Claude Code 2.1.310 honours an HTTP hook `timeout` of 305 s:** a held
+  `PermissionRequest` took an answer after 169 s from the desk and after 175 s from the phone.
+- **P15-L17 — A first long poll gives no news for up to 25 s;** a quick `getMe` first shows the
+  relay's state at once.
 
 ## 9. Questions for Matthew
 
@@ -244,7 +269,13 @@ after slice 3: done as D100 on `fix/claude-repo-trust`, merged into this branch.
 - A milestone queued while the phone was offline and approved before it went is rewritten in the
   outbox; if the sender is mid-send at that moment, the phone keeps a stale Approve that answers
   "isn't waiting for your review".
-- Session approvals, questions and prompts aren't on the phone yet (slice 4's second half, D101).
+- Seen with the real bot for sessions: an approval card, its settling at the desk and from the phone,
+  and a finished turn while the desk was idle. Routed in the no-network test but not yet seen with
+  the real bot: `/sessions`, `/use`, a plain-message prompt, a question's option buttons, the busy
+  refusal, `/digest` and the daily digest, per-project full text, and a card edited when its hold
+  ends unanswered.
+- The release installer is built from this unmerged branch: Matthew's real 2.0 data runs migrations
+  0023 and 0024, so a build from `main` refuses it until P15 merges (P15-D24).
 - A run started before `run-state.json` was ignored has it tracked, so it shows as modified after a tag
   (the F1 run made before that fix).
 - Step sessions stay in the session list after they finish (exited), one per step.
