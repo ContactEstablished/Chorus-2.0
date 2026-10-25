@@ -138,8 +138,8 @@ counts, the model per step, Telegram message ids) lives in Chorus's database, wi
      kept out of argv.
    - S4: a Telegram dev bot (decision 11): long polling and buttons from Windows. *Moved to the
      start of slice 4, where the token has a Settings field to go in.*
-   - Still to see in a terminal (slice 2's first run in the app): `dontAsk` draws no dialog, and
-     the status line receives `rate_limits`. Both need Claude Code to trust the fixture folder.
+   - Seen in a terminal in the `p15` instance: `dontAsk` draws no dialog, and the status line
+     receives `rate_limits`. Fixtures live under `%TEMP%\chorus-p15`, which Claude Code trusts.
 2. **One phase, one task.** The orchestrator, run state, the gatekeeper's checks, roles from Bots, the
    model logged per step, and every stop condition. Prove it with the scripted agent (§7), then with
    one real run on fixture F1.
