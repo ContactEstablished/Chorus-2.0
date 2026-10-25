@@ -10,10 +10,12 @@
 
 pub mod files;
 pub mod prompts;
+pub mod questions;
 pub mod report;
 pub mod roles;
 pub mod script;
 pub mod signature;
+pub mod tools;
 
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -35,11 +37,18 @@ pub struct Limits {
     pub step_retries: u32,
     /// Minutes a phase may run; `None` for no cap.
     pub phase_minutes: Option<u32>,
+    /// Minutes a timed question waits for Matthew before its default is taken.
+    #[serde(default = "default_timed_minutes")]
+    pub timed_minutes: u32,
+}
+
+fn default_timed_minutes() -> u32 {
+    15
 }
 
 impl Default for Limits {
     fn default() -> Self {
-        Self { fix_attempts: 3, same_signature: 3, plan_retries: 1, step_retries: 1, phase_minutes: Some(240) }
+        Self { fix_attempts: 3, same_signature: 3, plan_retries: 1, step_retries: 1, phase_minutes: Some(240), timed_minutes: 15 }
     }
 }
 
@@ -56,6 +65,9 @@ impl Limits {
         }
         if self.phase_minutes.is_some_and(|m| !(5..=48 * 60).contains(&m)) {
             return Err("A phase's time cap is 5 minutes to 48 hours.".into());
+        }
+        if !(1..=24 * 60).contains(&self.timed_minutes) {
+            return Err("A timed question waits 1 minute to 24 hours for its default.".into());
         }
         Ok(*self)
     }

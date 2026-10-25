@@ -44,6 +44,12 @@ pub struct ScriptStep {
     /// Make the step fail as if its agent had, with this reason.
     #[serde(default)]
     pub fail: Option<String>,
+    /// Ask a question, as the agent's `ask` tool would, after writing `write`.
+    #[serde(default)]
+    pub ask: Option<serde_json::Value>,
+    /// Files to write once the question is answered; `{answer}` in a text is the answer.
+    #[serde(default)]
+    pub after_answer: BTreeMap<String, String>,
 }
 
 const MAX_STEPS: usize = 500;
@@ -55,8 +61,11 @@ pub fn parse(text: &str) -> Result<Script, String> {
         return Err(format!("A script has up to {MAX_STEPS} steps."));
     }
     for s in &script.steps {
-        for p in s.write.keys().chain(s.delete.iter()) {
+        for p in s.write.keys().chain(s.delete.iter()).chain(s.after_answer.keys()) {
             safe_path(p)?;
+        }
+        if let Some(a) = &s.ask {
+            crate::run_loop::tools::parse_ask(a)?;
         }
         if s.step == StepName::Build && s.task.is_none() {
             return Err(format!("Phase {}'s build step needs a task.", s.phase));

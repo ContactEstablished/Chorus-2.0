@@ -1,12 +1,15 @@
 #!/usr/bin/env node
 // P15 fixture F1: a tiny TypeScript CLI tested with Node's own runner (no dependencies, so it needs
 // no install), with a three-phase roadmap for the loop. Makes a fresh git repository at the folder
-// given, which must not exist yet. Usage: node scripts/loop-fixtures/make-f1.mjs <folder>
+// given, which must not exist yet. With --always-ask, decisions.md says to ask before wording any
+// message a user sees, so a builder raises a blocking question (P15 scenarios 8 and 10).
+// Usage: node scripts/loop-fixtures/make-f1.mjs <folder> [--always-ask]
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
 const dir = process.argv[2]
+const alwaysAsk = process.argv.includes('--always-ask')
 if (!dir) {
   console.error('usage: make-f1.mjs <folder>')
   process.exit(2)
@@ -76,7 +79,10 @@ If it doesn't, apply "Defaults when unsure", log the choice in assumptions.md, a
 1. Follow an existing pattern in the codebase.
 2. Choose the option that is easiest to change later.
 3. Don't add a dependency; write the small thing instead.
-`,
+${alwaysAsk ? `
+## Always ask
+- The exact wording of any message a user sees (errors and help text), unless a rule below already settles it. Ask once, with the wording you propose, before writing it.
+` : ''}`,
 }
 
 for (const [path, text] of Object.entries(files)) {

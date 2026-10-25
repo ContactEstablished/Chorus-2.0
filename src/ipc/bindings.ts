@@ -195,6 +195,7 @@ export const commands = {
 	loopRunStop: (id: number) => typedError<RunView, string>(__TAURI_INVOKE("loop_run_stop", { id })),
 	loopRunApprove: (id: number) => typedError<RunView, string>(__TAURI_INVOKE("loop_run_approve", { id })),
 	loopRunDelete: (id: number) => typedError<boolean, string>(__TAURI_INVOKE("loop_run_delete", { id })),
+	loopQuestionAnswer: (questionId: number, answer: string, makeRule: boolean) => typedError<RunView, string>(__TAURI_INVOKE("loop_question_answer", { questionId, answer, makeRule })),
 };
 
 /** Events */
@@ -852,6 +853,8 @@ export type Limits = {
 	stepRetries: number,
 	/**  Minutes a phase may run; `None` for no cap. */
 	phaseMinutes: number | null,
+	/**  Minutes a timed question waits for Matthew before its default is taken. */
+	timedMinutes?: number,
 };
 
 /**  What a folder offers a new run: its repository, branch and roadmap. */
@@ -1307,6 +1310,26 @@ export type QuestionOption = {
 	description: string,
 };
 
+/**  A question a step asked, as the Loop screen shows it. */
+export type QuestionView = {
+	id: number,
+	stepId: number,
+	phase: number,
+	task: string | null,
+	/**  blocking | timed */
+	class: string,
+	question: string,
+	options: string[],
+	defaultAnswer: string | null,
+	/**  open | answered | defaulted | cancelled */
+	state: string,
+	answer: string | null,
+	madeRule: boolean,
+	askedAtSecs: number,
+	/**  A timed question's: when its default is taken. */
+	deadlineAtSecs: number | null,
+};
+
 export type QueuedPrompt = {
 	id: number,
 	runId: number,
@@ -1491,6 +1514,10 @@ export type RunView = {
 	state: RunState,
 	note: string | null,
 	phases: PhaseView[],
+	/**  Every question its steps asked, newest first. */
+	questions: QuestionView[],
+	/**  Open questions: the run waits on Matthew for these. */
+	openQuestions: number,
 	createdAtSecs: number,
 	updatedAtSecs: number,
 };
@@ -1669,6 +1696,8 @@ export type StepView = {
 	modelObserved: string | null,
 	state: StepState,
 	note: string | null,
+	/**  What the agent said it did, with Chorus's task_done tool. */
+	summary: string | null,
 	startedAtSecs: number,
 	endedAtSecs: number | null,
 	/**  A gate step's checks. */

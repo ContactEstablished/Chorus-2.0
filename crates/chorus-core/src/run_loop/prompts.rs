@@ -19,6 +19,13 @@ pub fn phase_dir(phase: &PhaseEntry) -> String {
     format!("{RUN_DIR}/phases/{}", phase.folder())
 }
 
+/// How every step uses Chorus's tools (P15 slice 3).
+const TOOLS: &str = "Chorus's tools: when decisions.md doesn't settle something, use the chorus ask tool. Its class is blocking for \
+anything under \"Always ask\" in decisions.md, timed for ambiguous behaviour or two reasonable ways (with options and a \
+default), and log_only for naming or internal structure. After a blocking or timed question, end your turn: the answer \
+comes as your next message. Record any other choice you make on your own with log_assumption. When the step is done, \
+call task_done with a one-line summary, then end your turn.";
+
 const TASK_FORMAT: &str = "## T1 · <short title>\n- Depends on: <task ids, or none>\n- Claims: <comma-separated paths or globs the task may change>\n- Accept: <one statement a test can prove>\n- Accept: <another, as many as needed>\n- Status: pending";
 
 /// The phase planner's prompt. `problems` is what was wrong with its last `tasks.md`.
@@ -30,6 +37,7 @@ pub fn plan(phase: &PhaseEntry, problems: Option<&str>) -> String {
          1. {dir}/spec.md: what this phase delivers, and acceptance criteria written as statements a test can prove.\n\
          2. {dir}/tasks.md: the tasks that build it, each in exactly this format:\n{TASK_FORMAT}\n\
          Each task claims every file it will change. Keep tasks small enough for one builder session each.\n\
+         {TOOLS}\n\
          Don't write any code in this step and don't change any other file. End your turn when both files are written.",
         code = phase.code(),
         title = phase.title,
@@ -46,9 +54,9 @@ pub fn build(phase: &PhaseEntry, task: &str, title: &str, attempt: u32, fix_atte
     let checks = checks.iter().map(|c| format!("- {}: {}", c.name, c.command)).collect::<Vec<_>>().join("\n");
     let rules = format!(
         "Rules: change only the files {task} claims in tasks.md. Never delete, skip or weaken a test to get the checks to \
-         pass. Don't run git: Chorus commits your work. Log any choice you make on your own as one line in \
-         {RUN_DIR}/assumptions.md. If a tool or command you need is refused, don't work around it: say what you needed \
-         in your final message and end your turn.\n\
+         pass. Don't run git: Chorus commits your work. If a tool or command you need is refused, don't work around it: \
+         ask for it with class blocking.\n\
+         {TOOLS}\n\
          These checks must pass, and you may run them yourself:\n{checks}"
     );
     if attempt == 0 {
@@ -95,6 +103,8 @@ mod tests {
         assert!(b.starts_with("You are the builder for task T2 · Endpoint in phase P03 · Order history."));
         assert!(b.contains("- tests: npm test"));
         assert!(b.contains("Never delete, skip or weaken a test"));
+        assert!(b.contains("use the chorus ask tool") && b.contains("call task_done"));
+        assert!(plan(&phase(), None).contains("log_assumption"));
         let f = build(&phase(), "T2", "Endpoint", 2, 3, &checks);
         assert!(f.contains("fix attempt 2 of 3") && f.contains("03-order-history/gate-report.md"), "{f}");
         // Every prompt is a sentence the launch check accepts.

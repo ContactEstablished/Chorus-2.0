@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 // P15: the scripted steps for F1's first phase, for the loop's scripted worker (debug builds).
-// The first build's sum subtracts, so the checks fail; the fix adds. Usage: make-f1-script.mjs <file>
+// The first build's sum subtracts, so the checks fail; the fix adds. With --question, the first
+// build instead asks a blocking question and builds correctly once it is answered.
+// Usage: make-f1-script.mjs <file> [--question]
 import { writeFileSync } from 'node:fs'
 
 const dir = '.chorus/run/phases/01-sum-command'
@@ -39,6 +41,7 @@ test('sum needs two arguments', () => {
   assert.equal(run(['sum', '2']), 'sum needs two numbers: sum <a> <b>')
 })
 `
+const question = process.argv.includes('--question')
 const steps = [
   {
     phase: 1,
@@ -48,8 +51,26 @@ const steps = [
       [`${dir}/tasks.md`]: '# Tasks: P01 · Sum command\n\n## T1 · Sum command\n- Depends on: none\n- Claims: src/cli.ts, test/sum.test.ts\n- Accept: `sum 2 3` prints 5\n- Accept: `sum 2 x` prints "not a number: x"\n- Accept: `sum 2` prints the usage line\n- Status: pending\n',
     },
   },
-  { phase: 1, step: 'build', task: 'T1', attempt: 0, write: { 'src/cli.ts': cli('-'), 'test/sum.test.ts': test } },
-  { phase: 1, step: 'build', task: 'T1', attempt: 1, write: { 'src/cli.ts': cli('+') } },
+  ...(question
+    ? [
+        {
+          phase: 1,
+          step: 'build',
+          task: 'T1',
+          attempt: 0,
+          write: { 'test/sum.test.ts': test },
+          ask: {
+            class: 'blocking',
+            question: 'decisions.md says to ask about user-facing wording. For a missing argument, may I print "sum needs two numbers: sum <a> <b>"?',
+            options: ['Yes, use it', 'Use "sum: missing argument"'],
+          },
+          after_answer: { 'src/cli.ts': cli('+') },
+        },
+      ]
+    : [
+        { phase: 1, step: 'build', task: 'T1', attempt: 0, write: { 'src/cli.ts': cli('-'), 'test/sum.test.ts': test } },
+        { phase: 1, step: 'build', task: 'T1', attempt: 1, write: { 'src/cli.ts': cli('+') } },
+      ]),
 ]
 writeFileSync(process.argv[2], JSON.stringify({ steps }, null, 2) + '\n')
 console.log(process.argv[2])

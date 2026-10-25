@@ -3,7 +3,8 @@
  * The Loop (P15): runs that work a repository's roadmap phase after phase on their own branch.
  * A run lists its phases, each phase its tasks and steps: who did each step, the model asked for
  * and the model that answered, and what the checks said. A run that stops says why and where to
- * look; one at a milestone waits for Approve.
+ * look; one at a milestone waits for Approve. Questions a step asked wait here for an answer:
+ * blocking ones with no timeout, timed ones until their default is taken (slice 3).
  */
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import {
@@ -12,6 +13,7 @@ import {
   unwrap,
   type LoopCheckRun,
   type LoopFolder,
+  type LoopQuestion,
   type LoopRun,
   type LoopRunConfig,
   type LoopStep,
@@ -31,6 +33,9 @@ const flavor = ref<Flavor>('release')
 const busy = ref(false)
 const confirmingDelete = ref<number | null>(null)
 const shownOutput = ref<string | null>(null)
+/** Answers being written, per question. */
+const answers = ref<Record<number, { text: string; rule: boolean }>>({})
+const now = ref(Date.now())
 
 interface Draft {
   /** The run being edited, or null for a new one. */
@@ -67,7 +72,10 @@ onMounted(async () => {
     /* release: no scripted steps */
   }
   unlisten = await events.loopUpdated.listen(() => void load())
-  timer = setInterval(() => void load(), 5_000)
+  timer = setInterval(() => {
+    now.value = Date.now()
+    void load()
+  }, 5_000)
 })
 onUnmounted(() => {
   if (timer) clearInterval(timer)
@@ -212,6 +220,41 @@ function at(secs: number | null): string {
 function checkKey(s: LoopStep, c: LoopCheckRun): string {
   return `${s.id}:${c.name}`
 }
+
+function draft(q: LoopQuestion): { text: string; rule: boolean } {
+  if (!answers.value[q.id]) answers.value[q.id] = { text: '', rule: false }
+  return answers.value[q.id]!
+}
+
+function where(q: LoopQuestion): string {
+  return `P${String(q.phase).padStart(2, '0')}${q.task ? ' ' + q.task : ' plan'}`
+}
+
+function timeLeft(q: LoopQuestion): string {
+  if (!q.deadlineAtSecs) return ''
+  const mins = Math.max(0, Math.ceil((q.deadlineAtSecs * 1000 - now.value) / 60_000))
+  return mins <= 1 ? 'default in under a minute' : `default in ${mins} min`
+}
+
+function outcome(q: LoopQuestion): string {
+  if (q.state === 'answered') return `You answered: ${q.answer}${q.madeRule ? ' (made a rule)' : ''}`
+  if (q.state === 'defaulted') return `Nobody answered in time; the default was taken: ${q.answer}`
+  return 'Closed without an answer'
+}
+
+async function answer(q: LoopQuestion): Promise<void> {
+  const d = draft(q)
+  busy.value = true
+  try {
+    await unwrap(commands.loopQuestionAnswer(q.id, d.text, d.rule))
+    delete answers.value[q.id]
+    await load()
+  } catch (e) {
+    notices.error("Couldn't answer the question.", e)
+  } finally {
+    busy.value = false
+  }
+}
 </script>
 
 <template>
@@ -298,7 +341,8 @@ function checkKey(s: LoopStep, c: LoopCheckRun): string {
         <div class="row" :class="{ opened: open === r.id }">
           <button type="button" class="name" @click="open = open === r.id ? null : r.id">{{ r.name }}</button>
           <span class="what mono">{{ r.runBranch }} <span class="muted">from {{ r.baseBranch }}</span></span>
-          <span class="state" :class="r.state">{{ STATE_TEXT[r.state] }}</span>
+          <span v-if="r.state === 'running' && r.openQuestions" class="state waiting">Needs your answer</span>
+          <span v-else class="state" :class="r.state">{{ STATE_TEXT[r.state] }}</span>
         </div>
         <div v-if="open === r.id" class="detail">
           <p v-if="r.note" class="note" :class="r.state">{{ r.note }}</p>
@@ -322,6 +366,42 @@ function checkKey(s: LoopStep, c: LoopCheckRun): string {
             </template>
           </div>
 
+          <div v-if="r.questions.length" class="questions">
+            <div v-for="q in r.questions.filter((x) => x.state === 'open')" :key="q.id" class="question">
+              <div class="q-head">
+                <span class="mono muted">{{ where(q) }}</span>
+                <span class="badge" :class="q.class">{{ q.class === 'blocking' ? 'Blocking: the task waits for you' : `Timed: ${timeLeft(q)}` }}</span>
+              </div>
+              <p class="q-text">{{ q.question }}</p>
+              <div v-if="q.options.length" class="q-options">
+                <button
+                  v-for="o in q.options"
+                  :key="o"
+                  type="button"
+                  :class="{ chosen: draft(q).text === o }"
+                  @click="draft(q).text = o"
+                >
+                  {{ o }}<span v-if="o === q.defaultAnswer" class="muted"> (default)</span>
+                </button>
+              </div>
+              <div class="q-answer">
+                <input v-model="draft(q).text" placeholder="Your answer" maxlength="2000" @keydown.enter="answer(q)" />
+                <label class="check"><input v-model="draft(q).rule" type="checkbox" /> Make it a rule</label>
+                <button type="button" class="primary" :disabled="busy || !draft(q).text.trim()" @click="answer(q)">Answer</button>
+              </div>
+              <p class="hint">A rule goes into the run's decisions.md, so no step asks this again.</p>
+            </div>
+            <details v-if="r.questions.some((x) => x.state !== 'open')" class="past">
+              <summary>{{ r.questions.filter((x) => x.state !== 'open').length }} earlier question{{ r.questions.filter((x) => x.state !== 'open').length === 1 ? '' : 's' }}</summary>
+              <ul>
+                <li v-for="q in r.questions.filter((x) => x.state !== 'open')" :key="q.id">
+                  <span class="mono muted">{{ where(q) }}</span> {{ q.question }}
+                  <span class="muted"> · {{ outcome(q) }}</span>
+                </li>
+              </ul>
+            </details>
+          </div>
+
           <p v-if="!r.phases.length" class="hint">No phase has started yet.</p>
           <div v-for="p in r.phases" :key="p.number" class="phase">
             <div class="phase-head">
@@ -341,7 +421,10 @@ function checkKey(s: LoopStep, c: LoopCheckRun): string {
                 <span class="when">{{ at(s.startedAtSecs) }}</span>
                 <span class="label">{{ stepLabel(s) }}</span>
                 <span class="who">{{ s.botName ?? '' }}<span v-if="model(s)" class="model mono muted">{{ model(s) }}</span></span>
-                <span class="out">{{ s.state === 'running' ? 'running…' : (s.note ?? s.state) }}</span>
+                <span class="out">
+                  {{ s.state === 'running' ? 'running…' : (s.note ?? s.state) }}
+                  <span v-if="s.summary" class="summary">{{ s.summary }}</span>
+                </span>
                 <button v-if="s.sessionId !== null" type="button" class="quiet" @click="view.openSession(s.sessionId)">Open session</button>
                 <ul v-if="s.checks.length" class="check-runs">
                   <li v-for="c in s.checks" :key="c.name" :class="{ failed: !c.passed }">
@@ -619,5 +702,71 @@ h1 {
 }
 .empty {
   color: var(--text-muted);
+}
+.questions {
+  display: grid;
+  gap: 10px;
+}
+.question {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--status-needs);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+}
+.q-head {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+}
+.badge {
+  font-size: 12px;
+  color: var(--status-needs);
+}
+.q-text {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.45;
+}
+.q-options {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.q-options button.chosen {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.q-answer {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 10px;
+  align-items: center;
+}
+.q-answer .check {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+.past summary {
+  cursor: pointer;
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+.past ul {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+  font-size: 12.5px;
+}
+.steps .summary {
+  display: block;
+  color: var(--text-2);
+  font-size: 12.5px;
 }
 </style>

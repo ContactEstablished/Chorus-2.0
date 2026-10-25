@@ -279,6 +279,7 @@ pub struct StepRow {
     pub model_observed: Option<String>,
     pub state: StepState,
     pub note: Option<String>,
+    pub summary: Option<String>,
     pub started_at: i64,
     pub ended_at: Option<i64>,
 }
@@ -302,13 +303,14 @@ fn step_from(r: &Row<'_>) -> rusqlite::Result<StepRow> {
             _ => StepState::Failed,
         },
         note: r.get(12)?,
-        started_at: r.get(13)?,
-        ended_at: r.get(14)?,
+        summary: r.get(13)?,
+        started_at: r.get(14)?,
+        ended_at: r.get(15)?,
     })
 }
 
 const STEP_COLUMNS: &str =
-    "id, phase_id, kind, task, attempt, role, bot_id, session_id, session_run_id, model_asked, model_observed, state, note, started_at, ended_at";
+    "id, phase_id, kind, task, attempt, role, bot_id, session_id, session_run_id, model_asked, model_observed, state, note, summary, started_at, ended_at";
 
 pub fn steps(store: &Store, run_id: u32) -> Result<Vec<StepRow>, String> {
     store.with(|c| {
@@ -370,6 +372,168 @@ pub fn end_step(store: &Store, id: u32, state: StepState, note: Option<&str>, mo
             c.execute(
                 "UPDATE loop_steps SET state = ?2, note = COALESCE(?3, note), model_observed = COALESCE(?4, model_observed), ended_at = ?5 WHERE id = ?1",
                 params![id, state, note, model_observed, now_ms()],
+            )
+        })
+        .map(|_| ())
+}
+
+pub fn step(store: &Store, id: u32) -> Result<Option<StepRow>, String> {
+    store.with(|c| c.query_row(&format!("SELECT {STEP_COLUMNS} FROM loop_steps WHERE id = ?1"), [id], step_from).optional())
+}
+
+/// The run and phase number a step belongs to.
+pub fn step_place(store: &Store, step_id: u32) -> Result<Option<(u32, u32)>, String> {
+    store.with(|c| {
+        c.query_row(
+            "SELECT s.run_id, p.number FROM loop_steps s JOIN loop_phases p ON p.id = s.phase_id WHERE s.id = ?1",
+            [step_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()
+    })
+}
+
+pub fn set_step_summary(store: &Store, id: u32, summary: &str) -> Result<(), String> {
+    store.with(|c| c.execute("UPDATE loop_steps SET summary = ?2 WHERE id = ?1", params![id, summary])).map(|_| ())
+}
+
+/// A question a step asked (slice 3).
+#[derive(Debug, Clone)]
+pub struct QuestionRow {
+    pub id: u32,
+    pub step_id: u32,
+    pub phase: u32,
+    pub task: Option<String>,
+    /// blocking | timed
+    pub class: String,
+    pub question: String,
+    pub options: Vec<String>,
+    pub default_answer: Option<String>,
+    pub asked_at: i64,
+    pub deadline_at: Option<i64>,
+    /// open | answered | defaulted | cancelled
+    pub state: String,
+    pub answer: Option<String>,
+    pub made_rule: bool,
+}
+
+fn question_from(r: &Row<'_>) -> rusqlite::Result<QuestionRow> {
+    Ok(QuestionRow {
+        id: r.get(0)?,
+        step_id: r.get(1)?,
+        phase: r.get(2)?,
+        task: r.get(3)?,
+        class: r.get(4)?,
+        question: r.get(5)?,
+        options: json_col(r, 6)?,
+        default_answer: r.get(7)?,
+        asked_at: r.get(8)?,
+        deadline_at: r.get(9)?,
+        state: r.get(10)?,
+        answer: r.get(11)?,
+        made_rule: r.get(12)?,
+    })
+}
+
+const QUESTION_COLUMNS: &str =
+    "id, step_id, phase, task, class, question, options, default_answer, asked_at, deadline_at, state, answer, made_rule";
+
+pub struct NewQuestion<'a> {
+    pub run_id: u32,
+    pub step_id: u32,
+    pub phase: u32,
+    pub task: Option<&'a str>,
+    pub class: &'a str,
+    pub question: &'a str,
+    pub options: &'a [String],
+    pub default_answer: Option<&'a str>,
+    pub deadline_at: Option<i64>,
+}
+
+pub fn insert_question(store: &Store, q: &NewQuestion<'_>) -> Result<u32, String> {
+    let options = serde_json::to_string(q.options).map_err(|e| e.to_string())?;
+    store.with(|c| {
+        c.execute(
+            "INSERT INTO loop_questions (run_id, step_id, phase, task, class, question, options, default_answer, asked_at, deadline_at, state)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'open')",
+            params![q.run_id, q.step_id, q.phase, q.task, q.class, q.question, options, q.default_answer, now_ms(), q.deadline_at],
+        )?;
+        Ok(c.last_insert_rowid() as u32)
+    })
+}
+
+/// A run's questions, newest first.
+pub fn questions(store: &Store, run_id: u32) -> Result<Vec<QuestionRow>, String> {
+    store.with(|c| {
+        let mut stmt = c.prepare(&format!("SELECT {QUESTION_COLUMNS} FROM loop_questions WHERE run_id = ?1 ORDER BY id DESC"))?;
+        stmt.query_map([run_id], question_from)?.collect()
+    })
+}
+
+pub fn question(store: &Store, id: u32) -> Result<Option<(u32, QuestionRow)>, String> {
+    store.with(|c| {
+        c.query_row(&format!("SELECT run_id, {QUESTION_COLUMNS} FROM loop_questions WHERE id = ?1"), [id], |r| {
+            let run: u32 = r.get(0)?;
+            let q = QuestionRow {
+                id: r.get(1)?,
+                step_id: r.get(2)?,
+                phase: r.get(3)?,
+                task: r.get(4)?,
+                class: r.get(5)?,
+                question: r.get(6)?,
+                options: json_col(r, 7)?,
+                default_answer: r.get(8)?,
+                asked_at: r.get(9)?,
+                deadline_at: r.get(10)?,
+                state: r.get(11)?,
+                answer: r.get(12)?,
+                made_rule: r.get(13)?,
+            };
+            Ok((run, q))
+        })
+        .optional()
+    })
+}
+
+/// A step's questions that are open, or answered but not yet given back to its agent.
+pub fn pending_for_step(store: &Store, step_id: u32) -> Result<Vec<QuestionRow>, String> {
+    store.with(|c| {
+        let mut stmt = c.prepare(&format!(
+            "SELECT {QUESTION_COLUMNS} FROM loop_questions WHERE step_id = ?1 AND delivered_at IS NULL AND state != 'cancelled' ORDER BY id"
+        ))?;
+        stmt.query_map([step_id], question_from)?.collect()
+    })
+}
+
+/// Records an answer, Matthew's (`answered`) or the default (`defaulted`), if the question is open.
+pub fn answer_question(store: &Store, id: u32, state: &str, answer: &str, made_rule: bool) -> Result<bool, String> {
+    store
+        .with(|c| {
+            c.execute(
+                "UPDATE loop_questions SET state = ?2, answer = ?3, made_rule = ?4, answered_at = ?5 WHERE id = ?1 AND state = 'open'",
+                params![id, state, answer, made_rule, now_ms()],
+            )
+        })
+        .map(|n| n == 1)
+}
+
+pub fn set_delivered(store: &Store, ids: &[u32]) -> Result<(), String> {
+    let now = now_ms();
+    store.with(|c| {
+        for id in ids {
+            c.execute("UPDATE loop_questions SET delivered_at = ?2 WHERE id = ?1", params![id, now])?;
+        }
+        Ok(())
+    })
+}
+
+/// Cancels a step's open questions (the step failed or the run stopped), or a whole run's.
+pub fn cancel_questions(store: &Store, run_id: u32, step_id: Option<u32>) -> Result<(), String> {
+    store
+        .with(|c| {
+            c.execute(
+                "UPDATE loop_questions SET state = 'cancelled' WHERE run_id = ?1 AND state = 'open' AND (?2 IS NULL OR step_id = ?2)",
+                params![run_id, step_id],
             )
         })
         .map(|_| ())

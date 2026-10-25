@@ -242,6 +242,8 @@ pub struct LoopLaunch {
     /// Arguments for the first run only, before the positional prompt: the step's unattended
     /// permissions and tools. A Restart starts the agent as usual, for whoever takes it over.
     pub args: Vec<String>,
+    /// Environment the run gets, redacted like a key: the step's token for Chorus's tools.
+    pub secrets: Vec<(String, String)>,
 }
 
 /// Starts the sessions a preset makes. `session` is the first; the others are derived from it.
@@ -550,7 +552,7 @@ pub struct SessionManager {
     /// How far the restore at start has got, for the splash.
     restore: Mutex<RestoreProgress>,
     /// P15: loop steps' arguments, taken by each step's first run.
-    loop_args: Mutex<HashMap<u32, Vec<String>>>,
+    loop_args: Mutex<HashMap<u32, LoopLaunch>>,
 }
 
 /// The sessions Chorus relaunches at start, and how many are back (each started or failed).
@@ -686,6 +688,16 @@ impl SessionManager {
             }
         }
         found
+    }
+
+    /// P15: what the session's next run adds for its loop step; taken by that run only.
+    pub fn set_loop_launch(&self, id: u32, launch: LoopLaunch) {
+        self.loop_args.lock().unwrap_or_else(std::sync::PoisonError::into_inner).insert(id, launch);
+    }
+
+    /// The loopback listener's port, which agent hooks and Chorus's tools use.
+    pub fn listener_port(&self) -> Option<u16> {
+        self.hook_listener.get().and_then(|r| r.as_ref().ok()).copied()
     }
 
     pub fn data_dir(&self) -> &Path {
@@ -969,7 +981,7 @@ impl SessionManager {
         let source = if req.loop_step.is_some() { "loop" } else { "automation" };
         crate::automations::stage_prompt(&self.store, id, source, req.first_prompt.as_deref())?;
         if let Some(step) = &req.loop_step {
-            self.loop_args.lock().unwrap_or_else(std::sync::PoisonError::into_inner).insert(id, step.args.clone());
+            self.set_loop_launch(id, step.clone());
         }
         if join.is_none() {
             self.remember_folder(&asked);
@@ -1022,6 +1034,11 @@ impl SessionManager {
             launch.additions.push(("CODEX_INTERNAL_ORIGINATOR_OVERRIDE", chorus_core::codex::originator_for(row.id)));
         }
         let mut secrets: Vec<(String, String)> = Vec::new();
+        // A loop step's launch, taken by this run only: its token joins the redacted environment.
+        let step = self.loop_args.lock().unwrap_or_else(std::sync::PoisonError::into_inner).remove(&row.id);
+        if let Some(s) = &step {
+            secrets.extend(s.secrets.iter().cloned());
+        }
         match (row.credential_id, &row.credential_env) {
             (Some(cid), Some(var)) => secrets.push((var.clone(), vault::decrypt(&self.store, cid)?)),
             (None, Some(_)) => return Err("the key this session uses has been deleted".into()),
@@ -1178,7 +1195,7 @@ impl SessionManager {
             args.extend(hook_args);
             // A loop step's own arguments, on its first run only. A step that sets its own
             // permission mode replaces the Bot's.
-            let step_args = self.loop_args.lock().unwrap_or_else(std::sync::PoisonError::into_inner).remove(&row.id).unwrap_or_default();
+            let step_args = step.map(|s| s.args).unwrap_or_default();
             let own_permission = step_args.iter().any(|a| a == "--permission-mode");
             args.extend(spec.option_args(&LaunchOptions { permission: options.permission.filter(|_| !own_permission), ..options.clone() }));
             // Gemini CLI refuses to create an id whose chat file already exists, and to resume one

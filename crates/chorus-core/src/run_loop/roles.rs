@@ -148,6 +148,14 @@ pub fn vendor(bot: &BotFacts) -> Option<String> {
     }
 }
 
+/// Whether a model id names an OpenAI or Anthropic model. D99: those run only on Matthew's
+/// subscriptions, through Codex and Claude Code, never through OpenRouter.
+pub fn gpt_or_claude(model: &str) -> bool {
+    let m = model.trim().trim_start_matches('~').to_ascii_lowercase();
+    let name = m.rsplit('/').next().unwrap_or(&m);
+    m.starts_with("openai/") || m.starts_with("anthropic/") || name.starts_with("gpt") || name.starts_with("claude")
+}
+
 /// The reviewer for a task built by `builder`: the reviewer role's Bot, or its fallback when the
 /// first shares the builder's vendor. An unknown vendor never counts as a match.
 pub fn reviewer_for(builder: &BotFacts, reviewer: &BotFacts, fallback: Option<&BotFacts>) -> Result<u32, String> {
@@ -213,6 +221,16 @@ mod tests {
         assert_eq!(vendor(&b[2]).as_deref(), Some("deepseek"));
         assert_eq!(vendor(&bot(4, "x", AgentKind::Opencode, Some("openai/gpt-6.1-sol"))).as_deref(), Some("openai"));
         assert_eq!(vendor(&bot(5, "x", AgentKind::Opencode, None)), None);
+    }
+
+    #[test]
+    fn gpt_and_claude_are_spotted() {
+        for m in ["openai/gpt-6.1-sol", "~anthropic/claude-sonnet-latest", "anthropic/claude-opus-5-5", "gpt-6.1-sol", "x/claude-fork"] {
+            assert!(gpt_or_claude(m), "{m}");
+        }
+        for m in ["~z-ai/glm-flash-latest", "~deepseek/deepseek-v4-flash-latest", "~moonshotai/kimi-latest", "deepseek/deepseek-v4.1-flash"] {
+            assert!(!gpt_or_claude(m), "{m}");
+        }
     }
 
     #[test]

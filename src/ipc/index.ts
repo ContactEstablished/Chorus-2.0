@@ -130,6 +130,7 @@ export type {
   LoopRole,
   NewRun as LoopNewRun,
   PhaseView as LoopPhase,
+  QuestionView as LoopQuestion,
   RoleSetting as LoopRoleSetting,
   RunConfig as LoopRunConfig,
   RunState as LoopRunState,

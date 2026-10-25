@@ -91,14 +91,24 @@ impl Fixture {
         let input = NewRun { name: "Sums".into(), folder: self.repo.display().to_string(), base_branch: None, config };
         let created = super::create(&self.manager, &input).unwrap();
         assert!(super::ready_to_run(&self.manager, created.id).unwrap());
+        self.drive(created.id);
+        created.id
+    }
+
+    /// Passes over the run until it waits, stops or finishes, or 20 passes (a step waiting on a
+    /// question stays running).
+    fn drive(&self, id: u32) {
         for _ in 0..20 {
-            let run = db::run(self.manager.store(), created.id).unwrap().unwrap();
+            let run = db::run(self.manager.store(), id).unwrap().unwrap();
             if run.state != RunState::Running {
                 break;
             }
             worker::pass(&self.manager, &run).unwrap();
         }
-        created.id
+    }
+
+    fn state(&self, id: u32) -> RunState {
+        db::run(self.manager.store(), id).unwrap().unwrap().state
     }
 
     fn worktree(&self, id: u32) -> PathBuf {
@@ -222,4 +232,91 @@ fn checks_and_roles_are_required() {
     let key = format!("sk-or-v1-{}", "a1".repeat(32));
     let secret = RunConfig { checks: vec![Check { name: "t".into(), command: format!("echo {key}"), timeout_secs: 30 }], ..both };
     assert!(super::create(&f.manager, &NewRun { config: secret, ..input }).unwrap_err().contains("looks like a key"));
+}
+
+/// A build that asks a question, then writes the answer into the file it builds.
+fn asking_build(ask: &str) -> String {
+    format!(r#"{{"phase": 1, "step": "build", "task": "T1", "attempt": 0, "ask": {ask}, "after_answer": {{"src/sum.txt": "return a + b // {{answer}}"}}}}"#)
+}
+
+#[test]
+fn a_blocking_question_waits_for_its_answer_and_can_become_a_rule() {
+    let f = Fixture::new("blocking");
+    let ask = r#"{"class": "blocking", "question": "Which wording for errors?", "options": ["short", "long"]}"#;
+    let id = f.run(&format!("[{}, {}]", plan_step(), asking_build(ask)));
+    // The step asked and waits: the run is still running, the question open, nothing built.
+    assert_eq!(f.state(id), RunState::Running);
+    let q = db::questions(f.manager.store(), id).unwrap();
+    assert_eq!((q.len(), q[0].state.as_str(), q[0].class.as_str(), q[0].task.as_deref()), (1, "open", "blocking", Some("T1")));
+    assert!(!f.worktree(id).join("src/sum.txt").exists());
+    assert_eq!(super::view(&f.manager, &db::run(f.manager.store(), id).unwrap().unwrap()).unwrap().open_questions, 1);
+
+    assert!(super::answer_question(&f.manager, q[0].id, "  ", false).unwrap_err().contains("Write an answer"));
+    super::answer_question(&f.manager, q[0].id, "short", true).unwrap();
+    assert!(super::answer_question(&f.manager, q[0].id, "long", false).unwrap_err().contains("already answered"));
+    f.drive(id);
+    assert_eq!(f.state(id), RunState::Waiting, "phase 1 passed and waits at its milestone");
+    let wt = f.worktree(id);
+    assert_eq!(std::fs::read_to_string(wt.join("src/sum.txt")).unwrap(), "return a + b // short");
+    let decisions = std::fs::read_to_string(wt.join(".chorus/run/decisions.md")).unwrap();
+    assert!(decisions.contains("## Rules from your answers") && decisions.contains("- Which wording for errors?: short ([P01 T1])"), "{decisions}");
+    // The rule is committed with the task, so later phases read it.
+    assert!(git(&wt, &["show", "HEAD:.chorus/run/decisions.md"]).contains("Which wording for errors?: short"));
+    let q = db::questions(f.manager.store(), id).unwrap();
+    assert_eq!((q[0].state.as_str(), q[0].made_rule), ("answered", true));
+}
+
+#[test]
+fn a_timed_question_takes_its_default_and_logs_it() {
+    let f = Fixture::new("timed");
+    let ask = r#"{"class": "timed", "question": "Offset or cursor?", "options": ["cursor", "offset"], "default": "cursor"}"#;
+    let id = f.run(&format!("[{}, {}]", plan_step(), asking_build(ask)));
+    let q = db::questions(f.manager.store(), id).unwrap();
+    assert_eq!(q[0].state, "open");
+    assert!(q[0].deadline_at.unwrap() - q[0].asked_at >= 15 * 60_000 - 1000, "15 minutes by default");
+    // Nobody answers before the deadline.
+    f.manager.store().with(|c| c.execute("UPDATE loop_questions SET deadline_at = 0", [])).unwrap();
+    f.drive(id);
+    assert_eq!(f.state(id), RunState::Waiting);
+    let wt = f.worktree(id);
+    assert_eq!(std::fs::read_to_string(wt.join("src/sum.txt")).unwrap(), "return a + b // cursor");
+    let log = std::fs::read_to_string(wt.join(".chorus/run/assumptions.md")).unwrap();
+    assert!(log.contains("- [P01 T1] Nobody answered \"Offset or cursor?\" within 15 minutes; took the default: cursor"), "{log}");
+    assert_eq!(db::questions(f.manager.store(), id).unwrap()[0].state, "defaulted");
+}
+
+#[test]
+fn the_tools_endpoint_records_questions_assumptions_and_summaries() {
+    use super::tools::{self, Refused};
+    let f = Fixture::new("tools");
+    let ask = r#"{"class": "blocking", "question": "First?", "options": ["a"]}"#;
+    let id = f.run(&format!("[{}, {}]", plan_step(), asking_build(ask)));
+    let step = db::all_running_steps(f.manager.store()).unwrap().pop().unwrap();
+    let token = tools::issue(step.id);
+    let call = |body: &str| tools::serve(&f.manager, step.id, &token, body);
+    assert!(matches!(tools::serve(&f.manager, step.id, "wrong", "{}"), Err(Refused::Unauthorised)));
+    assert!(matches!(tools::serve(&f.manager, step.id + 99, &token, "{}"), Err(Refused::Unauthorised)));
+    let list = call(r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#).ok().flatten().unwrap();
+    assert!(list.contains("log_assumption") && list.contains("task_done"));
+    let key = format!("sk-or-v1-{}", "c3".repeat(32));
+    let body = serde_json::json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "ask", "arguments": {
+        "class": "timed", "question": format!("Use {key} here?"), "options": ["yes", "no"], "default": "no"}}});
+    let reply = call(&body.to_string()).ok().flatten().unwrap();
+    assert!(reply.contains("the default (no)"), "{reply}");
+    let qs = db::questions(f.manager.store(), id).unwrap();
+    assert_eq!(qs.len(), 2);
+    assert!(!qs[0].question.contains(&key), "a key in a question is scrubbed: {}", qs[0].question);
+    let bad = call(r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"ask","arguments":{"class":"timed","question":"q"}}}"#).ok().flatten().unwrap();
+    assert!(bad.contains("\"isError\":true") && bad.contains("needs a default"), "{bad}");
+    call(r#"{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"log_assumption","arguments":{"text":"Used Number() for parsing"}}}"#).unwrap();
+    let log = std::fs::read_to_string(f.worktree(id).join(".chorus/run/assumptions.md")).unwrap();
+    assert!(log.contains("- [P01 T1] Used Number() for parsing"), "{log}");
+    call(r#"{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"task_done","arguments":{"summary":"Built sum."}}}"#).unwrap();
+    assert_eq!(db::step(f.manager.store(), step.id).unwrap().unwrap().summary.as_deref(), Some("Built sum."));
+    assert_eq!(call(r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#).ok().flatten(), None);
+    // Stopping the run cancels its open questions, and the step's tools say it has ended.
+    super::stop(&f.manager, id).unwrap();
+    assert!(db::questions(f.manager.store(), id).unwrap().iter().all(|q| q.state == "cancelled"));
+    let late = call(r#"{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"log_assumption","arguments":{"text":"x"}}}"#).ok().flatten().unwrap();
+    assert!(late.contains("has ended"), "{late}");
 }

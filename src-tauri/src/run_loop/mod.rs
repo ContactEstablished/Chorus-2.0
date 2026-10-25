@@ -10,6 +10,7 @@
 
 pub mod db;
 pub mod gate;
+pub mod tools;
 #[cfg(test)]
 mod tests;
 pub mod worker;
@@ -59,6 +60,8 @@ pub struct StepView {
     pub model_observed: Option<String>,
     pub state: StepState,
     pub note: Option<String>,
+    /// What the agent said it did, with Chorus's task_done tool.
+    pub summary: Option<String>,
     pub started_at_secs: u32,
     pub ended_at_secs: Option<u32>,
     /// A gate step's checks.
@@ -93,8 +96,34 @@ pub struct RunView {
     pub state: RunState,
     pub note: Option<String>,
     pub phases: Vec<PhaseView>,
+    /// Every question its steps asked, newest first.
+    pub questions: Vec<QuestionView>,
+    /// Open questions: the run waits on Matthew for these.
+    pub open_questions: u32,
     pub created_at_secs: u32,
     pub updated_at_secs: u32,
+}
+
+/// A question a step asked, as the Loop screen shows it.
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct QuestionView {
+    pub id: u32,
+    pub step_id: u32,
+    pub phase: u32,
+    pub task: Option<String>,
+    /// blocking | timed
+    pub class: String,
+    pub question: String,
+    pub options: Vec<String>,
+    pub default_answer: Option<String>,
+    /// open | answered | defaulted | cancelled
+    pub state: String,
+    pub answer: Option<String>,
+    pub made_rule: bool,
+    pub asked_at_secs: u32,
+    /// A timed question's: when its default is taken.
+    pub deadline_at_secs: Option<u32>,
 }
 
 /// `run-state.json`: what the run is doing and which model ran each step, for people and agents.
@@ -189,6 +218,7 @@ pub fn view(m: &SessionManager, run: &RunRow) -> Result<RunView, String> {
                     model_observed: s.model_observed.clone(),
                     state: s.state,
                     note: s.note.clone(),
+                    summary: s.summary.clone(),
                     started_at_secs: secs(s.started_at),
                     ended_at_secs: s.ended_at.map(secs),
                     checks: if s.kind == StepKind::Check { db::checks(store, s.id).unwrap_or_default() } else { Vec::new() },
@@ -207,6 +237,25 @@ pub fn view(m: &SessionManager, run: &RunRow) -> Result<RunView, String> {
             }
         })
         .collect();
+    let questions: Vec<QuestionView> = db::questions(store, run.id)?
+        .into_iter()
+        .map(|q| QuestionView {
+            id: q.id,
+            step_id: q.step_id,
+            phase: q.phase,
+            task: q.task,
+            class: q.class,
+            question: q.question,
+            options: q.options,
+            default_answer: q.default_answer,
+            state: q.state,
+            answer: q.answer,
+            made_rule: q.made_rule,
+            asked_at_secs: secs(q.asked_at),
+            deadline_at_secs: q.deadline_at.map(secs),
+        })
+        .collect();
+    let open_questions = questions.iter().filter(|q| q.state == "open").count() as u32;
     Ok(RunView {
         id: run.id,
         name: run.name.clone(),
@@ -218,6 +267,8 @@ pub fn view(m: &SessionManager, run: &RunRow) -> Result<RunView, String> {
         state: run.state,
         note: run.note.clone(),
         phases,
+        questions,
+        open_questions,
         created_at_secs: secs(run.created_at),
         updated_at_secs: secs(run.updated_at),
     })
@@ -260,6 +311,15 @@ fn check_config(m: &SessionManager, config: &RunConfig) -> Result<RunConfig, Str
             let bot = crate::bots::get(store, id)?.ok_or_else(|| format!("The {} role's Bot no longer exists.", role.label()))?;
             if bot.archived {
                 return Err(format!("{} is archived.", bot.name));
+            }
+            if let (Some(pid), Some(model)) = (bot.provider_id, bot.options.model.as_deref())
+                && crate::store::providers::get(store, pid)?.is_some_and(|p| p.kind == chorus_core::providers::ProviderKind::Openrouter)
+                && chorus_core::run_loop::roles::gpt_or_claude(model)
+            {
+                return Err(format!(
+                    "{} runs {model} through OpenRouter. GPT and Claude models run only on your subscriptions, through Codex and Claude Code (D99): choose another model for it, or another Bot.",
+                    bot.name
+                ));
             }
             if config.script.is_none() && bot.agent != AgentKind::Claude {
                 return Err(format!(
@@ -462,23 +522,30 @@ pub fn loop_run_pause(state: Manager<'_>, id: u32) -> Result<RunView, String> {
 #[tauri::command]
 #[specta::specta]
 pub fn loop_run_stop(state: Manager<'_>, id: u32) -> Result<RunView, String> {
-    let run = get(&state, id)?;
+    stop(&state, id)?;
+    view(&state, &get(&state, id)?)
+}
+
+/// Stops a run at once: its step's agent ends, its phase and open questions close.
+fn stop(m: &SessionManager, id: u32) -> Result<(), String> {
+    let run = get(m, id)?;
     if matches!(run.state, RunState::Stopped | RunState::Done) {
-        return view(&state, &run);
+        return Ok(());
     }
-    if let Some(phase) = db::phases(state.store(), id)?.pop() {
-        if let Some(step) = db::running_step(state.store(), phase.id)? {
-            worker::end_agent(&state, &step, "The run was stopped.");
+    if let Some(phase) = db::phases(m.store(), id)?.pop() {
+        if let Some(step) = db::running_step(m.store(), phase.id)? {
+            worker::end_agent(m, &step, "The run was stopped.");
         }
         if !matches!(phase.progress.stage, chorus_core::run_loop::Stage::Passed) {
             let mut progress = phase.progress.clone();
             progress.stage = chorus_core::run_loop::Stage::Stopped;
-            db::save_phase(state.store(), phase.id, &progress, None, None)?;
+            db::save_phase(m.store(), phase.id, &progress, None, None)?;
         }
     }
-    db::set_state(state.store(), id, RunState::Stopped, Some("Stopped by you. The worktree keeps what the last step left."))?;
+    db::set_state(m.store(), id, RunState::Stopped, Some("Stopped by you. The worktree keeps what the last step left."))?;
+    db::cancel_questions(m.store(), id, None)?;
     worker::notify(id);
-    view(&state, &get(&state, id)?)
+    Ok(())
 }
 
 #[tauri::command]
@@ -499,6 +566,39 @@ fn approve(m: &SessionManager, id: u32) -> Result<(), String> {
     let last = db::phases(m.store(), id)?.pop().map_or(0, |p| p.number);
     db::set_reviewed(m.store(), id, last)?;
     db::set_state(m.store(), id, RunState::Running, None)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn loop_question_answer(state: Manager<'_>, question_id: u32, answer: String, make_rule: bool) -> Result<RunView, String> {
+    let run_id = answer_question(&state, question_id, &answer, make_rule)?;
+    worker::notify(run_id);
+    view(&state, &get(&state, run_id)?)
+}
+
+/// Records Matthew's answer to an open question; the run's worker gives it back to the step. "Make
+/// it a rule" adds it to the run's decisions.md too, so no step asks it again.
+fn answer_question(m: &SessionManager, id: u32, answer: &str, make_rule: bool) -> Result<u32, String> {
+    let store = m.store();
+    let (run_id, q) = db::question(store, id)?.ok_or("That question no longer exists.")?;
+    if q.state != "open" {
+        return Err("That question was already answered or closed.".into());
+    }
+    let answer = answer.trim();
+    if answer.is_empty() || answer.chars().count() > 2000 {
+        return Err("Write an answer of up to 2000 characters.".into());
+    }
+    crate::bots::refuse_secrets(store, "an answer", answer)?;
+    if !db::answer_question(store, id, "answered", answer, make_rule)? {
+        return Err("That question was already answered or closed.".into());
+    }
+    if make_rule {
+        let run = get(m, run_id)?;
+        let dir = run.worktree_path.ok_or("The run has no worktree for decisions.md.")?;
+        let tag = chorus_core::run_loop::questions::tag(q.phase, q.task.as_deref());
+        tools::add_rule(Path::new(&dir), &q.question, answer, &tag)?;
+    }
+    Ok(run_id)
 }
 
 #[tauri::command]

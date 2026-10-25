@@ -12,13 +12,15 @@ use chorus_core::activity::Activity;
 use chorus_core::agent::{AgentKind, LaunchOptions};
 use chorus_core::run_loop::files::{self, PhaseEntry, Problem, Risk, TaskStatus};
 use chorus_core::run_loop::prompts::{self, CheckLine, RUN_DIR};
+use chorus_core::run_loop::questions::{self, AnsweredBy};
 use chorus_core::run_loop::roles::{self, BotFacts, LoopRole};
-use chorus_core::run_loop::script::{self, StepName};
+use chorus_core::run_loop::script::{self, ScriptStep, StepName};
+use chorus_core::run_loop::tools::{self as core_tools, AskClass};
 use chorus_core::run_loop::{self as engine, Action, CheckOutcome, Condition, Decision, Event, Stage, Stop, report};
 use chorus_core::session::SessionState;
 
-use super::db::{self, NewStep, PhaseRow, RunRow, RunState, StepKind, StepRow, StepState};
-use super::gate;
+use super::db::{self, NewQuestion, NewStep, PhaseRow, QuestionRow, RunRow, RunState, StepKind, StepRow, StepState};
+use super::{gate, tools};
 use crate::git;
 use crate::sessions::{CreateSession, LoopLaunch, SessionManager};
 use crate::store::now_ms;
@@ -27,6 +29,7 @@ const PASS: Duration = Duration::from_millis(1500);
 const FIRST_PASS: Duration = Duration::from_secs(3);
 const FINISHED_NOTE: &str = "Its loop step finished, so Chorus closed the agent. Restart to follow up.";
 const INTERRUPTED: &str = "Chorus restarted during this loop step, so the loop runs the step again.";
+const WAITING_NOTE: &str = "Its loop step asked a question, so Chorus closed the agent until the answer comes; then it carries on in this conversation.";
 
 /// Runs with a worker thread, so a second Start doesn't make a twin.
 static ACTIVE: Mutex<Vec<u32>> = Mutex::new(Vec::new());
@@ -44,14 +47,19 @@ pub fn notify(run_id: u32) {
 }
 
 /// Before sessions are relaunched at start: a step that was running when Chorus stopped is run
-/// again from the start, so its session isn't relaunched as an idle agent and the step is ended.
+/// again from the start, so its session isn't relaunched as an idle agent and the step is ended. A
+/// step waiting on a question keeps waiting: its answer resumes its conversation.
 pub fn prepare(m: &SessionManager) {
     let store = m.store();
     for step in db::all_running_steps(store).unwrap_or_default() {
+        let waiting = db::pending_for_step(store, step.id).is_ok_and(|q| !q.is_empty());
         if let Some(sid) = step.session_id {
-            let _ = crate::store::sessions::set_state(store, sid, SessionState::Exited, Some(INTERRUPTED));
+            let note = if waiting { WAITING_NOTE } else { INTERRUPTED };
+            let _ = crate::store::sessions::set_state(store, sid, SessionState::Exited, Some(note));
         }
-        let _ = db::end_step(store, step.id, StepState::Failed, Some("Chorus restarted during this step; it runs again."), None);
+        if !waiting {
+            let _ = db::end_step(store, step.id, StepState::Failed, Some("Chorus restarted during this step; it runs again."), None);
+        }
     }
 }
 
@@ -140,7 +148,10 @@ pub(super) fn pass(m: &Arc<SessionManager>, run: &RunRow) -> Result<(), String> 
         Stage::Stopped => return stop_run(m, run, &phase, phase.stop.as_ref()),
         _ => {}
     }
-    if let Some(stop) = engine::overdue(&phase.progress, &run.config.limits, now_ms()) {
+    // Time spent waiting on a blocking question doesn't count: it waits for Matthew with no timeout.
+    let blocked = db::running_step(store, phase.id)?
+        .is_some_and(|st| db::pending_for_step(store, st.id).is_ok_and(|q| q.iter().any(|q| q.state == "open" && q.class == "blocking")));
+    if let Some(stop) = engine::overdue(&phase.progress, &run.config.limits, now_ms()).filter(|_| !blocked) {
         if let Some(step) = db::running_step(store, phase.id)? {
             end_agent(m, &step, "The phase ran past its time cap.");
         }
@@ -255,7 +266,11 @@ fn start_step(m: &Arc<SessionManager>, run: &RunRow, phase: &PhaseRow, entry: &P
     )?;
     notify(run.id);
     if let Some(path) = &run.config.script {
-        let event = play(dir, path, entry.number, kind, task, attempt, entry);
+        let event = match play(m, run, entry, step_id, path, kind, task, attempt) {
+            Played::Done(e) => e,
+            // The step waits, with no session, for its answer.
+            Played::Asked => return Ok(()),
+        };
         let (state, note) = match &event {
             Event::StepFailed { why } => (StepState::Failed, Some(why.as_str())),
             _ => (StepState::Done, Some("Played from the run's script.")),
@@ -299,7 +314,7 @@ fn start_step(m: &Arc<SessionManager>, run: &RunRow, phase: &PhaseRow, entry: &P
         routing: None,
         bot_id: Some(bot.id),
         first_prompt: Some(prompt.to_owned()),
-        loop_step: Some(LoopLaunch { args: claude_args(m, kind, &run.config.checks)? }),
+        loop_step: Some(step_launch(m, step_id, kind, &run.config.checks)?),
     };
     match m.create(request) {
         Ok(s) if s.live => {
@@ -342,9 +357,9 @@ fn step_name(run: &str, code: &str, what: &str) -> String {
 /// Claude Code's arguments for an unattended step (P15 spike S1, checked on 2.1.308 and 2.1.310):
 /// only the named tools, user and project settings ignored, file tools kept to the worktree,
 /// anything not allowed refused without asking, and no MCP servers but Chorus's own. The planner
-/// may write only the run documents; a builder may edit the worktree and run the checks.
-fn claude_args(m: &SessionManager, kind: StepKind, checks: &[gate::Check]) -> Result<Vec<String>, String> {
-    let mcp = mcp_config(m)?;
+/// may write only the run documents; a builder may edit the worktree and run the checks. Both may
+/// call Chorus's tools.
+fn claude_args(kind: StepKind, checks: &[gate::Check], mcp: &str) -> Vec<String> {
     let mut args: Vec<String> = vec!["--restricted".into(), "--tools".into()];
     let mut allowed: Vec<String> = Vec::new();
     if kind == StepKind::Plan {
@@ -361,54 +376,97 @@ fn claude_args(m: &SessionManager, kind: StepKind, checks: &[gate::Check]) -> Re
             }
         }
     }
+    allowed.extend(core_tools::CLAUDE_TOOL_NAMES.iter().map(|t| (*t).to_owned()));
     args.extend(["--permission-mode".into(), "dontAsk".into(), "--allowedTools".into()]);
     args.extend(allowed);
-    args.extend(["--strict-mcp-config".into(), "--mcp-config".into(), mcp]);
-    Ok(args)
+    args.extend(["--strict-mcp-config".into(), "--mcp-config".into(), mcp.to_owned()]);
+    args
 }
 
-/// The MCP configuration loop steps get, in Chorus's own data: none yet (slice 3 adds Chorus's
-/// tools), which with `--strict-mcp-config` also keeps the account's connectors out.
-fn mcp_config(m: &SessionManager) -> Result<String, String> {
-    let dir = m.data_dir().join("loop");
-    std::fs::create_dir_all(&dir).map_err(|e| format!("creating {}: {e}", dir.display()))?;
-    let path = dir.join("no-mcp.json");
-    if !path.is_file() {
-        std::fs::write(&path, "{\"mcpServers\":{}}\n").map_err(|e| format!("writing {}: {e}", path.display()))?;
-    }
-    Ok(path.display().to_string())
+/// A step's launch: its flags, and a fresh token for Chorus's tools in its environment.
+fn step_launch(m: &SessionManager, step_id: u32, kind: StepKind, checks: &[gate::Check]) -> Result<LoopLaunch, String> {
+    let mcp = tools::config_file(m, step_id)?;
+    let token = tools::issue(step_id);
+    Ok(LoopLaunch { args: claude_args(kind, checks, &mcp), secrets: vec![(tools::TOKEN_VAR.to_owned(), token)] })
 }
 
-/// Plays a scripted step: writes and deletes its files, then reports what an agent would have.
-#[allow(clippy::too_many_arguments)]
-fn play(dir: &Path, script_path: &str, phase: u32, kind: StepKind, task: Option<&str>, attempt: u32, entry: &PhaseEntry) -> Event {
-    let step = std::fs::read_to_string(script_path)
-        .map_err(|e| format!("Couldn't read the script: {e}"))
-        .and_then(|t| script::parse(&t))
-        .and_then(|s| {
-            let name = if kind == StepKind::Plan { StepName::Plan } else { StepName::Build };
-            s.find(phase, name, task, attempt).cloned().ok_or_else(|| format!("The script has no {name:?} step for phase {phase}, {task:?}, attempt {attempt}."))
-        });
-    let step = match step {
-        Ok(s) => s,
-        Err(why) => return Event::StepFailed { why },
-    };
-    if let Some(why) = step.fail {
-        return Event::StepFailed { why };
-    }
-    for (path, text) in &step.write {
+enum Played {
+    Done(Event),
+    /// The script's step asked a blocking or timed question; it waits for the answer.
+    Asked,
+}
+
+fn script_step(script_path: &str, phase: u32, kind: StepKind, task: Option<&str>, attempt: u32) -> Result<ScriptStep, String> {
+    let text = std::fs::read_to_string(script_path).map_err(|e| format!("Couldn't read the script: {e}"))?;
+    let name = if kind == StepKind::Plan { StepName::Plan } else { StepName::Build };
+    script::parse(&text)?
+        .find(phase, name, task, attempt)
+        .cloned()
+        .ok_or_else(|| format!("The script has no {name:?} step for phase {phase}, {task:?}, attempt {attempt}."))
+}
+
+fn write_files(dir: &Path, files: &std::collections::BTreeMap<String, String>, answer: Option<&str>) -> Result<(), String> {
+    for (path, text) in files {
         let full = dir.join(path);
         if let Some(parent) = full.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        if let Err(e) = std::fs::write(&full, text) {
-            return Event::StepFailed { why: format!("The script couldn't write {path}: {e}") };
-        }
+        let text = answer.map_or_else(|| text.clone(), |a| text.replace("{answer}", a));
+        std::fs::write(&full, text).map_err(|e| format!("The script couldn't write {path}: {e}"))?;
+    }
+    Ok(())
+}
+
+/// Plays a scripted step: writes and deletes its files and asks its question, then reports what an
+/// agent would have.
+#[allow(clippy::too_many_arguments)]
+fn play(m: &SessionManager, run: &RunRow, entry: &PhaseEntry, step_id: u32, script_path: &str, kind: StepKind, task: Option<&str>, attempt: u32) -> Played {
+    let Ok(dir) = worktree(run) else { return Played::Done(Event::StepFailed { why: "The run's worktree is missing.".into() }) };
+    let step = match script_step(script_path, entry.number, kind, task, attempt) {
+        Ok(s) => s,
+        Err(why) => return Played::Done(Event::StepFailed { why }),
+    };
+    if let Some(why) = step.fail {
+        return Played::Done(Event::StepFailed { why });
+    }
+    if let Err(why) = write_files(dir, &step.write, None) {
+        return Played::Done(Event::StepFailed { why });
     }
     for path in &step.delete {
         let _ = std::fs::remove_file(dir.join(path));
     }
-    if kind == StepKind::Plan { Event::Planned(read_plan(dir, entry)) } else { Event::Built }
+    if let Some(args) = &step.ask {
+        match core_tools::parse_ask(args) {
+            Ok(a) if a.class == AskClass::LogOnly => {
+                let tag = questions::tag(entry.number, task);
+                let choice = a.default.clone().unwrap_or_default();
+                let _ = tools::log_assumption(dir, &questions::assumption_line(&tag, &format!("{} Chose: {choice}", a.question)));
+            }
+            Ok(a) => {
+                let deadline = (a.class == AskClass::Timed).then(|| now_ms() + i64::from(run.config.limits.timed_minutes) * 60_000);
+                let asked = db::insert_question(
+                    m.store(),
+                    &NewQuestion {
+                        run_id: run.id,
+                        step_id,
+                        phase: entry.number,
+                        task,
+                        class: a.class.as_str(),
+                        question: &a.question,
+                        options: &a.options,
+                        default_answer: a.default.as_deref(),
+                        deadline_at: deadline,
+                    },
+                );
+                return match asked {
+                    Ok(_) => Played::Asked,
+                    Err(why) => Played::Done(Event::StepFailed { why }),
+                };
+            }
+            Err(why) => return Played::Done(Event::StepFailed { why }),
+        }
+    }
+    Played::Done(if kind == StepKind::Plan { Event::Planned(read_plan(dir, entry)) } else { Event::Built })
 }
 
 /// The planner's tasks.md, with what's missing or wrong.
@@ -432,17 +490,109 @@ fn read_plan(dir: &Path, entry: &PhaseEntry) -> Result<Vec<files::TaskEntry>, Ve
     }
 }
 
-/// What happened to a running planner or builder step since the last pass, if anything.
+/// Timed questions past their deadline take their default, logged in assumptions.md.
+fn take_defaults(m: &SessionManager, run: &RunRow, step: &StepRow) -> Result<(), String> {
+    let now = now_ms();
+    for q in db::pending_for_step(m.store(), step.id)? {
+        if q.state != "open" || q.class != "timed" || q.deadline_at.is_none_or(|d| now < d) {
+            continue;
+        }
+        let default = q.default_answer.clone().unwrap_or_default();
+        if db::answer_question(m.store(), q.id, "defaulted", &default, false)? {
+            let line = format!("Nobody answered \"{}\" within {} minutes; took the default: {default}", q.question, run.config.limits.timed_minutes);
+            tools::log_assumption(worktree(run)?, &questions::assumption_line(&questions::tag(q.phase, q.task.as_deref()), &line))?;
+            notify(run.id);
+        }
+    }
+    Ok(())
+}
+
+/// The prompt that gives a step's answered questions back to its agent.
+fn answers_prompt(run: &RunRow, answered: &[QuestionRow]) -> String {
+    answered
+        .iter()
+        .map(|q| {
+            let by = if q.state == "defaulted" { AnsweredBy::Default } else { AnsweredBy::Matthew };
+            questions::answer_prompt(&q.question, q.answer.as_deref().unwrap_or(""), by, q.made_rule, run.config.limits.timed_minutes)
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
+/// Resumes the step's conversation with the answers as its first prompt: the reliable way to give a
+/// run its first instruction (L64, D96), with the step's flags and a new token. `Some(why)` when it
+/// couldn't.
+fn deliver(m: &Arc<SessionManager>, run: &RunRow, step: &StepRow, answered: &[QuestionRow]) -> Result<Option<String>, String> {
+    let store = m.store();
+    let Some(sid) = step.session_id else { return Ok(Some("The step has no session to answer.".into())) };
+    let prompt_id = crate::automations::stage(store, sid, "loop", &answers_prompt(run, answered))?;
+    m.set_loop_launch(sid, step_launch(m, step.id, step.kind, &run.config.checks)?);
+    let restarted = m.restart(sid);
+    let passed = crate::automations::passed(store, prompt_id);
+    match restarted {
+        Ok(s) if s.live && passed => {
+            db::set_step_session(store, step.id, sid, m.run_input(sid).map(|(r, _)| r))?;
+            db::set_delivered(store, &answered.iter().map(|q| q.id).collect::<Vec<_>>())?;
+            notify(run.id);
+            Ok(None)
+        }
+        Ok(s) => {
+            crate::automations::unstage(store, sid);
+            Ok(Some(s.note.unwrap_or_else(|| "The step's agent didn't start again with the answer.".into())))
+        }
+        Err(e) => {
+            crate::automations::unstage(store, sid);
+            Ok(Some(format!("Couldn't resume the step with the answer: {e}")))
+        }
+    }
+}
+
+/// What happened to a running planner or builder step since the last pass, if anything. A step
+/// that asked a question waits for it, with its agent closed; the answer resumes its conversation.
 fn poll(m: &Arc<SessionManager>, run: &RunRow, _phase: &PhaseRow, entry: &PhaseEntry, step: &StepRow) -> Result<Option<Event>, String> {
     let store = m.store();
     let failed = |why: &str| -> Result<Option<Event>, String> {
         db::end_step(store, step.id, StepState::Failed, Some(why), None)?;
+        db::cancel_questions(store, run.id, Some(step.id))?;
         Ok(Some(Event::StepFailed { why: why.to_owned() }))
     };
-    let Some(sid) = step.session_id else { return failed("The step has no session.") };
+    take_defaults(m, run, step)?;
+    let pending = db::pending_for_step(store, step.id)?;
+    let open = pending.iter().any(|q| q.state == "open");
+    let answered: Vec<QuestionRow> = pending.iter().filter(|q| q.state != "open").cloned().collect();
+
+    // A scripted step that asked: no session, so its answer goes into the script's files.
+    let Some(sid) = step.session_id else {
+        let Some(path) = run.config.script.as_deref() else { return failed("The step has no session.") };
+        if open || answered.is_empty() {
+            return if open { Ok(None) } else { failed("The step has no session.") };
+        }
+        let dir = worktree(run)?;
+        let script = match script_step(path, entry.number, step.kind, step.task.as_deref(), step.attempt) {
+            Ok(st) => st,
+            Err(e) => return failed(&e),
+        };
+        if let Err(e) = write_files(dir, &script.after_answer, answered.last().and_then(|q| q.answer.as_deref())) {
+            return failed(&e);
+        }
+        db::set_delivered(store, &answered.iter().map(|q| q.id).collect::<Vec<_>>())?;
+        db::end_step(store, step.id, StepState::Done, Some("Played from the run's script, with the answer."), Some("scripted"))?;
+        return Ok(Some(if step.kind == StepKind::Plan { Event::Planned(read_plan(dir, entry)) } else { Event::Built }));
+    };
+
     let Ok(s) = m.summary(sid) else { return failed("The step's session was deleted.") };
     let run_now = m.run_input(sid).map(|(r, _)| r);
-    if !s.live || run_now.is_none() || run_now != step.session_run_id {
+    let live = s.live && run_now.is_some() && run_now == step.session_run_id;
+    if !live {
+        if open {
+            return Ok(None);
+        }
+        if !answered.is_empty() {
+            return match deliver(m, run, step, &answered)? {
+                None => Ok(None),
+                Some(why) => failed(&why),
+            };
+        }
         return failed(s.note.as_deref().unwrap_or("The agent exited before its turn ended."));
     }
     let run_id = run_now.unwrap_or(0);
@@ -451,6 +601,19 @@ fn poll(m: &Arc<SessionManager>, run: &RunRow, _phase: &PhaseRow, entry: &PhaseE
         return Ok(None);
     }
     match s.activity {
+        Activity::Ready | Activity::NeedsAnswer if open || !answered.is_empty() => {
+            // It asked and ended its turn: its agent closes until the answer comes, and someone
+            // who typed into it keeps it. An answer already given goes back at once.
+            let _ = m.finish(sid, run_id, WAITING_NOTE);
+            notify(run.id);
+            if !open {
+                return match deliver(m, run, step, &answered)? {
+                    None => Ok(None),
+                    Some(why) => failed(&why),
+                };
+            }
+            Ok(None)
+        }
         Activity::Ready | Activity::NeedsAnswer => {
             let observed = s.observed.as_ref().map(|o| o.model.clone());
             // Someone who typed into the session took it over; it stays open for them.
@@ -594,6 +757,7 @@ fn stop_run(m: &Arc<SessionManager>, run: &RunRow, phase: &PhaseRow, stop: Optio
         run.worktree_path.as_deref().unwrap_or("?")
     );
     db::set_state(m.store(), run.id, RunState::Stopped, Some(&note))?;
+    db::cancel_questions(m.store(), run.id, None)?;
     notify(run.id);
     Ok(())
 }

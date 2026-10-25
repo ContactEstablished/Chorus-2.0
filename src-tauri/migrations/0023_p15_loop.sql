@@ -59,6 +59,8 @@ CREATE TABLE loop_steps (
     -- running | done | failed
     state TEXT NOT NULL,
     note TEXT,
+    -- What the agent said it did (its task_done call).
+    summary TEXT,
     started_at INTEGER NOT NULL,
     ended_at INTEGER
 );
@@ -77,3 +79,28 @@ CREATE TABLE loop_checks (
     output_tail TEXT NOT NULL,
     signature TEXT
 );
+
+-- Questions a step asked with Chorus's ask tool (slice 3). A blocking question waits for Matthew;
+-- a timed one takes its default at deadline_at. The answer goes back to the step's agent as its
+-- next prompt (delivered_at). log_only questions are logged in assumptions.md, not kept here.
+CREATE TABLE loop_questions (
+    id INTEGER PRIMARY KEY,
+    run_id INTEGER NOT NULL REFERENCES loop_runs(id) ON DELETE CASCADE,
+    step_id INTEGER NOT NULL REFERENCES loop_steps(id) ON DELETE CASCADE,
+    phase INTEGER NOT NULL,
+    task TEXT,
+    -- blocking | timed
+    class TEXT NOT NULL,
+    question TEXT NOT NULL,
+    options TEXT NOT NULL,
+    default_answer TEXT,
+    asked_at INTEGER NOT NULL,
+    deadline_at INTEGER,
+    -- open | answered | defaulted | cancelled
+    state TEXT NOT NULL,
+    answer TEXT,
+    made_rule INTEGER NOT NULL DEFAULT 0,
+    answered_at INTEGER,
+    delivered_at INTEGER
+);
+CREATE INDEX loop_questions_run ON loop_questions(run_id, state);

@@ -136,6 +136,7 @@ pub fn builder() -> Builder<tauri::Wry> {
             run_loop::loop_run_stop,
             run_loop::loop_run_approve,
             run_loop::loop_run_delete,
+            run_loop::loop_question_answer,
         ])
         .events(collect_events![
             app::BackendPulse,
