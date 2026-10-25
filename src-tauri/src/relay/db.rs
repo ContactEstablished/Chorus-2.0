@@ -66,6 +66,7 @@ pub struct NewOut<'a> {
     pub run_id: Option<u32>,
     pub question_id: Option<u32>,
     pub chat_id: Option<i64>,
+    /// The message this replies to; for an `edit`, the message whose text it replaces.
     pub reply_to: Option<i64>,
     pub html: &'a str,
     pub silent: bool,
@@ -139,6 +140,40 @@ pub fn finish_out(store: &Store, id: u32, error: Option<&str>) -> Result<(), Str
 pub fn retry_out(store: &Store, id: u32, error: &str) -> Result<(), String> {
     store
         .with(|c| c.execute("UPDATE relay_outbox SET attempts = attempts + 1, error = ?2 WHERE id = ?1", params![id, error]))
+        .map(|_| ())
+}
+
+/// The newest message of a kind queued for a run: its id, text, when it was queued and whether it went.
+pub fn last_out(store: &Store, run_id: u32, kind: &str) -> Result<Option<(u32, String, i64, bool)>, String> {
+    store.with(|c| {
+        c.query_row(
+            "SELECT id, html, created_at, sent_at IS NOT NULL FROM relay_outbox WHERE run_id = ?1 AND kind = ?2 ORDER BY id DESC LIMIT 1",
+            params![run_id, kind],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+        )
+        .optional()
+    })
+}
+
+/// Replaces a message's text before it goes, and takes its buttons away.
+pub fn rewrite_unsent(store: &Store, id: u32, html: &str) -> Result<(), String> {
+    store
+        .with(|c| c.execute("UPDATE relay_outbox SET html = ?2, buttons = '[]' WHERE id = ?1 AND sent_at IS NULL", params![id, html]))
+        .map(|_| ())
+}
+
+/// Where a run's messages of a kind went, since a time.
+pub fn sent_messages(store: &Store, run_id: u32, kind: &str, since: i64) -> Result<Vec<(i64, i64)>, String> {
+    store.with(|c| {
+        let mut stmt = c.prepare("SELECT chat_id, message_id FROM relay_messages WHERE run_id = ?1 AND kind = ?2 AND sent_at >= ?3")?;
+        stmt.query_map(params![run_id, kind, since], |r| Ok((r.get(0)?, r.get(1)?)))?.collect()
+    })
+}
+
+/// Marks a run's messages of a kind as settled (`<kind>-settled`), so they aren't edited again.
+pub fn settle_messages(store: &Store, run_id: u32, kind: &str) -> Result<(), String> {
+    store
+        .with(|c| c.execute("UPDATE relay_messages SET kind = ?2 || '-settled' WHERE run_id = ?1 AND kind = ?2", params![run_id, kind]))
         .map(|_| ())
 }
 

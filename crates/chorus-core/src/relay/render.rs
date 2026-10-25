@@ -127,19 +127,23 @@ pub fn stopped(run: &str, phase: u32, title: &str, why: &str, last_good: &str) -
     ))
 }
 
-/// MILESTONE: a phase passed at a milestone; the run waits for Matthew's review.
+/// MILESTONE: a phase passed at a milestone; the run waits for Matthew's review. After the last
+/// phase, approving finishes the run.
 pub fn milestone(run: &str, phase: u32, title: &str, tag_name: &str, more: bool) -> Outgoing {
-    let next = if more { "Review the run branch, then approve to start the next phase." } else { "It was the last phase in the roadmap." };
+    let next = if more { "Review the run branch, then approve to start the next phase." } else { "It was the last phase in the roadmap: review the run branch, then approve to finish the run." };
     let mut out = Outgoing::loud(format!(
         "<b>MILESTONE</b> · {}\nP{phase:02} · {} passed and is tagged {}. {next}",
         escape(&clip(run, 40)),
         escape(&clip(title, 80)),
         escape(tag_name)
     ));
-    if more {
-        out.buttons.push(("Approve".into(), Act::Approve));
-    }
+    out.buttons.push(("Approve".into(), Act::Approve));
     out
+}
+
+/// A milestone once settled, wherever that was: its text with the outcome, and no button.
+pub fn milestone_settled(html: &str, outcome: &str) -> String {
+    format!("{html}\n<b>{}</b>", escape(outcome))
 }
 
 /// PHASE DONE: silent, for the record.
@@ -187,6 +191,17 @@ pub fn status(runs: &[RunLine]) -> Outgoing {
         })
         .collect();
     Outgoing { html: lines.join("\n"), silent: true, buttons: Vec::new() }
+}
+
+/// What a plain message (not a command, not a reply) gets back: how to answer what is waiting.
+/// `open` is each open question as `[P01 T1] in <run>`.
+pub fn answer_hint(open: &[String]) -> String {
+    const HOW: &str = "swipe it left, or tap it and choose Reply";
+    match open {
+        [] => "Nothing is waiting for an answer. Send /help to see what you can send.".to_owned(),
+        [one] => format!("To answer {}, reply to its message: {HOW}.", escape(&clip(one, 120))),
+        many => format!("{} questions are waiting. Reply to the one you're answering: {HOW}.", many.len()),
+    }
 }
 
 pub const HELP: &str = "This bot relays Chorus's loop: questions that need you, and when a run stops, reaches a milestone or finishes. Tap an option to answer, or reply to a question in your own words.\n/status what the loop is doing\n/pause and /resume a run\n/approve the milestone a run waits on\n/stop a run";
@@ -257,8 +272,13 @@ mod tests {
         assert!(!p.html.contains("src/app") && !p.html.contains("C:\\") && p.html.contains("error TS2322"), "{}", p.html);
         let m = milestone("F1", 1, "Sum", "phase-01", true);
         assert_eq!(m.buttons, vec![("Approve".to_owned(), Act::Approve)]);
-        assert!(milestone("F1", 3, "Help", "phase-03", false).buttons.is_empty());
+        let last = milestone("F1", 3, "Help", "phase-03", false);
+        assert!(last.html.contains("approve to finish the run") && last.buttons.len() == 1, "{}", last.html);
+        assert_eq!(milestone_settled(&m.html, "Approved."), format!("{}\n<b>Approved.</b>", m.html));
         assert!(phase_done("F1", 2, "Product", "phase-02").silent);
+        assert!(answer_hint(&[]).starts_with("Nothing is waiting"));
+        assert_eq!(answer_hint(&["[P01 T1] in F1 <x>".into()]), "To answer [P01 T1] in F1 &lt;x&gt;, reply to its message: swipe it left, or tap it and choose Reply.");
+        assert!(answer_hint(&["a".into(), "b".into()]).starts_with("2 questions are waiting."));
         let st = status(&[RunLine { name: "F1".into(), state: "running".into(), phase: Some((2, "Product".into())), step: Some("T1 build".into()), open_questions: 1 }]);
         assert_eq!(st.html, "<b>F1</b>: running, P02 · Product, T1 build. 1 question waiting");
     }

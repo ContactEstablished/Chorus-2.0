@@ -718,7 +718,7 @@ fn after_pass(m: &Arc<SessionManager>, run: &RunRow, phases: &[PhaseRow], plan: 
         let since = phases.iter().filter(|p| p.number > run.reviewed_phase && p.number < last.number && p.progress.stage == Stage::Passed).count() as u32;
         let high = entry.is_some_and(|e| e.risk == Risk::High);
         if engine::ends_milestone(last.number, high, since, run.config.milestone_every, false) {
-            let then = if next.is_some() { "then Approve to start the next phase" } else { "it was the last phase in the roadmap" };
+            let then = if next.is_some() { "then Approve to start the next phase" } else { "it was the last phase in the roadmap, so Approve finishes the run" };
             let note = format!("P{:02} · {} passed and is tagged {tag}. Review the {} branch; {then}.", last.number, last.title, run.run_branch);
             db::set_state(m.store(), run.id, RunState::Waiting, Some(&note))?;
             notify(run.id);

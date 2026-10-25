@@ -127,6 +127,28 @@ pub fn milestone(m: &SessionManager, run_id: u32, run: &str, phase: u32, title: 
     }
 }
 
+/// Takes the Approve button off the milestone a run waited on once it is approved or the run is
+/// stopped, from the phone or the desk, and says which.
+pub fn milestone_settled(m: &SessionManager, run_id: u32, outcome: &str) {
+    if !listening(m) {
+        return;
+    }
+    let store = m.store();
+    let Ok(Some((id, html, queued_at, sent))) = db::last_out(store, run_id, "milestone") else { return };
+    let html = scrub(m, &render::milestone_settled(&html, outcome));
+    if !sent {
+        let _ = db::rewrite_unsent(store, id, &html);
+        return;
+    }
+    for (chat, message) in db::sent_messages(store, run_id, "milestone", queued_at).unwrap_or_default() {
+        let _ = db::enqueue(
+            store,
+            &db::NewOut { kind: "edit", run_id: Some(run_id), question_id: None, chat_id: Some(chat), reply_to: Some(message), html: &html, silent: true, buttons: &[] },
+        );
+    }
+    let _ = db::settle_messages(store, run_id, "milestone");
+}
+
 pub fn phase_done(m: &SessionManager, run_id: u32, run: &str, phase: u32, title: &str, tag: &str) {
     if listening(m) {
         let _ = enqueue(m, "phase-done", Some(run_id), None, &render::phase_done(run, phase, title, tag));
@@ -189,6 +211,13 @@ fn send_one(m: &SessionManager, token: &str, out: &db::Out, users: &[db::User], 
     if out.kind == "settled" {
         let qid = out.question_id.unwrap_or(0);
         for (chat, message) in db::messages_of_question(m.store(), qid).unwrap_or_default() {
+            pace(buckets, chat);
+            client::edit(token, chat, message, &out.html)?;
+        }
+        return Ok(());
+    }
+    if out.kind == "edit" {
+        if let (Some(chat), Some(message)) = (out.chat_id, out.reply_to) {
             pace(buckets, chat);
             client::edit(token, chat, message, &out.html)?;
         }

@@ -530,6 +530,15 @@ pub fn set_delivered(store: &Store, ids: &[u32]) -> Result<(), String> {
     })
 }
 
+/// Every open question in every run, oldest first: its run's name, phase and task.
+pub fn open_questions(store: &Store) -> Result<Vec<(String, u32, Option<String>)>, String> {
+    store.with(|c| {
+        let mut stmt =
+            c.prepare("SELECT r.name, q.phase, q.task FROM loop_questions q JOIN loop_runs r ON r.id = q.run_id WHERE q.state = 'open' ORDER BY q.id")?;
+        stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect()
+    })
+}
+
 /// A run's open questions, or one step's.
 pub fn open_question_ids(store: &Store, run_id: u32, step_id: Option<u32>) -> Result<Vec<u32>, String> {
     store.with(|c| {

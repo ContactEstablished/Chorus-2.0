@@ -92,6 +92,10 @@ fn pairing_questions_and_replies_without_the_network() {
     assert_eq!((b.act, b.question_id), (Act::Answer { text: "cursor".into(), rule: false }, Some(q)));
     assert!(db::take_button(m.store(), &card.buttons[1].1).unwrap().is_none(), "a button works once");
 
+    // A plain message isn't taken as the answer: the hint names the open question.
+    inbound::message(&m, msg(7, 7, "offset"));
+    assert!(outbox(&m).last().unwrap().html.starts_with("To answer [P01 T1] in F1, reply to its message"), "{}", outbox(&m).last().unwrap().html);
+
     // Once sent, a reply to it answers the question, and the phone's copy is queued to change.
     db::record_message(m.store(), 7, 500, "question", Some(run), Some(q)).unwrap();
     inbound::message(&m, Message { reply_to: Some(500), ..msg(7, 7, "offset, please") });
@@ -107,6 +111,24 @@ fn pairing_questions_and_replies_without_the_network() {
     let before = outbox(&m).len();
     inbound::message(&m, Message { forwarded: true, ..msg(7, 7, "/stop") });
     assert_eq!(outbox(&m).len(), before);
+
+    // A milestone's Approve button goes once it is settled, and the message says how, once.
+    outbound::milestone(&m, run, "F1", 1, "Sum", "phase-01", true);
+    let ms = outbox(&m).into_iter().find(|o| o.kind == "milestone").unwrap();
+    assert_eq!(ms.buttons.len(), 1);
+    db::finish_out(m.store(), ms.id, None).unwrap();
+    db::record_message(m.store(), 7, 501, "milestone", Some(run), None).unwrap();
+    outbound::milestone_settled(&m, run, "Approved.");
+    let edit = outbox(&m).into_iter().find(|o| o.kind == "edit").unwrap();
+    assert_eq!((edit.chat_id, edit.reply_to, edit.buttons.len()), (Some(7), Some(501), 0));
+    assert!(edit.html.starts_with("<b>MILESTONE</b>") && edit.html.ends_with("<b>Approved.</b>"), "{}", edit.html);
+    outbound::milestone_settled(&m, run, "Stopped.");
+    assert_eq!(outbox(&m).iter().filter(|o| o.kind == "edit").count(), 1, "settled once");
+    // One settled before it was sent goes without its button.
+    outbound::milestone(&m, run, "F1", 3, "Help", "phase-03", false);
+    outbound::milestone_settled(&m, run, "Approved.");
+    let last = outbox(&m).into_iter().rfind(|o| o.kind == "milestone").unwrap();
+    assert!(last.buttons.is_empty() && last.html.ends_with("<b>Approved.</b>"), "{}", last.html);
 
     state().token = None;
     let _ = std::fs::remove_dir_all(&dir);

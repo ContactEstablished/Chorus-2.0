@@ -543,6 +543,9 @@ fn stop(m: &SessionManager, id: u32) -> Result<(), String> {
         }
     }
     db::set_state(m.store(), id, RunState::Stopped, Some("Stopped by you. The worktree keeps what the last step left."))?;
+    if run.state == RunState::Waiting {
+        crate::relay::outbound::milestone_settled(m, id, "Stopped.");
+    }
     worker::cancel_questions(m, id, None)?;
     worker::notify(id);
     Ok(())
@@ -565,7 +568,9 @@ fn approve(m: &SessionManager, id: u32) -> Result<(), String> {
     }
     let last = db::phases(m.store(), id)?.pop().map_or(0, |p| p.number);
     db::set_reviewed(m.store(), id, last)?;
-    db::set_state(m.store(), id, RunState::Running, None)
+    db::set_state(m.store(), id, RunState::Running, None)?;
+    crate::relay::outbound::milestone_settled(m, id, "Approved.");
+    Ok(())
 }
 
 #[tauri::command]
@@ -608,6 +613,15 @@ pub fn answer_from_phone(m: &Arc<SessionManager>, question_id: u32, answer: &str
     let run_id = answer_question(m, question_id, answer, make_rule)?;
     worker::notify(run_id);
     Ok(chorus_core::run_loop::questions::tag(q.phase, q.task.as_deref()))
+}
+
+/// Every open question as `[P01 T1] in <run>`, for the phone's hint on how to answer.
+pub fn open_question_tags(m: &SessionManager) -> Vec<String> {
+    db::open_questions(m.store())
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(run, phase, task)| format!("{} in {run}", chorus_core::run_loop::questions::tag(phase, task.as_deref())))
+        .collect()
 }
 
 /// Each run's line for the phone's /status, newest first.
@@ -670,7 +684,7 @@ pub fn phone_command_for(m: &Arc<SessionManager>, run_id: u32, cmd: &chorus_core
         Command::Resume => Ok(format!("{name} isn't paused.")),
         Command::Approve if run.state == RunState::Waiting => approve(m, run_id).map(|()| {
             worker::ensure_worker(m, run_id);
-            format!("Approved: {name} goes on to its next phase.")
+            format!("Approved {name}.")
         }),
         Command::Approve => Ok(format!("{name} isn't waiting for your review.")),
         Command::Stop(phase) => stop(m, run_id).map(|()| match phase {

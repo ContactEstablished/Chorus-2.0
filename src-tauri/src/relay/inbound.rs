@@ -126,7 +126,7 @@ pub(super) fn message(m: &Arc<SessionManager>, msg: Message) {
         Some(Command::Status) => render::status(&crate::run_loop::status_lines(m)).html,
         Some(Command::Unknown(c)) => format!("There is no /{} command. Send /help.", render::escape(&c)),
         Some(c) => render::escape(&crate::run_loop::phone_command(m, &c)),
-        None => "Reply to a question to answer it, or send /help.".to_owned(),
+        None => render::answer_hint(&crate::run_loop::open_question_tags(m)),
     };
     db::audit(store, "command", Some(msg.from_id), "");
     outbound::reply(m, msg.chat_id, Some(msg.message_id), &reply);
