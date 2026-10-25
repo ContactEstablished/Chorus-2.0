@@ -477,3 +477,34 @@ Feed dispositions back to the model, but do not promise perfect recognition of e
 Redact evidence before clipping, otherwise a newly known secret across the boundary can leak a
 prefix. Record provider usage even if summary validation fails, and count unavailable usage as
 unknown. HTTP 429 is a visible provider limit, not a reason to replay a paid attempt automatically.
+
+**L61 — Claude Code's transcript says which model answered.** On 2.1.308 every assistant reply
+line records `message.model` (the model that ran), `requestedModel` and `effort`; a subagent's lines
+say `isSidechain: true`, and `<synthetic>` lines are not replies. Read the model from the newest
+non-sidechain reply rather than trusting the alias it was launched with: `opus` resolves to a dated
+model id, and a family alias should match any model of that family.
+
+**L62 — Claude Code turns on mouse tracking, so pointer movement reaches the PTY.** 2.1.308 enables
+any-motion tracking (`?1003h`) with SGR reports (`?1006h`). xterm.js then sends `ESC [ < b;x;y M/m`
+whenever the pointer moves over the terminal, without a click. Treat mouse reports, like focus and
+cursor reports, as terminal protocol, not as typing; counting them as input kept a finished
+automation's agent open and marked Raw as edited.
+
+**L63 — Tauri 2.12 checks every command once the app manifest lists them.** After
+`AppManifest::commands` is set, each app command is checked against the calling window's
+capabilities, the main window's included. A command's permission is `allow-<name with hyphens>`.
+Debug builds say where a refused command is allowed; release builds say only "Command X not allowed
+by ACL", so test each window's commands in a debug build.
+
+**L64 — Claude Code takes a first prompt on the command line, also when resuming.** 2.1.308's usage
+is `claude [options] [command] [prompt]`; put the prompt after `--` so text starting with "-" isn't
+read as an option, and refuse a single word, which could be read as a subcommand. With
+`--resume <id>` the prompt becomes the next turn of that conversation. There is no structured ready
+signal before a first turn, so this is the reliable way to give a starting or restarted run its
+first instruction; typing into a terminal that is still starting is not.
+
+**L65 — A small narrator model will write code if it is allowed to.** Asked to offer an agent's
+proposed fix, Gemini 2.5 Flash Lite once wrote its own diff, against lines the file didn't have.
+Tell it never to write code, diffs or replacement text and to ask the agent to make the change it
+proposed instead; the agent has the files. The same model also sometimes marks a review-only turn
+finished, so treat its suggestions as usually present, not guaranteed.

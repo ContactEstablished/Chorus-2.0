@@ -151,15 +151,9 @@ the review instance: Tip script review #10, closed by its automation, resumed wi
 you proposed for the tip calculation in tip.py." as its first prompt (recorded once, draft emptied),
 and Opus asked to change `/ 10` to `/ 100` in tip.py, a line the prompt didn't contain.
 
-**Proposed lessons (to number), Claude Code 2.1.308:** every reply line in its transcript records
-`message.model`, `requestedModel` and `effort` (a subagent's lines say `isSidechain: true`); and
-it turns on any-motion mouse tracking (`?1003h` with SGR `?1006h`), so a terminal showing it sends
-mouse reports whenever the pointer moves over it.
-
-**Proposed lesson (to number):** in Tauri 2.12, once `AppManifest::commands` is set, every app
-command is checked against the calling window's capabilities, the main window's included. Each
-command's permission is `allow-<name with hyphens>`. Debug builds say where a refused command is
-allowed; release builds say only "Command X not allowed by ACL".
+**Lessons recorded:** [L61 to L65](LESSONS.md): Claude Code's transcript model fields, its mouse
+tracking, Tauri's command checks once the manifest lists them, a first prompt on Claude Code's
+command line (also when resuming), and the narrator writing code if allowed to.
 
 ## Checked with the provided access
 
