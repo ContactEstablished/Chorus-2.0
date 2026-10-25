@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 // P15: the scripted steps for F1's first phase, for the loop's scripted worker (debug builds).
 // The first build's sum subtracts, so the checks fail; the fix adds. With --question, the first
-// build instead asks a blocking question and builds correctly once it is answered.
-// Usage: make-f1-script.mjs <file> [--question]
+// build instead asks a blocking question and builds correctly once it is answered. --phone adds
+// phases 2 and 3 (see below).
+// Usage: make-f1-script.mjs <file> [--question] [--phone]
 import { writeFileSync } from 'node:fs'
 
 const dir = '.chorus/run/phases/01-sum-command'
@@ -72,5 +73,58 @@ const steps = [
         { phase: 1, step: 'build', task: 'T1', attempt: 1, write: { 'src/cli.ts': cli('+') } },
       ]),
 ]
+
+// With --phone (and --question), all three phases, for the relay: P01's blocking question, P02's
+// timed one, then P03 finishes the run.
+const fn = (name, op) => cli(op).split('\n\n').find((s) => s.startsWith('export function sum')).replaceAll('sum', name) + '\n\n'
+const withProduct = cli('+')
+  .replace('export function run(', `${fn('product', '*')}export function run(`)
+  .replace("  if (command === 'sum') return sum(rest)\n", "  if (command === 'sum') return sum(rest)\n  if (command === 'product') return product(rest)\n")
+const helpFn =
+  "export function help(): string {\n  return ['sum <a> <b>      prints a + b', 'product <a> <b>  prints a * b', 'help             lists the commands', '--version        prints the version'].join('\\n')\n}\n\n"
+const withHelp = withProduct
+  .replace('export function run(', `${helpFn}export function run(`)
+  .replace('  return `unknown command: ${command ?? \'(none)\'}`', "  if (command === 'help') return help()\n  return `unknown command: ${command ?? '(none)'} (try: help)`")
+const helpTest = `import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import { run } from '../src/cli.ts'
+
+test('help lists every command', () => {
+  for (const c of ['sum <a> <b>', 'product <a> <b>', 'help', '--version']) assert.ok(run(['help']).includes(c), c)
+})
+
+test('an unknown command points to help', () => {
+  assert.equal(run(['nope']), 'unknown command: nope (try: help)')
+})
+`
+const plan = (n, slug, title, accept, claims) => ({
+  phase: n,
+  step: 'plan',
+  write: {
+    [`.chorus/run/phases/${slug}/spec.md`]: `# P0${n} · ${title}\n\n## Acceptance\n${accept.map((a) => `- ${a}`).join('\n')}\n`,
+    [`.chorus/run/phases/${slug}/tasks.md`]: `# Tasks: P0${n} · ${title}\n\n## T1 · ${title}\n- Depends on: none\n- Claims: ${claims}\n${accept.map((a) => `- Accept: ${a}`).join('\n')}\n- Status: pending\n`,
+  },
+})
+if (process.argv.includes('--phone')) {
+  steps.push(
+    plan(2, '02-product-command', 'Product command', ['`product 2 3` prints 6', '`product 2` prints the usage line'], 'src/cli.ts, test/product.test.ts'),
+    {
+      phase: 2,
+      step: 'build',
+      task: 'T1',
+      attempt: 0,
+      write: { 'test/product.test.ts': test.replaceAll('sum', 'product').replace('adds', 'multiplies').replace("'5'", "'6'") },
+      ask: {
+        class: 'timed',
+        question: 'For product with a missing argument, may I print "product needs two numbers: product <a> <b>", the same shape as sum?',
+        options: ['Yes, like sum', 'Use "product: missing argument"'],
+        default: 'Yes, like sum',
+      },
+      after_answer: { 'src/cli.ts': withProduct },
+    },
+    plan(3, '03-help', 'Help', ['`help` lists every command', 'an unknown command points to help'], 'src/cli.ts, test/help.test.ts'),
+    { phase: 3, step: 'build', task: 'T1', attempt: 0, write: { 'src/cli.ts': withHelp, 'test/help.test.ts': helpTest } },
+  )
+}
 writeFileSync(process.argv[2], JSON.stringify({ steps }, null, 2) + '\n')
 console.log(process.argv[2])
