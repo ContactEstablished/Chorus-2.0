@@ -146,6 +146,11 @@ spike doc); codex-cli 0.163.0; opencode 2.1.4; Node 24.15; git on PATH.
 
 ## 9. Questions for Matthew
 
+**Answered 2026-10-25 (D99):** 1, yes, and the spec's last resort through OpenRouter is withdrawn: never
+GPT or Claude through OpenRouter; an OpenRouter last resort is one of `~z-ai/glm-flash-latest`,
+`~deepseek/deepseek-v4-flash-latest` or `~moonshotai/kimi-latest`. 2, yes. 3, yes, as its own fix
+after slice 3.
+
 1. **Claude and GPT models through OpenRouter in loop roles.** You said they should always use your
    subscriptions. Is that only for testing (my reading), or should Settings → Models refuse an
    OpenRouter route for Claude and GPT models? *Recommendation: refuse it in the loop's roles, with the

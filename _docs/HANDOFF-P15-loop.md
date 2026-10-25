@@ -205,7 +205,11 @@ scenario is about a model.
 
 ## 9. Decisions for Matthew (ask before building past them)
 
-**Answered 2026-10-25 (D98):** 1 to 8 as recommended (1 still depends on S1). 9: OpenRouter spend is
+**Answered 2026-10-25 (D98, D99):** D99 adds that GPT and Claude models never run through OpenRouter;
+an OpenRouter last resort is `~z-ai/glm-flash-latest`, `~deepseek/deepseek-v4-flash-latest` or
+`~moonshotai/kimi-latest`.
+
+**First answers (D98):** 1 to 8 as recommended (1 still depends on S1). 9: OpenRouter spend is
 capped at $2 per run and $6 for all of P15's testing, and Claude and ChatGPT models run only on
 Matthew's own subscriptions, through the Claude Code and Codex sign-ins, never through an OpenRouter
 or API key. 10: the spec stays local. 11 happens at S4.
