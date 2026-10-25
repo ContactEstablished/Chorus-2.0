@@ -9,15 +9,31 @@ use chorus_core::relay::render::{self, Act};
 use chorus_core::relay::{self, Admit, Callback, Command, Incoming, Message, PairOutcome};
 
 use super::client::{self, Failure};
-use super::{Conn, active_token, db, outbound, set_conn, state};
+use super::db::About;
+use super::{Conn, active_token, db, outbound, sessions, set_conn, state};
 use crate::sessions::SessionManager;
 use crate::store::now_ms;
 
-/// A command older than this isn't acted on: it may have waited while Chorus was closed.
+/// A command or prompt older than this isn't acted on: it may have waited while Chorus was closed.
 const BACKLOG_SECS: i64 = 120;
+const STALE_PROMPT: &str = "That message waited too long to arrive, so it wasn't sent. Send it again.";
+const NO_TARGET: &str = "To send a session a prompt, reply to one of its messages, or pick it with /use (see /sessions).";
+
+/// `/status`: the loop's runs, and how many sessions need you.
+fn status(m: &SessionManager) -> String {
+    let mut html = render::status(&crate::run_loop::status_lines(m)).html;
+    let waiting = sessions::lines(m).iter().filter(|l| l.attention.needs_you()).count();
+    if waiting > 0 {
+        let s = if waiting == 1 { "session needs" } else { "sessions need" };
+        html.push_str(&format!("{}{waiting} {s} you: /sessions lists them.", if html.is_empty() { "" } else { "\n\n" }));
+    }
+    html
+}
 
 pub fn poll(m: &Arc<SessionManager>) {
     let mut backoff = 1u64;
+    // The bot's command menu, set once per start so a newer Chorus's commands show on the phone.
+    let mut menu_set = false;
     while !m.is_quitting() {
         let Some(token) = active_token(m) else {
             if state().token.is_none() {
@@ -31,6 +47,9 @@ pub fn poll(m: &Arc<SessionManager>) {
             Ok(updates) => {
                 set_conn(Conn::Connected);
                 backoff = 1;
+                if !menu_set {
+                    menu_set = client::set_commands(&token).is_ok();
+                }
                 for (id, incoming) in updates {
                     handle(m, &token, incoming);
                     let _ = db::set_offset(m.store(), id + 1);
@@ -108,25 +127,39 @@ pub(super) fn message(m: &Arc<SessionManager>, msg: Message) {
     let stale = now_ms() / 1000 - msg.date > BACKLOG_SECS;
     if let Some(to) = msg.reply_to {
         let text = relay::sanitize(&msg.text);
-        let reply = match db::question_of_message(store, msg.chat_id, to) {
-            Ok(Some(q)) if !text.is_empty() => match crate::run_loop::answer_from_phone(m, q, &text, false) {
+        // A reply answers the loop question it replies to, or goes to the session it replies about.
+        let reply = match db::message_about(store, msg.chat_id, to).ok().flatten() {
+            _ if text.is_empty() => "Write it as text.".to_owned(),
+            Some((_, About { question_id: Some(q), .. })) => match crate::run_loop::answer_from_phone(m, q, &text, false) {
                 Ok(tag) => format!("Answered {tag}: {}", render::escape(&render::clip(&text, 200))),
                 Err(e) => render::escape(&e),
             },
-            Ok(Some(_)) => "Write the answer as text.".to_owned(),
-            _ => "That message isn't a question I can answer. Reply to a question to answer it.".to_owned(),
+            Some((_, About { session_id: Some(_), .. })) if stale => STALE_PROMPT.to_owned(),
+            Some((kind, About { session_id: Some(session), ask_id, .. })) => sessions::reply(m, session, &kind, ask_id, &text),
+            _ => "That message isn't one I can answer. Reply to a question, or to a session's message.".to_owned(),
         };
-        db::audit(store, "answer-reply", Some(msg.from_id), "");
+        db::audit(store, "reply", Some(msg.from_id), "");
         outbound::reply(m, msg.chat_id, Some(msg.message_id), &reply);
         return;
     }
     let reply = match command {
         Some(_) if stale => "That command waited too long to arrive, so it wasn't acted on. Send it again.".to_owned(),
         Some(Command::Help | Command::Start) => render::escape(render::HELP),
-        Some(Command::Status) => render::status(&crate::run_loop::status_lines(m)).html,
+        Some(Command::Status) => status(m),
+        Some(Command::Sessions) => sessions::list_command(m),
+        Some(Command::Use(arg)) => sessions::use_command(m, &arg),
+        Some(Command::Digest) => sessions::digest(m).html,
         Some(Command::Unknown(c)) => format!("There is no /{} command. Send /help.", render::escape(&c)),
         Some(c) => render::escape(&crate::run_loop::phone_command(m, &c)),
-        None => render::answer_hint(&crate::run_loop::open_question_tags(m)),
+        None if stale => STALE_PROMPT.to_owned(),
+        // A plain message is a prompt to the `/use` session, if there is one.
+        None => match sessions::target(m) {
+            Some(session) => sessions::prompt(m, session, &relay::sanitize(&msg.text)),
+            None => {
+                let open = crate::run_loop::open_question_tags(m);
+                if open.is_empty() { NO_TARGET.to_owned() } else { render::answer_hint(&open) }
+            }
+        },
     };
     db::audit(store, "command", Some(msg.from_id), "");
     outbound::reply(m, msg.chat_id, Some(msg.message_id), &reply);
@@ -149,6 +182,7 @@ fn callback(m: &Arc<SessionManager>, token: &str, cb: &Callback) {
             Err(e) => e,
         },
         (Act::Approve, Some(run), _) => crate::run_loop::phone_command_for(m, run, &Command::Approve),
+        (act @ (Act::Allow { .. } | Act::Deny { .. } | Act::Choose { .. }), _, _) => sessions::press(m, &act),
         _ => "That button no longer does anything.".to_owned(),
     };
     db::audit(store, "button", Some(cb.from_id), "");

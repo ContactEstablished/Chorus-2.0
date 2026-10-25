@@ -8,6 +8,7 @@ mod client;
 pub mod db;
 mod inbound;
 pub mod outbound;
+pub mod sessions;
 #[cfg(test)]
 mod tests;
 
@@ -95,10 +96,31 @@ pub struct RelayView {
     pub pairing: Option<PairingCode>,
     /// Messages waiting to go.
     pub queued: u32,
+    /// The daily digest's local time, "HH:MM", if there is one.
+    pub digest_at: Option<String>,
+    /// The session plain messages from the phone go to (`/use`).
+    pub target: Option<String>,
+    /// Each project not archived, and whether it sends the phone full text.
+    pub projects: Vec<RelayProject>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RelayProject {
+    pub id: u32,
+    pub name: String,
+    pub full_text: bool,
 }
 
 fn view(m: &SessionManager) -> Result<RelayView, String> {
     let cfg = db::config(m.store())?;
+    let full = db::full_text_projects(m.store())?;
+    let projects = crate::store::projects::list(m.store())?
+        .into_iter()
+        .filter(|p| p.state != chorus_core::projects::ProjectState::Archived)
+        .map(|p| RelayProject { full_text: full.contains(&p.id), id: p.id, name: p.name })
+        .collect();
+    let target = sessions::target(m).and_then(|id| m.summary(id).ok()).map(|s| s.name);
     let s = state();
     let (name, note) = match &s.conn {
         Conn::Off => ("off", Some("The relay is off.".to_owned())),
@@ -121,6 +143,9 @@ fn view(m: &SessionManager) -> Result<RelayView, String> {
             .collect(),
         pairing: s.pairing.as_ref().filter(|p| p.expires_ms > now_ms()).map(|p| PairingCode { code: p.code.clone(), expires_at_secs: secs(p.expires_ms) }),
         queued: db::pending_count(m.store()),
+        digest_at: cfg.digest_at,
+        target,
+        projects,
     })
 }
 
@@ -136,7 +161,7 @@ pub fn start(m: &Arc<SessionManager>) -> Result<(), String> {
     std::thread::Builder::new().name("relay-poll".into()).spawn(move || inbound::poll(&poller)).map_err(|e| e.to_string())?;
     let sender = m.clone();
     std::thread::Builder::new().name("relay-send".into()).spawn(move || outbound::send_loop(&sender)).map_err(|e| e.to_string())?;
-    Ok(())
+    sessions::start(m)
 }
 
 #[tauri::command]
@@ -247,6 +272,37 @@ pub fn relay_test(state: Manager<'_>) -> Result<RelayView, String> {
     if db::users(state.store())?.is_empty() {
         return Err("Pair a phone first.".into());
     }
-    outbound::enqueue_text(&state, "test", None, "Chorus is connected. Loop questions, stops and milestones will come here. Send /help to see what you can send.", false)?;
+    outbound::enqueue_text(
+        &state,
+        "test",
+        db::About::default(),
+        "Chorus is connected. Loop questions, stops and milestones, and sessions that need you, will come here. Send /help to see what you can send.",
+        false,
+    )?;
+    view(&state)
+}
+
+/// The daily digest's local time ("HH:MM"), or none for no digest.
+#[tauri::command]
+#[specta::specta]
+pub fn relay_set_digest(state: Manager<'_>, at: Option<String>) -> Result<RelayView, String> {
+    let at = at.map(|a| a.trim().to_owned()).filter(|a| !a.is_empty());
+    if let Some(a) = &at
+        && chorus_core::relay::sessions::parse_time(a).is_none()
+    {
+        return Err("Give the time as HH:MM, on a 24-hour clock.".into());
+    }
+    db::set_digest_at(state.store(), at.as_deref())?;
+    view(&state)
+}
+
+/// Whether a project's sessions send the phone full text, or status only (D101).
+#[tauri::command]
+#[specta::specta]
+pub fn relay_set_full_text(state: Manager<'_>, project_id: u32, full: bool) -> Result<RelayView, String> {
+    if crate::store::projects::get(state.store(), project_id)?.is_none() {
+        return Err("That project no longer exists.".into());
+    }
+    db::set_full_text(state.store(), project_id, full)?;
     view(&state)
 }

@@ -153,7 +153,7 @@ fn row(store: &Store, id: u32) -> Result<Option<AutoRow>, String> {
 
 /// The local offset, in minutes east of UTC, at a UTC instant, from SQLite's `localtime`, which
 /// follows the system's time zone and its daylight-saving rules.
-fn offset_at(store: &Store, utc_ms: i64) -> i32 {
+pub(crate) fn offset_at(store: &Store, utc_ms: i64) -> i32 {
     store
         .with(|c| {
             c.query_row(

@@ -139,4 +139,5 @@ export type {
   TaskProgress as LoopTask,
   RelayView,
   RelayUser,
+  RelayProject,
 } from './bindings'

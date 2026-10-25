@@ -91,6 +91,8 @@ pub fn run() {
                 Box::new(move |session| {
                     let _ = SessionUpdated { session: session.clone() }.emit(&handle);
                     watching.observe(&session);
+                    // P15 slice 4: the phone relay's own subscription (it only queues the summary).
+                    relay::sessions::observe(&session);
                 }),
             );
             attention.bind(&manager);

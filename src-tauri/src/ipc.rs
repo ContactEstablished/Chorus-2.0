@@ -144,6 +144,8 @@ pub fn builder() -> Builder<tauri::Wry> {
             relay::relay_pair_start,
             relay::relay_unpair,
             relay::relay_test,
+            relay::relay_set_digest,
+            relay::relay_set_full_text,
         ])
         .events(collect_events![
             app::BackendPulse,

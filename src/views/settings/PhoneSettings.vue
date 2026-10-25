@@ -61,6 +61,20 @@ const toggle = () => run(() => unwrap(commands.relaySetEnabled(!relay.value?.ena
 const unpair = (id: string) => run(() => unwrap(commands.relayUnpair(id)), 'Unpaired.')
 const pair = () => run(() => unwrap(commands.relayPairStart()))
 const test = () => run(() => unwrap(commands.relayTest()), 'Test message queued.')
+const setFullText = (id: number, full: boolean) => run(() => unwrap(commands.relaySetFullText(id, full)))
+
+// The digest's time is edited here and saved on Save, so a half-typed time is never sent.
+const digest = ref('')
+const digestEdited = ref(false)
+const digestShown = computed(() => (digestEdited.value ? digest.value : (relay.value?.digestAt ?? '')))
+function editDigest(e: Event): void {
+  digest.value = (e.target as HTMLInputElement).value
+  digestEdited.value = true
+}
+async function saveDigest(at: string | null): Promise<void> {
+  await run(() => unwrap(commands.relaySetDigest(at)), at ? `The digest comes at ${at} each day while Chorus runs.` : 'No daily digest.')
+  if (!error.value) digestEdited.value = false
+}
 
 const STATE_TEXT: Record<string, string> = {
   off: 'Off',
@@ -84,11 +98,12 @@ const minutesLeft = computed(() => {
     <h2>Phone</h2>
     <p>
       A Telegram bot of your own carries the loop's questions to your phone, with buttons to answer, and tells you when a run stops, reaches a
-      milestone or finishes. Chorus reads the bot by long polling: nothing listens on a port.
+      milestone or finishes. It also tells you when a session needs you, and takes prompts for sessions. Chorus reads the bot by long polling:
+      nothing listens on a port.
     </p>
     <p class="muted">
-      Bot chats aren't end-to-end encrypted. Messages carry question text, options and short titles, never code, diffs, files or paths, and a run
-      can be set to send no question text at all.
+      Bot chats aren't end-to-end encrypted. Loop messages carry question text, options and short titles, never code, diffs, files or paths, and a
+      run can be set to send no question text at all. Sessions send status only, unless their project is set to full text below.
     </p>
     <p v-if="error" class="error" role="alert">{{ error }}</p>
     <p v-if="notice" role="status">{{ notice }}</p>
@@ -143,6 +158,33 @@ const minutesLeft = computed(() => {
           <button type="button" :disabled="busy" @click="pair">{{ relay.pairing ? 'New code' : 'Pair a phone' }}</button>
           <button type="button" :disabled="busy || !relay.users.length" @click="test">Send a test message</button>
         </div>
+
+        <h3>Sessions</h3>
+        <p class="muted">
+          A session that needs you sends the phone its name, project, state, and an approval's tool or a question's text, with buttons while Claude
+          Code holds the ask (about two minutes). A finished turn is sent when the phone started it, or when this computer has been idle for 5
+          minutes. A reply to a session's message is its next prompt; so is a plain message once you pick a session with /use.
+        </p>
+        <p>
+          Plain messages go to: <strong>{{ relay.target ?? 'no session' }}</strong>
+        </p>
+        <form class="row" @submit.prevent="saveDigest(digestShown.trim() || null)">
+          <label class="inline" for="digest-at">Daily digest at</label>
+          <input id="digest-at" class="time" :value="digestShown" placeholder="HH:MM" spellcheck="false" autocomplete="off" @input="editDigest" />
+          <button type="submit" :disabled="busy || !digestEdited">Save</button>
+          <button v-if="relay.digestAt" type="button" class="quiet" :disabled="busy" @click="saveDigest(null)">No digest</button>
+        </form>
+        <template v-if="relay.projects.length">
+          <p class="muted">Full text sends a project's final messages and an approval's input as well. Leave it off for client work.</p>
+          <ul class="users">
+            <li v-for="p in relay.projects" :key="p.id">
+              <label class="check">
+                <input type="checkbox" :checked="p.fullText" :disabled="busy" @change="setFullText(p.id, !p.fullText)" />
+                {{ p.name }}: full text
+              </label>
+            </li>
+          </ul>
+        </template>
       </template>
     </template>
   </section>
@@ -184,6 +226,12 @@ p {
   flex: 1;
   padding: 9px 12px;
   font-family: var(--font-mono);
+}
+.row input.time {
+  flex: 0 0 90px;
+}
+.inline {
+  font-size: 13px;
 }
 .check {
   display: inline-flex;

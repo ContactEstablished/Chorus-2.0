@@ -24,6 +24,11 @@ pub fn clip(s: &str, n: usize) -> String {
 pub enum Act {
     Answer { text: String, rule: bool },
     Approve,
+    /// A session's held approval, allowed once (D101; the phone never offers "always allow").
+    Allow { session: u32, run: u32, ask: u32 },
+    Deny { session: u32, run: u32, ask: u32 },
+    /// A session's held question, answered with one of its options.
+    Choose { session: u32, run: u32, ask: u32, answer: String },
 }
 
 /// A message to send: HTML, whether it buzzes, and its buttons, one per row.
@@ -141,8 +146,9 @@ pub fn milestone(run: &str, phase: u32, title: &str, tag_name: &str, more: bool)
     out
 }
 
-/// A milestone once settled, wherever that was: its text with the outcome, and no button.
-pub fn milestone_settled(html: &str, outcome: &str) -> String {
+/// A message once settled, wherever that was (a milestone approved, a session's ask answered): its
+/// text with the outcome, and no buttons.
+pub fn with_outcome(html: &str, outcome: &str) -> String {
     format!("{html}\n<b>{}</b>", escape(outcome))
 }
 
@@ -204,7 +210,7 @@ pub fn answer_hint(open: &[String]) -> String {
     }
 }
 
-pub const HELP: &str = "This bot relays Chorus's loop: questions that need you, and when a run stops, reaches a milestone or finishes. Tap an option to answer, or reply to a question in your own words.\n/status what the loop is doing\n/pause and /resume a run\n/approve the milestone a run waits on\n/stop a run";
+pub const HELP: &str = "This bot relays Chorus: the loop's questions, stops, milestones and finished runs, and sessions that need you. Tap an option to answer, or reply to a message in your own words; a reply to a session's message is its next prompt.\n/status what the loop is doing\n/pause and /resume a run\n/approve the milestone a run waits on\n/stop a run\n/sessions open sessions, numbered\n/use 2 send plain messages to session 2 (/use off stops)\n/digest what needs you, and what finished or failed today";
 
 #[cfg(test)]
 mod tests {
@@ -274,7 +280,7 @@ mod tests {
         assert_eq!(m.buttons, vec![("Approve".to_owned(), Act::Approve)]);
         let last = milestone("F1", 3, "Help", "phase-03", false);
         assert!(last.html.contains("approve to finish the run") && last.buttons.len() == 1, "{}", last.html);
-        assert_eq!(milestone_settled(&m.html, "Approved."), format!("{}\n<b>Approved.</b>", m.html));
+        assert_eq!(with_outcome(&m.html, "Approved."),format!("{}\n<b>Approved.</b>", m.html));
         assert!(phase_done("F1", 2, "Product", "phase-02").silent);
         assert!(answer_hint(&[]).starts_with("Nothing is waiting"));
         assert_eq!(answer_hint(&["[P01 T1] in F1 <x>".into()]), "To answer [P01 T1] in F1 &lt;x&gt;, reply to its message: swipe it left, or tap it and choose Reply.");

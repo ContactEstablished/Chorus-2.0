@@ -7,6 +7,7 @@
 //! message or a forwarded one is never acted on (P13 §7).
 
 pub mod render;
+pub mod sessions;
 
 use serde_json::Value;
 
@@ -221,6 +222,11 @@ pub enum Command {
     Approve,
     /// `/stop`, or `/stop P03` for a phase.
     Stop(Option<u32>),
+    /// Open sessions, numbered.
+    Sessions,
+    /// `/use 2`, `/use api` or `/use off`: where plain messages go; bare, which one it is.
+    Use(String),
+    Digest,
     Unknown(String),
 }
 
@@ -231,6 +237,9 @@ pub const MENU: &[(&str, &str)] = &[
     ("resume", "Resume a paused run"),
     ("approve", "Approve the milestone the run waits on"),
     ("stop", "Stop the run (or /stop P03)"),
+    ("sessions", "Open sessions, numbered"),
+    ("use", "Send plain messages to a session: /use 2"),
+    ("digest", "What needs you, and what finished or failed today"),
     ("help", "What this bot does"),
 ];
 
@@ -248,6 +257,9 @@ pub fn parse_command(text: &str) -> Option<Command> {
         "pause" => Command::Pause,
         "resume" => Command::Resume,
         "approve" => Command::Approve,
+        "sessions" => Command::Sessions,
+        "use" => Command::Use(arg.chars().take(80).collect()),
+        "digest" => Command::Digest,
         "stop" => {
             let n = arg.trim_start_matches(['P', 'p']).parse().ok();
             Command::Stop(n)
@@ -429,6 +441,10 @@ mod tests {
         assert_eq!(parse_command("/stop"), Some(Command::Stop(None)));
         assert_eq!(parse_command("/frob"), Some(Command::Unknown("frob".into())));
         assert_eq!(parse_command("cursor please"), None);
+        assert_eq!(parse_command("/use 2"), Some(Command::Use("2".into())));
+        assert_eq!(parse_command("/use"), Some(Command::Use(String::new())));
+        assert_eq!(parse_command("/sessions"), Some(Command::Sessions));
+        assert_eq!(parse_command("/digest"), Some(Command::Digest));
     }
 
     #[test]

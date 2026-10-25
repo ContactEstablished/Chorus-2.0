@@ -206,6 +206,10 @@ export const commands = {
 	relayUnpair: (id: string) => typedError<RelayView, string>(__TAURI_INVOKE("relay_unpair", { id })),
 	/**  Sends one test message to every paired phone. */
 	relayTest: () => typedError<RelayView, string>(__TAURI_INVOKE("relay_test")),
+	/**  The daily digest's local time ("HH:MM"), or none for no digest. */
+	relaySetDigest: (at: string | null) => typedError<RelayView, string>(__TAURI_INVOKE("relay_set_digest", { at })),
+	/**  Whether a project's sessions send the phone full text, or status only (D101). */
+	relaySetFullText: (projectId: number, full: boolean) => typedError<RelayView, string>(__TAURI_INVOKE("relay_set_full_text", { projectId, full })),
 };
 
 /** Events */
@@ -1405,6 +1409,12 @@ export type RegistrySource =
 /**  Not listed: derived from the model's endpoints by [`entry_for`]. */
 "derived";
 
+export type RelayProject = {
+	id: number,
+	name: string,
+	fullText: boolean,
+};
+
 export type RelayUser = {
 	/**  Telegram's user id, as text: it can pass 32 bits. */
 	id: string,
@@ -1424,6 +1434,12 @@ export type RelayView = {
 	pairing: PairingCode | null,
 	/**  Messages waiting to go. */
 	queued: number,
+	/**  The daily digest's local time, "HH:MM", if there is one. */
+	digestAt: string | null,
+	/**  The session plain messages from the phone go to (`/use`). */
+	target: string | null,
+	/**  Each project not archived, and whether it sends the phone full text. */
+	projects: RelayProject[],
 };
 
 export type ReplyDetails = { kind: "approval"; tool: string; input: string } | { kind: "question"; questions: Question[] };

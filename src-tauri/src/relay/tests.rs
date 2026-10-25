@@ -97,7 +97,7 @@ fn pairing_questions_and_replies_without_the_network() {
     assert!(outbox(&m).last().unwrap().html.starts_with("To answer [P01 T1] in F1, reply to its message"), "{}", outbox(&m).last().unwrap().html);
 
     // Once sent, a reply to it answers the question, and the phone's copy is queued to change.
-    db::record_message(m.store(), 7, 500, "question", Some(run), Some(q)).unwrap();
+    db::record_message(m.store(), 7, 500, "question", db::About { run_id: Some(run), question_id: Some(q), ..db::About::default() }).unwrap();
     inbound::message(&m, Message { reply_to: Some(500), ..msg(7, 7, "offset, please") });
     let (_, answered) = loop_db::question(m.store(), q).unwrap().unwrap();
     assert_eq!((answered.state.as_str(), answered.answer.as_deref()), ("answered", Some("offset, please")));
@@ -117,7 +117,7 @@ fn pairing_questions_and_replies_without_the_network() {
     let ms = outbox(&m).into_iter().find(|o| o.kind == "milestone").unwrap();
     assert_eq!(ms.buttons.len(), 1);
     db::finish_out(m.store(), ms.id, None).unwrap();
-    db::record_message(m.store(), 7, 501, "milestone", Some(run), None).unwrap();
+    db::record_message(m.store(), 7, 501, "milestone", db::About::run(run)).unwrap();
     outbound::milestone_settled(&m, run, "Approved.");
     let edit = outbox(&m).into_iter().find(|o| o.kind == "edit").unwrap();
     assert_eq!((edit.chat_id, edit.reply_to, edit.buttons.len()), (Some(7), Some(501), 0));
@@ -127,8 +127,30 @@ fn pairing_questions_and_replies_without_the_network() {
     // One settled before it was sent goes without its button.
     outbound::milestone(&m, run, "F1", 3, "Help", "phase-03", false);
     outbound::milestone_settled(&m, run, "Approved.");
-    let last = outbox(&m).into_iter().rfind(|o| o.kind == "milestone").unwrap();
+    let last = outbox(&m).into_iter().rfind(|o| o.kind == "milestone-settled").unwrap();
     assert!(last.buttons.is_empty() && last.html.ends_with("<b>Approved.</b>"), "{}", last.html);
+
+    // Sessions (D101), routed without a real one: commands answer, a plain message with no /use
+    // session says how to pick one, and a reply about a session that's gone says so.
+    let last_reply = |m: &SessionManager| outbox(m).into_iter().rfind(|o| o.kind == "reply").unwrap().html;
+    inbound::message(&m, msg(7, 7, "/sessions"));
+    assert_eq!(last_reply(&m), "No sessions are open.");
+    inbound::message(&m, msg(7, 7, "/use 1"));
+    assert!(last_reply(&m).starts_with("There is no session 1"), "{}", last_reply(&m));
+    inbound::message(&m, msg(7, 7, "/use"));
+    assert!(last_reply(&m).starts_with("Plain messages go nowhere yet"));
+    inbound::message(&m, msg(7, 7, "/digest"));
+    assert!(last_reply(&m).contains("Nothing needs you"));
+    inbound::message(&m, msg(7, 7, "run the tests"));
+    assert!(last_reply(&m).starts_with("To send a session a prompt"), "{}", last_reply(&m));
+    db::record_message(m.store(), 7, 502, "session-done", db::About::session(99)).unwrap();
+    inbound::message(&m, Message { reply_to: Some(502), ..msg(7, 7, "now the docs") });
+    assert_eq!(last_reply(&m), "That session no longer exists.");
+    // A stale prompt isn't sent.
+    inbound::message(&m, Message { reply_to: Some(502), date: now_ms() / 1000 - 600, ..msg(7, 7, "late") });
+    assert!(last_reply(&m).starts_with("That message waited too long"));
+    // A session's button for an ask that isn't held says it's too late, in words.
+    assert!(super::sessions::press(&m, &Act::Allow { session: 99, run: 1, ask: 1 }).starts_with("Too late for the phone"));
 
     state().token = None;
     let _ = std::fs::remove_dir_all(&dir);
