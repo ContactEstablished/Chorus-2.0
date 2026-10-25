@@ -198,6 +198,34 @@ impl SessionManager {
         Err("Couldn't find a free name for a new worktree.".into())
     }
 
+    /// P15: the worktree a loop run works in, on its run branch: made beside the repository like
+    /// any other (`<parent>\.chorus2\<repo>\run-<name>`), from `base` when the branch is new, and
+    /// registered, so sessions in it are its sessions and Claude Code's trust is recorded for it
+    /// as D55 says. Returns its id and path.
+    pub fn add_run_worktree(&self, main_root: &str, run_slug: &str, branch: &str, base: &str) -> Result<(u32, String), String> {
+        let _guard = self.worktree_lock.lock().expect("worktree lock");
+        let plan = wt::plan(main_root, &format!("run-{run_slug}"))?;
+        if Path::new(&plan.path).exists() {
+            return Err(format!("{} already exists. Remove it, or give the run another name.", plan.path));
+        }
+        let root = Path::new(main_root);
+        if git::rev(root, &format!("refs/heads/{branch}"))?.is_some() {
+            git::add_worktree_on(root, &plan.path, branch)?;
+        } else {
+            git::add_worktree(root, &plan.path, branch, Some(base))?;
+        }
+        let new = NewWorktree { repo_root: main_root, path: &plan.path, branch, base_branch: Some(base) };
+        let id = match worktree_rows::insert(&self.store, &new) {
+            Ok(id) => id,
+            Err(e) => {
+                let _ = git::remove_worktree(root, &plan.path);
+                return Err(e);
+            }
+        };
+        self.trust_worktree_for_claude(id, main_root);
+        Ok((id, plan.path))
+    }
+
     /// Undoes a worktree no session ended up using: removes it and its branch, which has nothing
     /// on it yet.
     pub(super) fn forget_worktree(&self, made: &Made) {

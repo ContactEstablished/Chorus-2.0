@@ -16,7 +16,7 @@ pub struct CheckRun {
     pub passed: bool,
     pub exit_code: Option<i32>,
     pub timed_out: bool,
-    pub duration_ms: u64,
+    pub duration_ms: u32,
     /// The end of its output, scrubbed.
     pub output_tail: String,
     pub signature: Option<Signature>,
@@ -42,8 +42,8 @@ pub fn tail(output: &str) -> String {
     kept[start..].to_owned()
 }
 
-fn seconds(ms: u64) -> String {
-    format!("{:.1} s", ms as f64 / 1000.0)
+fn seconds(ms: u32) -> String {
+    format!("{:.1} s", f64::from(ms) / 1000.0)
 }
 
 /// A fence longer than any run of backticks in `text`, so output can't close it early.

@@ -27,6 +27,7 @@ mod documents;
 mod instructions;
 mod notes;
 mod p8;
+mod run_loop;
 
 use std::sync::Arc;
 
@@ -114,6 +115,11 @@ pub fn run() {
             sessions::composer::start(&manager)?;
             narrator::start(&manager)?;
             p8::start(&manager)?;
+            // P15: a loop step that was running when Chorus stopped is ended before sessions relaunch.
+            let loop_handle = app.handle().clone();
+            run_loop::prepare(&manager, Box::new(move |run_id| {
+                let _ = run_loop::LoopUpdated { run_id }.emit(&loop_handle);
+            }));
             let relaunch = manager.reopen()?;
             // Revoke OpenRouter keys an earlier Chorus minted and couldn't revoke. Only keys from
             // before this start are touched, so it can run beside the relaunches, which mint new ones.
@@ -124,6 +130,7 @@ pub fn run() {
                 .spawn(move || providers::keys::sweep(sweeping.store(), up_to))?;
             let relaunching = manager.clone();
             std::thread::Builder::new().name("relaunch".into()).spawn(move || relaunching.relaunch(&relaunch))?;
+            run_loop::start(&manager);
             // Look for the agent CLIs without holding up the window. Runs relaunched before this
             // finishes get their CLI version filled in afterwards.
             let detecting = manager.clone();

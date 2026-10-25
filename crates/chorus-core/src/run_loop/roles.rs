@@ -10,7 +10,7 @@ use crate::agent::AgentKind;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "kebab-case")]
-pub enum Role {
+pub enum LoopRole {
     Planner,
     PlanGriller,
     Builder,
@@ -20,7 +20,7 @@ pub enum Role {
     Arbitrator,
 }
 
-impl Role {
+impl LoopRole {
     pub const ALL: [Self; 7] =
         [Self::Planner, Self::PlanGriller, Self::Builder, Self::Mechanic, Self::Reviewer, Self::Reporter, Self::Arbitrator];
 
@@ -59,7 +59,7 @@ impl Role {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct RoleSetting {
-    pub role: Role,
+    pub role: LoopRole,
     pub bot: u32,
     pub fallback: Option<u32>,
 }
@@ -100,18 +100,18 @@ fn named(bots: &[BotFacts], name: &str, whose: &str) -> Result<u32, String> {
 /// The Bot for `role` in a step. `task_model` is the task's `- Model:` line, which overrides the
 /// builder roles only; `phase_models` are the phase's `role=bot` pairs.
 pub fn resolve(
-    role: Role,
+    role: LoopRole,
     task_model: Option<&str>,
     phase_models: &[(String, String)],
     defaults: &[RoleSetting],
     bots: &[BotFacts],
 ) -> Result<Resolved, String> {
-    if matches!(role, Role::Builder | Role::Mechanic)
+    if matches!(role, LoopRole::Builder | LoopRole::Mechanic)
         && let Some(name) = task_model
     {
         return named(bots, name, "The task's Model line").map(|bot| Resolved { bot, source: Source::Task });
     }
-    if let Some((_, name)) = phase_models.iter().find(|(r, _)| Role::parse(r) == Some(role)) {
+    if let Some((_, name)) = phase_models.iter().find(|(r, _)| LoopRole::parse(r) == Some(role)) {
         return named(bots, name, "The phase's Models line").map(|bot| Resolved { bot, source: Source::Phase });
     }
     defaults
@@ -123,7 +123,7 @@ pub fn resolve(
 
 /// Roles a phase override names that aren't roles, for the roadmap check.
 pub fn unknown_roles(phase_models: &[(String, String)]) -> Vec<String> {
-    phase_models.iter().filter(|(r, _)| Role::parse(r).is_none()).map(|(r, _)| r.clone()).collect()
+    phase_models.iter().filter(|(r, _)| LoopRole::parse(r).is_none()).map(|(r, _)| r.clone()).collect()
 }
 
 /// The company whose model a Bot runs: the `vendor/` prefix of a routed model id, else the agent's
@@ -181,27 +181,27 @@ mod tests {
     }
 
     const DEFAULTS: [RoleSetting; 3] = [
-        RoleSetting { role: Role::Planner, bot: 1, fallback: Some(2) },
-        RoleSetting { role: Role::Builder, bot: 1, fallback: Some(3) },
-        RoleSetting { role: Role::Reviewer, bot: 2, fallback: Some(3) },
+        RoleSetting { role: LoopRole::Planner, bot: 1, fallback: Some(2) },
+        RoleSetting { role: LoopRole::Builder, bot: 1, fallback: Some(3) },
+        RoleSetting { role: LoopRole::Reviewer, bot: 2, fallback: Some(3) },
     ];
 
     #[test]
     fn the_most_specific_setting_wins() {
         let phase = vec![("builder".to_owned(), "sol".to_owned())];
         let b = bots();
-        assert_eq!(resolve(Role::Builder, Some("deepseek-flash"), &phase, &DEFAULTS, &b), Ok(Resolved { bot: 3, source: Source::Task }));
-        assert_eq!(resolve(Role::Builder, None, &phase, &DEFAULTS, &b), Ok(Resolved { bot: 2, source: Source::Phase }));
-        assert_eq!(resolve(Role::Planner, Some("sol"), &phase, &DEFAULTS, &b), Ok(Resolved { bot: 1, source: Source::Default }));
-        assert!(resolve(Role::Builder, Some("gemini"), &phase, &DEFAULTS, &b).unwrap_err().contains("\"gemini\""));
-        assert!(resolve(Role::Reporter, None, &[], &DEFAULTS, &b).unwrap_err().contains("Reporter"));
+        assert_eq!(resolve(LoopRole::Builder, Some("deepseek-flash"), &phase, &DEFAULTS, &b), Ok(Resolved { bot: 3, source: Source::Task }));
+        assert_eq!(resolve(LoopRole::Builder, None, &phase, &DEFAULTS, &b), Ok(Resolved { bot: 2, source: Source::Phase }));
+        assert_eq!(resolve(LoopRole::Planner, Some("sol"), &phase, &DEFAULTS, &b), Ok(Resolved { bot: 1, source: Source::Default }));
+        assert!(resolve(LoopRole::Builder, Some("gemini"), &phase, &DEFAULTS, &b).unwrap_err().contains("\"gemini\""));
+        assert!(resolve(LoopRole::Reporter, None, &[], &DEFAULTS, &b).unwrap_err().contains("Reporter"));
     }
 
     #[test]
     fn phase_roles_are_read_loosely() {
         let phase = vec![("Plan-Griller".to_owned(), "Claude Opus".to_owned()), ("chef".to_owned(), "x".to_owned())];
-        let d = [RoleSetting { role: Role::PlanGriller, bot: 2, fallback: None }];
-        assert_eq!(resolve(Role::PlanGriller, None, &phase, &d, &bots()).unwrap().bot, 1);
+        let d = [RoleSetting { role: LoopRole::PlanGriller, bot: 2, fallback: None }];
+        assert_eq!(resolve(LoopRole::PlanGriller, None, &phase, &d, &bots()).unwrap().bot, 1);
         assert_eq!(unknown_roles(&phase), ["chef"]);
     }
 

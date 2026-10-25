@@ -9,7 +9,7 @@ use std::path::Path;
 use tauri_specta::{Builder, collect_commands, collect_events};
 
 use crate::{agents, app, attention, export, fleet, fleet_registry, lock, narrator, prefs, projects, providers, routing, sessions, splash, vault};
-use crate::{automations, bots, documents, instructions, notes};
+use crate::{automations, bots, documents, instructions, notes, run_loop};
 
 /// Where the generated bindings live, relative to this crate.
 #[cfg_attr(not(debug_assertions), allow(dead_code, reason = "debug builds and tests regenerate the bindings"))]
@@ -126,6 +126,16 @@ pub fn builder() -> Builder<tauri::Wry> {
             automations::automation_delete,
             automations::automation_run_now,
             automations::automation_runs,
+            // p15: the autonomous phase loop
+            run_loop::loop_folder_check,
+            run_loop::loop_runs_list,
+            run_loop::loop_run_create,
+            run_loop::loop_run_update,
+            run_loop::loop_run_start,
+            run_loop::loop_run_pause,
+            run_loop::loop_run_stop,
+            run_loop::loop_run_approve,
+            run_loop::loop_run_delete,
         ])
         .events(collect_events![
             app::BackendPulse,
@@ -137,6 +147,8 @@ pub fn builder() -> Builder<tauri::Wry> {
             fleet::FleetShown,
             fleet_registry::FleetRosterChanged,
             prefs::PrefsChanged,
+            // p15
+            run_loop::LoopUpdated,
         ])
 }
 

@@ -230,6 +230,18 @@ pub struct CreateSession {
     #[serde(skip)]
     #[specta(skip)]
     pub first_prompt: Option<String>,
+    /// P15: a loop step's launch. Never from IPC.
+    #[serde(skip)]
+    #[specta(skip)]
+    pub loop_step: Option<LoopLaunch>,
+}
+
+/// What a loop step adds to its session's launch (P15).
+#[derive(Debug, Clone, Default)]
+pub struct LoopLaunch {
+    /// Arguments for the first run only, before the positional prompt: the step's unattended
+    /// permissions and tools. A Restart starts the agent as usual, for whoever takes it over.
+    pub args: Vec<String>,
 }
 
 /// Starts the sessions a preset makes. `session` is the first; the others are derived from it.
@@ -537,6 +549,8 @@ pub struct SessionManager {
     hook_listener: OnceLock<Result<u16, String>>,
     /// How far the restore at start has got, for the splash.
     restore: Mutex<RestoreProgress>,
+    /// P15: loop steps' arguments, taken by each step's first run.
+    loop_args: Mutex<HashMap<u32, Vec<String>>>,
 }
 
 /// The sessions Chorus relaunches at start, and how many are back (each started or failed).
@@ -562,6 +576,7 @@ impl SessionManager {
             agents: Detector::default(),
             hook_listener: OnceLock::new(),
             restore: Mutex::new(RestoreProgress::default()),
+            loop_args: Mutex::new(HashMap::new()),
         })
     }
 
@@ -951,7 +966,11 @@ impl SessionManager {
         drop(workspace_guard);
         tag_rows::set(&self.store, id, &tags)?;
         crate::bots::attach(&self.store, id, bot.as_ref())?;
-        crate::automations::stage_prompt(&self.store, id, req.first_prompt.as_deref())?;
+        let source = if req.loop_step.is_some() { "loop" } else { "automation" };
+        crate::automations::stage_prompt(&self.store, id, source, req.first_prompt.as_deref())?;
+        if let Some(step) = &req.loop_step {
+            self.loop_args.lock().unwrap_or_else(std::sync::PoisonError::into_inner).insert(id, step.args.clone());
+        }
         if join.is_none() {
             self.remember_folder(&asked);
         }
@@ -1157,7 +1176,11 @@ impl SessionManager {
             // goes last because for Codex it is a subcommand.
             args.extend(route_args);
             args.extend(hook_args);
-            args.extend(spec.option_args(&options));
+            // A loop step's own arguments, on its first run only. A step that sets its own
+            // permission mode replaces the Bot's.
+            let step_args = self.loop_args.lock().unwrap_or_else(std::sync::PoisonError::into_inner).remove(&row.id).unwrap_or_default();
+            let own_permission = step_args.iter().any(|a| a == "--permission-mode");
+            args.extend(spec.option_args(&LaunchOptions { permission: options.permission.filter(|_| !own_permission), ..options.clone() }));
             // Gemini CLI refuses to create an id whose chat file already exists, and to resume one
             // with no turns in it. A session that ended before its first prompt has exactly that,
             // so it gets a fresh id rather than a launch that fails with exit 42.
@@ -1173,6 +1196,8 @@ impl SessionManager {
             let exists = conversation.is_some_and(|id| agents::conversation_exists(row.agent, id, &parent));
             args.extend(spec.conversation_args(conversation, exists));
             args.extend(spec.name_args(&row.name));
+            // Before the positional prompt, which p8's arguments end with.
+            args.extend(step_args);
             args.extend(p8.args.iter().cloned());
             (None, exists && spec.resume.kind() != ResumeKind::None)
         };
@@ -1773,6 +1798,7 @@ impl SessionManager {
                 // The partner is another agent: the Bot's instructions are for its own.
                 bot_id: None,
                 first_prompt: None,
+                loop_step: None,
             };
             let (session, error) = match self.create_in(derived, worktree) {
                 Ok(s) => (Some(s), None),

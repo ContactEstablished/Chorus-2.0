@@ -186,6 +186,15 @@ export const commands = {
 	/**  Runs an automation now, whether it is paused or not, and returns the run's row. */
 	automationRunNow: (id: number) => typedError<AutomationRun, string>(__TAURI_INVOKE("automation_run_now", { id })),
 	automationRuns: (id: number) => typedError<AutomationRun[], string>(__TAURI_INVOKE("automation_runs", { id })),
+	loopFolderCheck: (folder: string, baseBranch: string | null) => __TAURI_INVOKE<LoopFolder>("loop_folder_check", { folder, baseBranch }),
+	loopRunsList: () => typedError<RunView[], string>(__TAURI_INVOKE("loop_runs_list")),
+	loopRunCreate: (input: NewRun) => typedError<RunView, string>(__TAURI_INVOKE("loop_run_create", { input })),
+	loopRunUpdate: (id: number, config: RunConfig) => typedError<RunView, string>(__TAURI_INVOKE("loop_run_update", { id, config })),
+	loopRunStart: (id: number) => typedError<RunView, string>(__TAURI_INVOKE("loop_run_start", { id })),
+	loopRunPause: (id: number) => typedError<RunView, string>(__TAURI_INVOKE("loop_run_pause", { id })),
+	loopRunStop: (id: number) => typedError<RunView, string>(__TAURI_INVOKE("loop_run_stop", { id })),
+	loopRunApprove: (id: number) => typedError<RunView, string>(__TAURI_INVOKE("loop_run_approve", { id })),
+	loopRunDelete: (id: number) => typedError<boolean, string>(__TAURI_INVOKE("loop_run_delete", { id })),
 };
 
 /** Events */
@@ -195,6 +204,7 @@ export const events = {
 	fleetClick: makeEvent<FleetClick>("fleet-click"),
 	fleetRosterChanged: makeEvent<FleetRosterChanged>("fleet-roster-changed"),
 	fleetShown: makeEvent<FleetShown>("fleet-shown"),
+	loopUpdated: makeEvent<LoopUpdated>("loop-updated"),
 	notificationAdded: makeEvent<NotificationAdded>("notification-added"),
 	prefsChanged: makeEvent<PrefsChanged>("prefs-changed"),
 	sessionUpdated: makeEvent<SessionUpdated>("session-updated"),
@@ -509,6 +519,26 @@ export type Changes = {
 	conflicts: number,
 };
 
+/**  A check as the run's configuration holds it. */
+export type Check = {
+	name: string,
+	command: string,
+	timeoutSecs: number,
+};
+
+/**  One check as the gatekeeper ran it. */
+export type CheckRun = {
+	name: string,
+	command: string,
+	passed: boolean,
+	exitCode: number | null,
+	timedOut: boolean,
+	durationMs: number,
+	/**  The end of its output, scrubbed. */
+	outputTail: string,
+	signature: Signature | null,
+};
+
 /**  What closing a session would do to its worktree. */
 export type CloseCheck = {
 	worktree: WorktreeClose | null,
@@ -549,6 +579,19 @@ export type ComposerSubmit = {
 	queue: boolean,
 	confirmReady: boolean,
 };
+
+/**  Which stop condition was hit. */
+export type Condition = 
+/**  A check still failed after the last fix attempt. */
+"fix-attempts" | 
+/**  Fix attempts kept ending with the same error signature. */
+"same-signature" | "wall-clock" | 
+/**  `tasks.md` was still invalid after the planner's retries. */
+"plan-invalid" | 
+/**  A step's agent failed again after its retries. */
+"step-failed" | 
+/**  A task stopped and nothing else in the phase can run. */
+"task-stopped";
 
 export type CreateSession = {
 	agent: AgentKind,
@@ -664,6 +707,13 @@ export type ExportResult = {
 	transcriptNote: string | null,
 };
 
+/**  One failing check in one gate run. */
+export type Failure = {
+	check: string,
+	key: string,
+	summary: string,
+};
+
 export type FileLeak = {
 	path: string,
 	longest: number,
@@ -724,6 +774,13 @@ export type FolderCheck = {
 	projectId: number | null,
 };
 
+/**  The checks after one attempt at a task. */
+export type GateRun = {
+	attempt: number,
+	/**  Empty when every check passed. */
+	failed: Failure[],
+};
+
 export type GitFolder = {
 	/**  The working tree the folder is in. */
 	topLevel: string,
@@ -781,6 +838,36 @@ export type LeakReport = {
 	/**  Every file under the data folder with any run of the key, and the longest run in it. */
 	files: FileLeak[],
 	filesScanned: number,
+};
+
+/**  The limits a run is configured with (the spec's `limits:` block). */
+export type Limits = {
+	/**  Fix attempts after a task's first build; the last follows Counsel's diagnosis. */
+	fixAttempts: number,
+	/**  Fix attempts in a row ending with the same error signature that stop the task. */
+	sameSignature: number,
+	/**  Times an invalid `tasks.md` goes back to the planner before the phase stops. */
+	planRetries: number,
+	/**  Times a step whose agent failed is run again before the phase stops. */
+	stepRetries: number,
+	/**  Minutes a phase may run; `None` for no cap. */
+	phaseMinutes: number | null,
+};
+
+/**  What a folder offers a new run: its repository, branch and roadmap. */
+export type LoopFolder = {
+	repoRoot: string | null,
+	branch: string | null,
+	phases: PhaseEntry[],
+	/**  Why a run can't start here, if it can't. */
+	problem: string | null,
+};
+
+export type LoopRole = "planner" | "plan-griller" | "builder" | "mechanic" | "reviewer" | "reporter" | "arbitrator";
+
+/**  A run changed: the Loop screen reads it again. */
+export type LoopUpdated = {
+	runId: number,
 };
 
 export type Narration = {
@@ -844,6 +931,15 @@ export type NarratorView = {
 	costs: NarratorCosts,
 	latestTurn: number | null,
 	canSummarize: boolean,
+};
+
+export type NewRun = {
+	name: string,
+	/**  A folder in the repository. */
+	folder: string,
+	/**  The branch the run starts from; left out, the folder's checked-out branch. */
+	baseBranch: string | null,
+	config: RunConfig,
 };
 
 /**  The endpoint Nitro would most likely use: a labelled preview, not a choice. */
@@ -1010,6 +1106,29 @@ export type Permission =
 export type PermissionChoice = {
 	permission: Permission,
 	args: string,
+};
+
+/**  A phase as `roadmap.md` lists it. */
+export type PhaseEntry = {
+	number: number,
+	title: string,
+	goal: string,
+	risk: Risk,
+	/**  Role overrides for this phase, `role=model alias` pairs, in the order written. */
+	models: ([string, string])[],
+};
+
+export type PhaseView = {
+	number: number,
+	title: string,
+	/**  planning | building | checking | tagging | passed | stopped */
+	state: string,
+	stop: Stop | null,
+	tag: string | null,
+	startedAtSecs: number,
+	endedAtSecs: number | null,
+	tasks: TaskProgress[],
+	steps: StepView[],
 };
 
 export type PlanStep = {
@@ -1274,8 +1393,21 @@ export type ResumeKind =
 /**  The conversation lives in a server Chorus runs for the session. */
 "server";
 
+export type Risk = 
+/**  A task a fallback model may take over when the default's allowance runs out. */
+"low" | "normal" | 
+/**  A phase that always ends a milestone and gets Counsel's review (schema, auth, payments…). */
+"high";
+
 /**  What a session in a launch is for. A label, not a limit: a reviewer can write files too. */
 export type Role = "builder" | "reviewer" | "shell";
+
+/**  A role's default Bot and its fallback. */
+export type RoleSetting = {
+	role: LoopRole,
+	bot: number,
+	fallback: number | null,
+};
 
 /**  One open Chorus session in the roster. */
 export type RosterRow = {
@@ -1303,6 +1435,17 @@ export type RoutingProfileId =
  */
 "helper";
 
+/**  A run's settings, which only Matthew edits, in Chorus. */
+export type RunConfig = {
+	roles: RoleSetting[],
+	checks: Check[],
+	limits: Limits,
+	/**  Phases between milestone reviews (the spec's `milestone_every`). */
+	milestoneEvery: number,
+	/**  Debug builds only: steps are played from this script file instead of being run by agents. */
+	script?: string | null,
+};
+
 /**  What a run's instructions held, kept on the run and shown in session facts. */
 export type RunInstructions = {
 	/**  The text reached the agent's launch (it was written and passed on). */
@@ -1325,6 +1468,31 @@ export type RunInstructions = {
 	 *  because the conversation recorded different instructions when it started.
 	 */
 	freshPrompt: boolean,
+};
+
+export type RunState = 
+/**  Made, not started. */
+"draft" | "running" | 
+/**  Paused by Matthew: the step that is running finishes, and nothing new starts. */
+"paused" | 
+/**  A phase passed at a milestone, and the run waits for Matthew's review. */
+"waiting" | "stopped" | 
+/**  Every phase in the roadmap passed. */
+"done";
+
+export type RunView = {
+	id: number,
+	name: string,
+	repoRoot: string,
+	baseBranch: string,
+	runBranch: string,
+	worktreePath: string | null,
+	config: RunConfig,
+	state: RunState,
+	note: string | null,
+	phases: PhaseView[],
+	createdAtSecs: number,
+	updatedAtSecs: number,
 };
 
 export type Schedule = 
@@ -1460,6 +1628,13 @@ export type SharingSession = {
 	agent: AgentKind,
 };
 
+export type Signature = {
+	check: string,
+	/**  Failing test names, sorted, at most [`MAX_TESTS`]. */
+	tests: string[],
+	firstError: string | null,
+};
+
 /**
  *  One session a launch makes. The first slot is the session the user set up; the others are
  *  derived from it.
@@ -1476,6 +1651,38 @@ export type Snapshot = {
 	diffNote: string | null,
 };
 
+export type StepKind = "plan" | "build" | "check" | "tag";
+
+export type StepState = "running" | "done" | "failed";
+
+export type StepView = {
+	id: number,
+	kind: StepKind,
+	task: string | null,
+	attempt: number,
+	role: string | null,
+	botId: number | null,
+	botName: string | null,
+	sessionId: number | null,
+	/**  The model the step asked for, and the one its transcript says answered (L61). */
+	modelAsked: string | null,
+	modelObserved: string | null,
+	state: StepState,
+	note: string | null,
+	startedAtSecs: number,
+	endedAtSecs: number | null,
+	/**  A gate step's checks. */
+	checks: CheckRun[],
+};
+
+export type Stop = {
+	condition: Condition,
+	/**  The task it stopped, or `None` for the phase. */
+	task: string | null,
+	/**  What to tell Matthew: the failing check and its last error, or why the step failed. */
+	detail: string,
+};
+
 export type Suggestion = {
 	kind: string,
 	title: string,
@@ -1489,6 +1696,18 @@ export type TagUse = {
 	/**  How many sessions have it, closed ones included. */
 	sessions: number,
 };
+
+export type TaskProgress = {
+	id: string,
+	title: string,
+	dependsOn: string[],
+	status: TaskStatus,
+	gates: GateRun[],
+};
+
+export type TaskStatus = "pending" | "running" | "done" | "failed" | 
+/**  Waiting on a blocking question. */
+"blocked" | "stopped";
 
 export type Theme = "glacier" | "dusk";
 
