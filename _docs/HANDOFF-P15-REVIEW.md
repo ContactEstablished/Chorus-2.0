@@ -13,9 +13,9 @@ again. Two real runs on fixture F1 worked all three phases to Done. The Telegram
 loop's questions, stops, milestones and finished runs, with buttons, replies and commands, and
 ordinary sessions' approvals, questions, failures and finished turns (D101), all seen working with
 a real bot; a Claude Code approval was allowed from the phone. Slices 5 to 9 (the plan grill,
-parallel builders, review, Counsel, limits) are not started. Matthew is installing a release built
-from this branch to run the loop on Chorus 2 itself (P12, P14), so migrations 0023 and 0024 are
-frozen from here on.
+parallel builders, review, Counsel, limits) are not started. Matthew installed a release built
+from this branch to run the loop on Chorus 2 itself (P12, P14); its data starts fresh with
+migrations 0023 and 0024, so they are frozen from here on.
 
 ## 2. Branch
 
@@ -209,7 +209,7 @@ spike doc); codex-cli 0.163.0; opencode 2.1.4; Node 24.15; git on PATH.
 | P15-D21 | The relay's subscription to session summaries only queues them (they're published under session locks); its own thread reads asks and sends. The first summary of a session after a start is only remembered, so a restart never repeats a message. Loop steps' sessions (tag `loop`) are left to the loop |
 | P15-D22 | A session's ask card is settled however the ask ends: from the phone (what was chosen), elsewhere ("No longer waiting"), or when the hold ends ("answer it at your desk"); its buttons go |
 | P15-D23 | A phone prompt goes through P6's delivery path with source `telegram`; a session that hasn't reported it's ready (no event yet) refuses it, so a session's first prompt comes from the desk |
-| P15-D24 | Migrations 0023 and 0024 are frozen from the first release built from this branch (Matthew's real data runs them); later schema changes are new migrations |
+| P15-D24 | Migrations 0023 and 0024 are frozen from the first release built from this branch (the installed app's data is created with them); later schema changes are new migrations |
 
 **Lessons:** P15-L1 to P15-L6 are in [spikes/P15.md](spikes/P15.md). From slice 2:
 
@@ -274,8 +274,9 @@ after slice 3: done as D100 on `fix/claude-repo-trust`, merged into this branch.
   the real bot: `/sessions`, `/use`, a plain-message prompt, a question's option buttons, the busy
   refusal, `/digest` and the daily digest, per-project full text, and a card edited when its hold
   ends unanswered.
-- The release installer is built from this unmerged branch: Matthew's real 2.0 data runs migrations
-  0023 and 0024, so a build from `main` refuses it until P15 merges (P15-D24).
+- The installed release is built from this unmerged branch: its data (new; no release had run on
+  this machine) is created with migrations 0023 and 0024, so a build from `main` refuses it until P15
+  merges (P15-D24).
 - A run started before `run-state.json` was ignored has it tracked, so it shows as modified after a tag
   (the F1 run made before that fix).
 - Step sessions stay in the session list after they finish (exited), one per step.
