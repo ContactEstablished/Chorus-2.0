@@ -24,6 +24,17 @@ it('adds a suggestion after existing draft text, preserves attachments and never
   expect(store.entry(1).text).not.toContain('Second')
 })
 
+it("adds a suggestion to a stopped session's draft, for Restart then Send", async () => {
+  // An automation closes its session when the run ends; its suggestions must still be usable.
+  const store = useComposerStore()
+  const stopped = { ...snapshot('', 0), runId: null, queueReason: 'Session has no live run. Restart it first.' }
+  ipc.sessionComposer.mockResolvedValue(ok(stopped))
+  ipc.sessionDraftSave.mockImplementation(async (_id, revision, text) => ok({ text, revision: revision + 1, images: [] }))
+  await store.addSuggestion(1, 'Make the fix you proposed.')
+  expect(store.entry(1).saved).toBe('Make the fix you proposed.')
+  expect(ipc.sessionComposerSubmit).not.toHaveBeenCalled()
+})
+
 it('serialises changing drafts and continues saving after an already-saved submit', async () => {
   const store = useComposerStore()
   ipc.sessionComposer.mockResolvedValue(ok(snapshot()))

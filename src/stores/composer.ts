@@ -124,8 +124,8 @@ export const useComposerStore = defineStore('composer', () => {
     const e = entry(id)
     if (!e.loaded) await refresh(id)
     if (!e.loaded || e.busy || e.pending) throw new Error('Wait for the current draft operation to finish.')
-    if (e.state?.queueReason) throw new Error(e.state.queueReason)
-    // Preserve local text and images, including an in-flight draft save. This never submits.
+    // Preserve local text and images, including an in-flight draft save. This never submits, so it
+    // works whenever the draft can be edited, a stopped session's included.
     e.text = e.text.trim() ? `${e.text}\n\n${text}` : text
     e.error = ''
     await persist(id)

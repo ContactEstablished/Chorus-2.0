@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { commands, unwrap, type NarratorView, type SessionSummary, type NarratorAction } from '../../ipc'
 import { useComposerStore } from '../../stores/composer'
 import { useViewStore } from '../../stores/view'
@@ -7,6 +7,8 @@ const props = defineProps<{ session: SessionSummary; narrator: NarratorView | nu
 const emit = defineEmits<{ refresh: [] }>()
 const composer = useComposerStore(), view = useViewStore()
 const busy = ref(false), notice = ref(''), actionError = ref('')
+// "Restart, then Send" is out of date once the session runs again.
+watch(() => props.session.live, () => { notice.value = '' })
 const summary = computed(() => props.narrator?.job?.summary)
 const current = computed(() => props.narrator?.job?.turnId === props.narrator?.latestTurn)
 const usableSummary = computed(() => !!summary.value && current.value && props.narrator?.enabled)
@@ -28,7 +30,9 @@ async function use(a: NarratorAction) {
   actionError.value = ''; notice.value = ''
   try {
     await composer.addSuggestion(props.session.id, a.suggestion.sends || a.suggestion.what)
-    notice.value = 'Added to your draft below. Review it, then Send or Queue.'
+    // A stopped session keeps its draft, so an automation's closed session can still take one.
+    notice.value = props.session.live ? 'Added to your draft below. Review it, then Send or Queue.'
+      : 'Added to your draft below. Nothing is sent yet: Restart the session, then Send.'
   } catch (e) { actionError.value = String(e) }
 }
 async function summarize() {
@@ -69,12 +73,14 @@ async function toggle() {
       <div class="steps">
         <h3>Suggested next steps <span v-if="!usableSummary">· General suggestions</span></h3>
         <p v-if="!actions.length" class="muted">No open suggestions.</p>
+        <p v-else-if="session.locked" class="muted">This session is locked, so suggestions can't be added to its draft. Unlock it first.</p>
+        <p v-else-if="!session.live" class="muted">The session is stopped. Add to prompt puts a suggestion in your draft; Restart the session to send it.</p>
         <article v-for="a in actions" :key="a.id">
           <strong>{{ a.suggestion.title }}</strong><p>{{ a.suggestion.what }}</p>
           <small v-if="a.suggestion.eta">{{ a.suggestion.eta }}</small>
           <details v-if="a.suggestion.sends"><summary>Preview prompt</summary><p>{{ a.suggestion.sends }}</p></details>
           <div class="buttons">
-            <button :disabled="busy || session.locked || !session.live || !!composer.entry(session.id).state?.queueReason" @click="use(a)">Add to prompt</button>
+            <button :disabled="busy || session.locked" @click="use(a)">Add to prompt</button>
             <button :disabled="busy" @click="change(a, 'done')">Done</button>
             <button :disabled="busy" @click="change(a, 'dismissed')">Dismiss</button>
           </div>

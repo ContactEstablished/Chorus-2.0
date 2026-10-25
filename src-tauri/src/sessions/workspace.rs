@@ -264,9 +264,7 @@ impl SessionManager {
     pub fn set_tags(&self, id: u32, tags: &[String]) -> Result<SessionSummary, String> {
         self.row(id)?;
         tag_rows::set(&self.store, id, &tag_rules::clean_tags(tags)?)?;
-        let summary = self.summary(id)?;
-        (self.notify)(summary.clone());
-        Ok(summary)
+        self.publish(id)
     }
 
     pub fn known_tags(&self) -> Result<Vec<TagUse>, String> {

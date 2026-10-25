@@ -125,6 +125,23 @@ a change the agent proposed but didn't make is remaining work, to offer as a fix
 the review instance: Tip script review on Opus got "Fix tip calculation bug", whose prompt asks the
 agent to make the change it proposed; the Haiku canary reply still got none.
 
+**Found while Matthew tried it, and fixed:** three things made the suggestion confusing.
+- Add to prompt was greyed out with no reason, because Chorus had closed the automation's
+  session, and looked as if it had already been used. A stopped session keeps its draft, so the
+  button now works there too; the card says the session is stopped, and the notice says nothing
+  is sent until Restart and Send. A locked session says why the button is off.
+- The closed session could still read "Running": the output thread's update, read before the
+  session was marked exited, could arrive after the close's own update. A session's summary is
+  now read and sent under one lock, so the last one sent is the newest.
+- Gemini wrote its own diff for the fix, against lines tip.py doesn't have. The narrator is now
+  told never to write code and to ask the agent to make the change it proposed.
+
+Seen in the review instance: on a stopped session Add to prompt put the suggestion in the
+draft and sent nothing; after Restart the draft was still there, no prompt had been sent, and
+Send was available. Four automation runs after the change read "Completed" in the page once
+closed, matching the back end. Two Opus runs each got "Make the fix you proposed for the tip
+calculation in tip.py.", and the canary got none.
+
 **Proposed lessons (to number), Claude Code 2.1.308:** every reply line in its transcript records
 `message.model`, `requestedModel` and `effort` (a subagent's lines say `isSidechain: true`); and
 it turns on any-motion mouse tracking (`?1003h` with SGR `?1006h`), so a terminal showing it sends

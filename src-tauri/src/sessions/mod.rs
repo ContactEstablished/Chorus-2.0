@@ -529,6 +529,9 @@ pub struct SessionManager {
     worktree_lock: Mutex<()>,
     quitting: AtomicBool,
     notify: Notify,
+    /// Held from reading a summary to sending it, so a summary read before a change can't
+    /// arrive after the one read after it (an automation's close left "Running" showing).
+    notify_order: Mutex<()>,
     agents: Detector,
     /// The event listener's port, or why it isn't running.
     hook_listener: OnceLock<Result<u16, String>>,
@@ -555,6 +558,7 @@ impl SessionManager {
             worktree_lock: Mutex::new(()),
             quitting: AtomicBool::new(false),
             notify,
+            notify_order: Mutex::new(()),
             agents: Detector::default(),
             hook_listener: OnceLock::new(),
             restore: Mutex::new(RestoreProgress::default()),
@@ -782,13 +786,20 @@ impl SessionManager {
     }
 
     fn notify_id(&self, id: u32) {
-        if let Ok(s) = self.summary(id) {
-            (self.notify)(s);
-        }
+        let _ = self.publish(id);
+    }
+
+    /// Sends session `id`'s current summary to the front end, and returns it.
+    fn publish(&self, id: u32) -> Result<SessionSummary, String> {
+        let _order = self.notify_order.lock().expect("notify order lock");
+        let summary = self.summary(id)?;
+        (self.notify)(summary.clone());
+        Ok(summary)
     }
 
     /// Sends every open session's summary to the front end again.
     pub fn notify_all(&self) {
+        let _order = self.notify_order.lock().expect("notify order lock");
         for s in self.list().unwrap_or_default() {
             (self.notify)(s);
         }
@@ -959,9 +970,7 @@ impl SessionManager {
         if let Err(e) = self.start_run(&live) {
             self.record_failure(&live, &e);
         }
-        let summary = self.summary(id)?;
-        (self.notify)(summary.clone());
-        Ok(summary)
+        self.publish(id)
     }
 
     /// A launch that failed is shown, not hidden: the session stays, exited, with the reason in its
@@ -1703,9 +1712,7 @@ impl SessionManager {
         if let Err(e) = self.start_run(&live) {
             self.record_failure(&live, &e);
         }
-        let summary = self.summary(id)?;
-        (self.notify)(summary.clone());
-        Ok(summary)
+        self.publish(id)
     }
 
     /// The agents a launch can use: those found on this machine, or all of them before the first
@@ -1804,17 +1811,13 @@ impl SessionManager {
             return Err("A session needs a name.".into());
         }
         rows::set_name(&self.store, id, &clean_name(Some(name), "")?)?;
-        let summary = self.summary(id)?;
-        (self.notify)(summary.clone());
-        Ok(summary)
+        self.publish(id)
     }
 
     pub fn set_description(&self, id: u32, text: Option<&str>) -> Result<SessionSummary, String> {
         self.row(id)?;
         rows::set_description(&self.store, id, launch_rules::clean_description(text)?.as_deref())?;
-        let summary = self.summary(id)?;
-        (self.notify)(summary.clone());
-        Ok(summary)
+        self.publish(id)
     }
 
     /// The project a new session joins: the one asked for, which must exist and not be archived,
@@ -1847,9 +1850,7 @@ impl SessionManager {
             }
         }
         rows::set_project(&self.store, id, project_id)?;
-        let summary = self.summary(id)?;
-        (self.notify)(summary.clone());
-        Ok(summary)
+        self.publish(id)
     }
 
     pub fn set_locked(&self, id: u32, locked: bool, pin: Option<&str>) -> Result<SessionSummary, String> {
@@ -1860,9 +1861,7 @@ impl SessionManager {
             crate::lock::check_unlock(&self.store, pin)?;
         }
         rows::set_locked(&self.store, id, locked)?;
-        let summary = self.summary(id)?;
-        (self.notify)(summary.clone());
-        Ok(summary)
+        self.publish(id)
     }
 
     /// Chorus is quitting: record every live run as ended by that, so the next start relaunches
