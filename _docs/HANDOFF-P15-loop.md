@@ -3,7 +3,8 @@
 **Read [HANDOFF-COMMON.md](HANDOFF-COMMON.md) first.** It holds the isolation, safety, shared-file and
 review-file rules this plan relies on. Label `p15`, Vite port 1437, review file
 `_docs/HANDOFF-P15-REVIEW.md`. The source is Matthew's spec, "Chorus Autonomous Phase Loop — Spec"
-(2026-10-24, decision 10 below says where it lives). This plan says how Chorus builds it.
+(2026-10-24). It stays local and untracked in the main checkout's `_docs/Automation Loop/`
+(decision 10), so this plan never quotes it at length. This plan says how Chorus builds it.
 
 ## 1. Goal
 
@@ -189,6 +190,16 @@ scenario is about a model.
 - **Size:** this is the largest phase yet. The slices keep each review small.
 
 ## 9. Decisions for Matthew (ask before building past them)
+
+**Answered 2026-10-25 (D98):** 1 to 8 as recommended (1 still depends on S1). 9: OpenRouter spend is
+capped at $2 per run and $6 for all of P15's testing, and Claude and ChatGPT models run only on
+Matthew's own subscriptions, through the Claude Code and Codex sign-ins, never through an OpenRouter
+or API key. 10: the spec stays local. 11 happens at S4.
+
+The $6 covers every OpenRouter call made while testing P15, the narrator's and Counsel's included,
+and is tallied from each capped key's cost read back. A real-model test doesn't start while a
+Claude or ChatGPT window (5-hour or weekly) is over 70% used, and stops for Matthew at 90%, so
+testing leaves him headroom. Reaching any cap means stop until Matthew reviews.
 
 1. **Unattended tool permissions.**
    - (a) `dontAsk` with an allowlist: edits in the task's worktree and the run's check commands.
