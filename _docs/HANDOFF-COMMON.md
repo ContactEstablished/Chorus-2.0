@@ -1,5 +1,9 @@
 # Hand-off rules for parallel phases (P7, P8, P11, P13, P14)
 
+**Priority override, 2026-10-25 (D102): P11 and P14 are on hold until Matthew explicitly resumes
+them.** The permission below to start those phases is suspended. P10 and P12 take priority;
+P14 and then P11 remain at the end for a future Chorus 2 real-world test. Existing work is retained.
+
 Written 2026-10-20. Matthew is handing five later phases to other models while the main line finishes
 P4 and P5. **Read this file first, then your phase's plan:**
 

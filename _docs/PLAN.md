@@ -59,9 +59,20 @@ scraping the screen, and records **every prompt durably** in SQLite.
 
 ## 4. Phases
 
-### Current position (2026-10-23)
+### Current position (priority updated 2026-10-25)
 
-There are **14 active phases**: P0–P14 with P9 removed. Keep these identifiers: scope and decisions
+**Priority override (2026-10-25, D102):** prioritize P10 Council and P12 Routing inspector.
+P10 remains part of the autonomous phase loop (P15, D97 on its development branch); this priority
+change does not interrupt that ongoing work or create a second Council implementation.
+Move P14 and P11 to the end of the roadmap, with P11 last. Both are **on hold until Matthew
+explicitly resumes them**. Do not start their remaining implementation or acceptance checks under
+the earlier phase-order or parallel-work permissions. Matthew intends to have Chorus 2 handle
+these held items later as a real-world test; this is not authorization to start them now.
+Keep completed work and phase identifiers. M3's full scope remains, with no completion date while
+these phases are held. This override takes precedence over the historical execution order below.
+
+The original roadmap has **14 phases**: P0–P14 with P9 removed; P11 and P14 are now on hold,
+and P15 is being developed separately as noted above. Keep these identifiers: scope and decisions
 already refer to them. P0–P5 are closed; P4's full-day acceptance check was explicitly waived on
 2026-10-22, not performed (D72). P5's remaining work passed its app checks on 2026-10-22.
 M1 is complete with the recorded P1/P4 waivers. P6's final narrator slice is ready for review. Work brought forward from P12 and P14
@@ -79,11 +90,11 @@ does not close those phases.
 | P7 | Attention and notifications | Built 2026-10-24 and ready for review: inbox order and ages, notification centre, tray badge, fleet strip, Raw search, transcript export and Claude fleet addressing; exit gate and D23 seen in the app ([review](HANDOFF-P7-REVIEW.md)). tray click and menu, strip focus and inbox keys checked with real input. A third review's fixes (a hang when a restart changed the tray while a keystroke arrived, reproduced first; the strip's shield size, show/hide races and swapped buttons) checked in the app. Each window now calls only its own commands (D92, D93), seen in the app. Other DPI scales, a real monitor change and swapped buttons deferred (D88); opencode 2.1.4: Ctrl+Shift+F opens Raw search and sends opencode nothing, Ctrl+F still reaches it |
 | P8 | Bots, Automations, Notes, Documents | Built 2026-10-24 and ready for review: Bots from profiles, Notes and per-run instructions (Claude; Codex through its app-server, kept with Friendly waiting for them, D89), Documents for Claude Code and Codex, Automations for Claude Code that close a finished run's agent (D84) and skip while any of their sessions is busy (D85) ([review](HANDOFF-P8-REVIEW.md); decisions D84–D96 and what was verified in [one list](HANDOFF-P6-P8-DECISIONS.md)) |
 | P9 | Voice | Removed; separate dictation app (D22); Chorus retains compatibility (D23) |
-| P10 | Council | Planned |
-| P11 | Measurement, made visible | Planned; tokens, costs, attention and Usage UI; forecasts remain gated on data completeness |
-| P12 | Routing inspector | Launch routing built in P4; Settings → Routing, observer status and history remain |
+| P10 | Council | Priority work (D102); to be built once inside the ongoing P15 autonomous phase loop (D97 on its development branch) |
+| P12 | Routing inspector | Priority work (D102). Launch routing built in P4; Settings → Routing, observer status and history remain |
 | P13 | Phone relay | Planned; P13a delivers prompts and status; P13b answers questions and approvals after P6 |
-| P14 | More agents and ship | Partly built: Gemini, Aider, Ollama, CI, installer polish and Q28–Q30 fixes; complete real turns, DeepSeek spike/adapter, signing, updates and eventual name migration remain |
+| P14 | More agents and ship | **On hold until further notice (D102); at the end, before P11.** Partly built: Gemini, Aider, Ollama, CI, installer polish and Q28–Q30 fixes; complete real turns, DeepSeek spike/adapter, signing, updates and eventual name migration remain for a future Chorus 2 real-world test |
+| P11 | Measurement, made visible | **On hold until further notice (D102); last priority.** Tokens, costs, attention and Usage UI remain for a future Chorus 2 real-world test; forecasts remain gated on data completeness |
 
 **Execution order agreed 2026-10-22:** roadmap consolidation, Q28–Q30 and P5 are complete. Build P6
 and P7 for M2, then finish the remaining capability and release phases for M3. P6 began with the
@@ -100,8 +111,8 @@ P4 (D57). DeepSeek Harness was added to P14 (D59); it was absent from the origin
 
 **Parallel work exception:** [HANDOFF-COMMON.md](HANDOFF-COMMON.md) records Matthew's permission to
 develop P7, P8, P11, P13 and P14 alongside the main sequence. These are plans, not completion claims.
-P14 is partly merged; the other four have no implementation on the current main line. Contracts
-from an unfinished phase remain dependencies, especially P8's prompt delivery and P6's ActionRouter.
+**D102 suspends that permission for P11 and P14 until Matthew explicitly resumes them.**
+P7 and P8 are now merged; P14 is partly merged. Contracts from unfinished phases remain dependencies.
 
 | Supporting plan | Role |
 |---|---|
@@ -376,6 +387,9 @@ cases and exhibits (attach repo files). Fix the under-reported cost by reconcili
 revoke (LESSONS L16).
 
 ### P11 — Measurement, made visible
+**On hold until further notice (D102).** Last in execution priority, after P14. Retain this scope for
+Matthew's future Chorus 2 real-world test; do not start it automatically.
+
 Attention sampler, per-task cost attribution, subscription metering, token ledger, day summary, all with
 UI this time (session facts, Overview headline, a Usage screen). Mission Control's forecasts only once
 P3's turn data meets its completeness bar.
@@ -391,6 +405,10 @@ action pipeline as Friendly. The only remote access in 2.0 (Remote hosts was dis
 whether Claude Code's and Codex's built-in remote control modes complement it (D35).
 
 ### P14 — More agents and ship
+**On hold until further notice (D102).** At the end of execution priority, before P11. Existing work
+is retained; remaining implementation and acceptance checks await Matthew's explicit resumption
+for a future Chorus 2 real-world test.
+
 Gemini CLI, Aider, and Ollama (via opencode) adapters. **DeepSeek Harness** (`dsh`) on DeepSeek's own
 API (D59), after spike S9 settles how Chorus runs it (Q21): on Windows, which of its interfaces gives a
 real terminal or a structured event stream, how its key and model are set from 2.0's vault and launch

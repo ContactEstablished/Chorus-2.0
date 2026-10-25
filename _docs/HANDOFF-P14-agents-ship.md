@@ -1,5 +1,10 @@
 # Hand-off plan: P14 — More agents and ship
 
+**On hold until further notice (2026-10-25, D102).** P14 moves to the end of the roadmap, before P11.
+Keep completed work. Matthew intends to have Chorus 2 handle the remaining work later as a
+real-world test; do not resume implementation or acceptance checks until he explicitly says so.
+This hold overrides the earlier parallel-work permission in HANDOFF-COMMON.md.
+
 **Read [HANDOFF-COMMON.md](HANDOFF-COMMON.md) first.** It holds the isolation, safety, shared-file and
 review-file rules this plan relies on. Label `p14`, Vite port 1434, review file
 `_docs/HANDOFF-P14-REVIEW.md`.

@@ -1,5 +1,10 @@
 # Hand-off plan: P11 — Measurement, made visible
 
+**On hold until further notice (2026-10-25, D102).** P11 is last in roadmap priority, after P14.
+Matthew intends to have Chorus 2 perform this work later as a real-world test. Keep this plan for
+that future run; do not begin implementation or acceptance checks until he explicitly resumes it.
+This hold overrides the earlier parallel-work permission in HANDOFF-COMMON.md.
+
 **Read [HANDOFF-COMMON.md](HANDOFF-COMMON.md) first.** It holds the isolation, safety, shared-file and
 review-file rules this plan relies on. Label `p11`, Vite port 1431, review file
 `_docs/HANDOFF-P11-REVIEW.md`.
