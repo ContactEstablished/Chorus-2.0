@@ -582,7 +582,11 @@ fn condition_text(c: Condition) -> &'static str {
 /// The run stops, saying which condition stopped it, the last error, and where to look.
 fn stop_run(m: &Arc<SessionManager>, run: &RunRow, phase: &PhaseRow, stop: Option<&Stop>) -> Result<(), String> {
     let last_good = db::phases(m.store(), run.id)?.iter().rev().find_map(|p| p.tag.clone()).unwrap_or_else(|| run.base_branch.clone());
-    let why = stop.map_or_else(|| "it was stopped".to_owned(), |s| format!("{}. {}", condition_text(s.condition), s.detail));
+    let why = stop.map_or_else(|| "it was stopped.".to_owned(), |s| {
+        let detail = s.detail.trim_end();
+        let end = if detail.ends_with(['.', '!', '?']) { "" } else { "." };
+        format!("{}. {detail}{end}", condition_text(s.condition))
+    });
     let note = format!(
         "STOPPED: P{:02} · {} stopped because {why} The worktree at {} holds the last attempt, uncommitted; the last good state is {last_good}.",
         phase.number,

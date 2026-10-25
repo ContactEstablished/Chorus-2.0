@@ -348,7 +348,7 @@ function checkKey(s: LoopStep, c: LoopCheckRun): string {
                     <span>{{ c.passed ? 'passed' : c.timedOut ? 'timed out' : 'failed' }}</span>
                     <span class="mono">{{ c.name }}</span>
                     <span class="muted">{{ seconds(c.durationMs) }}</span>
-                    <span v-if="c.signature" class="sig">{{ c.signature.firstError ?? c.signature.tests[0] ?? '' }}</span>
+                    <span v-if="c.signature" class="sig">{{ c.signature.tests[0] ?? c.signature.firstError ?? '' }}</span>
                     <button type="button" class="quiet" @click="shownOutput = shownOutput === checkKey(s, c) ? null : checkKey(s, c)">
                       {{ shownOutput === checkKey(s, c) ? 'Hide output' : 'Output' }}
                     </button>
