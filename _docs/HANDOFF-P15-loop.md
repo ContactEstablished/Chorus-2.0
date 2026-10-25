@@ -142,7 +142,7 @@ counts, the model per step, Telegram message ids) lives in Chorus's database, wi
      receives `rate_limits`. Fixtures live under `%TEMP%\chorus-p15`, which Claude Code trusts.
 2. **One phase, one task.** The orchestrator, run state, the gatekeeper's checks, roles from Bots, the
    model logged per step, and every stop condition. Prove it with the scripted agent (§7), then with
-   one real run on fixture F1.
+   one real run on fixture F1. *Done 2026-10-25; see [the review draft](HANDOFF-P15-REVIEW.md).*
 3. **Agent tools and questions in Chorus.** `ask`, `log_assumption` and `task_done`; the three
    classes, timed defaults, the assumptions log, and "make it a rule".
 4. **Telegram.** Spike S4 first, then HANDOFF-P13's P13a, with phone answers now possible (P6 built the reply channels),
