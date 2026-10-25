@@ -153,7 +153,11 @@ fn view(m: &SessionManager) -> Result<RelayView, String> {
 pub fn start(m: &Arc<SessionManager>) -> Result<(), String> {
     if let Some(id) = db::config(m.store())?.credential_id {
         match vault::decrypt(m.store(), id) {
-            Ok(t) => state().token = Some(t),
+            Ok(t) => {
+                let mut s = state();
+                s.token = Some(t);
+                s.conn = Conn::Connecting;
+            }
             Err(e) => set_conn(Conn::Rejected(format!("the stored token couldn't be decrypted ({e})"))),
         }
     }

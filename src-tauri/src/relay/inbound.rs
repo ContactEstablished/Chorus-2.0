@@ -32,24 +32,42 @@ fn status(m: &SessionManager) -> String {
 
 pub fn poll(m: &Arc<SessionManager>) {
     let mut backoff = 1u64;
-    // The bot's command menu, set once per start so a newer Chorus's commands show on the phone.
-    let mut menu_set = false;
+    // Until a call has worked since the start or the last failure, a quick getMe says whether
+    // Telegram answers, instead of a long poll that can take 25 s. It also sets the bot's command
+    // menu, so a newer Chorus's commands show on the phone.
+    let mut confirmed = false;
     while !m.is_quitting() {
         let Some(token) = active_token(m) else {
-            if state().token.is_none() {
-                set_conn(Conn::NoToken);
+            {
+                let mut s = state();
+                s.conn = match (&s.token, &s.conn) {
+                    // The stored token couldn't be decrypted: keep saying so.
+                    (None, Conn::Rejected(why)) => Conn::Rejected(why.clone()),
+                    (None, _) => Conn::NoToken,
+                    (Some(_), _) => Conn::Off,
+                };
             }
+            confirmed = false;
             std::thread::sleep(Duration::from_secs(2));
             continue;
         };
-        let offset = db::config(m.store()).map(|c| c.poll_offset).unwrap_or(0);
-        match client::get_updates(&token, offset) {
+        let result = if confirmed {
+            let offset = db::config(m.store()).map(|c| c.poll_offset).unwrap_or(0);
+            client::get_updates(&token, offset)
+        } else {
+            client::get_me(&token).map(|_| {
+                let _ = client::set_commands(&token);
+                Vec::new()
+            })
+        };
+        if result.is_err() {
+            confirmed = false;
+        }
+        match result {
             Ok(updates) => {
                 set_conn(Conn::Connected);
+                confirmed = true;
                 backoff = 1;
-                if !menu_set {
-                    menu_set = client::set_commands(&token).is_ok();
-                }
                 for (id, incoming) in updates {
                     handle(m, &token, incoming);
                     let _ = db::set_offset(m.store(), id + 1);
