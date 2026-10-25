@@ -116,9 +116,30 @@ pub fn folder_trusted(config: &str, cwd: &str) -> Option<bool> {
     }
 }
 
+/// Whether Claude Code trusts sessions in a git repository and its worktrees. Measured on 2.1.310
+/// (P15): it keys a repository, worktrees included, by the main working tree's own entry, and a
+/// trusted folder above the repository doesn't count, unlike a plain folder's. Answering its
+/// question in a worktree records the main working tree.
+pub fn repo_trusted(config: &str, main_root: &str) -> Option<bool> {
+    let v: Value = serde_json::from_str(config).ok()?;
+    let Some(projects) = v.get("projects").and_then(Value::as_object) else { return Some(false) };
+    let want = norm(main_root);
+    Some(projects.iter().any(|(k, p)| norm(k) == want && p.get("hasTrustDialogAccepted").and_then(Value::as_bool) == Some(true)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_repository_needs_its_own_entry() {
+        let config = r#"{"projects":{"C:/tmp/p15":{"hasTrustDialogAccepted":true},"C:/tmp/p15/b":{"hasTrustDialogAccepted":true}}}"#;
+        assert_eq!(repo_trusted(config, r"C:\tmp\p15\a"), Some(false), "a trusted parent doesn't count");
+        assert_eq!(folder_trusted(config, r"C:\tmp\p15\a"), Some(true), "it does for a plain folder");
+        assert_eq!(repo_trusted(config, r"c:\TMP\p15\b\"), Some(true));
+        assert_eq!(repo_trusted("{}", r"C:\x"), Some(false));
+        assert_eq!(repo_trusted("nope", r"C:\x"), None);
+    }
 
     const CONFIG: &str = r#"{"projects":{
         "C:/Users/a/work": {"hasTrustDialogAccepted": true},

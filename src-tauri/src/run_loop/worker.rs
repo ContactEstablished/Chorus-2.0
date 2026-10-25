@@ -596,22 +596,30 @@ fn stop_run(m: &Arc<SessionManager>, run: &RunRow, phase: &PhaseRow, stop: Optio
 
 /// Ends a running step's agent (Stop, or the time cap), leaving its session for review.
 pub fn end_agent(m: &SessionManager, step: &StepRow, why: &str) {
-    if let (Some(sid), Some(run_id)) = (step.session_id, step.session_run_id) {
-        let _ = m.finish(sid, run_id, why);
+    if let Some(sid) = step.session_id
+        && let Err(e) = m.end_agent(sid, why)
+    {
+        eprintln!("chorus: loop step {}: ending its agent: {e}", step.id);
     }
     let _ = db::end_step(m.store(), step.id, StepState::Failed, Some(why), None);
 }
 
-/// The read-only `run-state.json` beside the run documents, for people and agents.
+/// The read-only `run-state.json` beside the run documents, for people and agents. It is an
+/// export of the database, rewritten after every step, so git ignores it: a phase's tag never
+/// leaves the worktree changed.
 fn write_state(m: &SessionManager, run: &RunRow) {
     let Some(dir) = run.worktree_path.as_deref() else { return };
     let Ok(view) = super::view(m, run) else { return };
+    let folder = Path::new(dir).join(RUN_DIR);
+    let _ = std::fs::create_dir_all(&folder);
+    let ignore = folder.join(".gitignore");
+    let listed = std::fs::read_to_string(&ignore).unwrap_or_default();
+    if !listed.lines().any(|l| l.trim() == "run-state.json") {
+        let sep = if listed.is_empty() || listed.ends_with('\n') { "" } else { "\n" };
+        let _ = std::fs::write(&ignore, format!("{listed}{sep}run-state.json\n"));
+    }
     if let Ok(json) = serde_json::to_string_pretty(&view.state_file()) {
-        let path = Path::new(dir).join(RUN_DIR).join("run-state.json");
-        if let Some(parent) = path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        let _ = std::fs::write(path, json + "\n");
+        let _ = std::fs::write(folder.join("run-state.json"), json + "\n");
     }
 }
 

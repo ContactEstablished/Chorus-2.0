@@ -448,7 +448,7 @@ fn delivered_secrets_are_scrubbed_and_echoes_are_run_and_time_scoped() {
     let (id, run, _) = delivery_fixture(&f, false);
     *run.recorder.lock().unwrap() = Recorder::new(id, run.id, "hook", Arc::new(vec![b"example-private-value".to_vec()]), Arc::new(builtin_patterns()));
     run.recorder.lock().unwrap().record(&f.manager.store, "test", &serde_json::json!({}), &[chorus_core::events::AgentEvent::Idle], 0);
-    let result = delivery::deliver_prompt(&f.manager, id, run.id, DELIVERY_REQUEST, "use example-private-value", PromptSource::Automation).unwrap();
+    let result = delivery::deliver_prompt(&f.manager, id, run.id, DELIVERY_REQUEST, "use example-private-value", PromptSource::Composer).unwrap();
     let stored: String = f.manager.store.with(|c| c.query_row("SELECT text FROM prompts WHERE id=?1", [result.prompt_id], |r| r.get(0))).unwrap();
     assert!(!stored.contains("example-private-value"));
     assert!(receipts::observe(&f.manager.store, run.id + 1, &stored, crate::store::now_ms()).unwrap().is_none());

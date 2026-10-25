@@ -429,6 +429,15 @@ fn ready_to_run(m: &SessionManager, id: u32) -> Result<bool, String> {
         RunState::Stopped | RunState::Done => return Err("This run has ended. Make a new run to go again.".into()),
     }
     check_config(m, &run.config)?;
+    // A step in a repository Claude Code doesn't trust would stop at its trust question, with
+    // nobody there to answer. Chorus never trusts one for Matthew (D55); it says so instead.
+    let env: Vec<(String, String)> = std::env::vars().collect();
+    if run.config.script.is_none() && crate::agents::claude_repo_trusted(&env, &run.repo_root) == Some(false) {
+        return Err(format!(
+            "Claude Code doesn't trust {} yet, so the run's steps would stop at its trust question. Start a Claude Code session in that folder once, choose Yes, then start the run.",
+            run.repo_root
+        ));
+    }
     if run.worktree_path.as_deref().is_none_or(|p| !Path::new(p).is_dir()) {
         let (wt_id, path) = m.add_run_worktree(&run.repo_root, &files::slug(&run.name), &run.run_branch, &run.base_branch)?;
         db::set_worktree(m.store(), id, wt_id, &path)?;

@@ -179,6 +179,13 @@ pub fn claude_folder_trusted(parent_env: &[(String, String)], cwd: &str) -> Opti
     chorus_core::claude::folder_trusted(&read_claude_config(&claude_config_path(parent_env)?)?, cwd)
 }
 
+/// P15: whether Claude Code trusts sessions in the repository whose main working tree is
+/// `main_root`, and so in its worktrees (`chorus_core::claude::repo_trusted`). None when its config
+/// can't be read.
+pub fn claude_repo_trusted(parent_env: &[(String, String)], main_root: &str) -> Option<bool> {
+    chorus_core::claude::repo_trusted(&read_claude_config(&claude_config_path(parent_env)?)?, main_root)
+}
+
 /// Records in Claude Code's config that it trusts `folder` (D55): the only write Chorus makes
 /// there. The config is read again just before, written to a file beside it and renamed over it,
 /// so Claude Code never reads half a file, then read back. A config that isn't there yet is left

@@ -77,7 +77,7 @@ pub fn strip_escapes(s: &str) -> String {
 }
 
 /// A failing test's name from one output line, for the test runners the loop is likely to meet:
-/// Vitest and Jest, `dotnet test`, `cargo test`, pytest, Playwright and Go.
+/// Vitest and Jest, Node's own runner, `dotnet test`, `cargo test`, pytest, Playwright and Go.
 fn failing_test(line: &str) -> Option<String> {
     let l = line.trim();
     let after = |prefix: &str| l.strip_prefix(prefix).map(str::trim).filter(|s| !s.is_empty());
@@ -87,6 +87,10 @@ fn failing_test(line: &str) -> Option<String> {
     }
     if let Some(rest) = after("●") {
         return rest.contains('›').then(|| rest.to_owned());
+    }
+    // node:test: "✖ sum adds two numbers (1.3ms)", but not its "✖ failing tests:" heading.
+    if let Some(rest) = after("✖") {
+        return (!rest.ends_with(':')).then(|| rest.to_owned());
     }
     // dotnet test: "Failed Namespace.Class.Method [12 ms]".
     if let Some(rest) = after("Failed ") {
@@ -198,6 +202,10 @@ mod tests {
     fn other_runners() {
         let dotnet = "  Failed Shop.Tests.OrdersTests.Returns404 [23 ms]\n  Error Message:\n   Assert.Equal() Failure\n";
         assert_eq!(of("dotnet test", dotnet).tests, ["Shop.Tests.OrdersTests.Returns404"]);
+        let node = "✔ --version prints the version (0.77ms)\n✖ sum adds two numbers (1.3452ms)\n\n✖ failing tests:\n\n✖ sum adds two numbers (1.3452ms)\n  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n";
+        let s = of("tests", node);
+        assert_eq!(s.tests, ["sum adds two numbers"]);
+        assert_eq!(s.summary(), "tests: sum adds two numbers failed");
         let cargo = "test parse::tests::rejects_empty ... FAILED\nthread 'parse::tests::rejects_empty' panicked at src/parse.rs:40:9:\n";
         let s = of("cargo test", cargo);
         assert_eq!(s.tests, ["parse::tests::rejects_empty"]);

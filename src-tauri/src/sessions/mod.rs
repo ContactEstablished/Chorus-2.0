@@ -1719,6 +1719,22 @@ impl SessionManager {
         Ok(())
     }
 
+    /// P15: ends the session's agent whoever typed in it, for an explicit Stop (a loop run stopped
+    /// by Matthew, or past its time cap). A locked session is still refused. The session stays,
+    /// exited, with `note`.
+    pub fn end_agent(&self, id: u32, note: &str) -> Result<(), String> {
+        let live = self.open_live(id)?;
+        let _action = live.action.lock().expect("action lock");
+        self.refuse_if_locked(&self.row(id)?, "close")?;
+        if self.run_input(id).is_none() {
+            return Ok(());
+        }
+        self.end_run_for(&live, ExitCause::AutomationFinished);
+        rows::set_state(&self.store, id, SessionState::Exited, Some(note))?;
+        self.notify_id(id);
+        Ok(())
+    }
+
     pub fn restart(self: &Arc<Self>, id: u32) -> Result<SessionSummary, String> {
         if self.row(id)?.state == SessionState::Closed {
             return Err("a closed session can't be restarted".into());

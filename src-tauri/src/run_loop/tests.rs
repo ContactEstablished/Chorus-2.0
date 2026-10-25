@@ -145,7 +145,10 @@ fn a_phase_passes_after_a_fix_and_waits_at_its_milestone() {
     assert_eq!(git(&f.repo, &["rev-parse", "--abbrev-ref", "HEAD"]).trim(), "main");
     assert!(!f.repo.join("src").exists(), "the main checkout is untouched");
     let log = git(&wt, &["log", "--format=%s"]);
-    assert!(log.contains("P01 · Sum: plan") && log.contains("P01 T1: Sum") && log.contains("P01 · Sum: passed its checks"), "{log}");
+    assert!(log.contains("P01 · Sum: plan") && log.contains("P01 T1: Sum"), "{log}");
+    // run-state.json is ignored, so the tag leaves nothing changed behind it.
+    assert_eq!(git(&wt, &["status", "--porcelain"]).trim(), "", "a clean worktree at the tag");
+    assert!(std::fs::read_to_string(wt.join(".chorus/run/.gitignore")).unwrap().contains("run-state.json"));
     let report = std::fs::read_to_string(wt.join(".chorus/run/phases/01-sum/gate-report.md")).unwrap();
     assert!(report.find("fix attempt 1: every check passed").unwrap() < report.find("first build: 1 of 1 checks failed").unwrap(), "{report}");
     assert!(report.contains("Failure: sum: error: sum subtracts"), "{report}");
