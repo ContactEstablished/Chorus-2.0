@@ -5,18 +5,26 @@ HANDOFF-COMMON §6's sections. Raw evidence is in `_verify/p15/`, which is never
 
 ## 1. Verdict
 
-**Partly done: slices 1 to 3 of 9.** The spikes are done (Telegram's moved to slice 4). One phase at
-a time, task after task, runs end to end in the app: scripted and with real Claude Code steps. Steps
-call Chorus's own tools to ask questions, log assumptions and report they're done; questions are
-answered on the Loop screen, and "make it a rule" stops a later phase asking again. Two real runs on
-fixture F1 worked all three phases to Done. Slices 4 to 9 (Telegram, the plan grill, parallel
-builders, review, Counsel, limits) are not started.
+**Partly done: slices 1 to 3 of 9, and slice 4's loop half.** The spikes are done (Telegram's ran in
+slice 4). One phase at a time, task after task, runs end to end in the app: scripted and with real
+Claude Code steps. Steps call Chorus's own tools to ask questions, log assumptions and report they're
+done; questions are answered on the Loop screen or from Matthew's phone, and "make it a rule" stops a
+later phase asking again. Two real runs on fixture F1 worked all three phases to Done. The Telegram
+relay carries the loop's questions, stops, milestones and finished runs, with buttons, replies and
+commands, seen working with a real bot. Still to come in slice 4: HANDOFF-P13's session features
+(D101). Slices 5 to 9 (the plan grill, parallel builders, review, Counsel, limits) are not started.
 
 ## 2. Branch
 
 `p15/loop`, from `main` at `d4f4298`.
 
 ```
+51f4e45 Relay: a milestone loses its Approve button once settled; the last one can be approved
+454cf5a F1 fixture: a three-phase scripted run with a blocking and a timed question (--phone)
+45eb295 Relay: retry a reset connection to Telegram and say so when the token wasn't checked
+5e9f52a P15 slice 4: the Telegram relay for the loop
+8dabc78 Merge fix/claude-repo-trust (D100) into p15/loop
+bca7cf7 P15: the review draft after slice 3
 bc51602 P15: a rule reads as the rule, with its question after; one tag per assumption
 160ea45 P15 slice 3: Chorus's tools for agents, and questions
 7923315 P15: never GPT or Claude through OpenRouter; fixture trust; D55 follow-up (D99)
@@ -54,8 +62,16 @@ aa01550 P15: the Loop screen, fixture F1, and fixes from the first real run
 | `src-tauri/src/run_loop/tests.rs` | Whole runs against a real git repository with scripted steps |
 | `src-tauri/migrations/0023_p15_loop.sql` | The loop's tables |
 | `src/views/LoopView.vue` | The Loop screen |
-| `scripts/loop-fixtures/make-f1.mjs`, `make-f1-script.mjs` | Fixture F1 and its scripted first phase |
-| `_docs/spikes/P15.md` | Slice 1's spikes |
+| `scripts/loop-fixtures/make-f1.mjs`, `make-f1-script.mjs` | Fixture F1 and its scripted phases (`--phone`: all three, with a blocking and a timed question) |
+| `_docs/spikes/P15.md` | Slice 1's spikes, and S4 from slice 4 |
+| `crates/chorus-core/src/relay/mod.rs` | The relay's pure core: parsing updates, who is heard, pairing codes, commands, the sanitizer, callback tokens, the send bucket, the token's shape |
+| `crates/chorus-core/src/relay/render.rs` | Every phone message: question cards and their settled form, STOPPED, MILESTONE, phase done, DONE, `/status`, help, the answer hint |
+| `src-tauri/src/relay/mod.rs` | Relay state, its IPC commands and the token in the vault |
+| `src-tauri/src/relay/client.rs` | The Bot API calls; errors without the URL; connect errors retried |
+| `src-tauri/src/relay/inbound.rs` | The long-poll thread, pairing, commands, replies and button presses |
+| `src-tauri/src/relay/outbound.rs` | What the loop queues for the phone, and the sender thread |
+| `src-tauri/src/relay/db.rs`, `tests.rs` | The relay's rows; the no-network test |
+| `src/views/settings/PhoneSettings.vue` | Settings → Phone |
 
 **Modified** (hot files from HANDOFF-COMMON §3 marked ★)
 
@@ -74,6 +90,9 @@ aa01550 P15: the Loop screen, fixture F1, and fixes from the first real run
 | `crates/chorus-core/src/claude.rs`, `src-tauri/src/agents/mod.rs` | `repo_trusted`: Claude Code's trust for a git repository |
 | `src-tauri/src/sessions/tests.rs` | `loop_step: None`; a typed-delivery test uses the composer source |
 | `src/stores/view.ts`, `src/shell/Rail.vue`, `src/app/App.vue`, `src/components/icons.ts`, `src/ipc/index.ts` | The Loop screen's place, rail entry, icon and types |
+| `src-tauri/src/run_loop/mod.rs`, `worker.rs` | The loop tells the relay about questions, stops, milestones and finished runs; answers and commands from the phone |
+| `src/views/SettingsView.vue`, `src/views/LoopView.vue` | The Phone section; a run's "phone gets no question text" setting |
+| ★ `secret-patterns.json`, `crates/chorus-core/src/scrub.rs` | A Telegram bot token's shape |
 
 ## 4. Surface added
 
@@ -93,16 +112,23 @@ aa01550 P15: the Loop screen, fixture F1, and fixes from the first real run
   and `decisions.md` rules; in app data, `loop/mcp-step-<id>.json` (the URL and the token's variable
   name, never the token). Commits and `phase-NN` tags on the run branch, never on the base branch.
 - **Worktrees:** `<parent>\.chorus2\<repo>\run-<name>` on `run/<name>`, registered like P5's.
+- **Relay (slice 4):** tables `relay_config` (one row: the token's credential, on/off, bot name, poll
+  offset), `relay_users`, `relay_outbox`, `relay_messages` (what each sent message was about),
+  `relay_buttons` (single-use, a week) and `relay_audit` (no message text), in 0023. Commands
+  `relay_status`, `relay_set_token`, `relay_clear_token`, `relay_set_enabled`, `relay_pair_start`,
+  `relay_unpair`, `relay_test`. Outbound HTTPS to `api.telegram.org` only; no port opened. Run config
+  `phoneStatusOnly`.
 - No dependency added.
 
 ## 5. Plan against result
 
 | Slice | Status |
 |---|---|
-| 1. Spikes | Done: S1 (permissions), S2 (allowances), S3 (agent tools). S4 (Telegram) moved to slice 4 |
+| 1. Spikes | Done: S1 (permissions), S2 (allowances), S3 (agent tools); S4 (Telegram) ran in slice 4 |
 | 2. One phase, one task | Done, and beyond: tasks run one after another in dependency order, and passing phases chain to the next until a milestone. Roles are the planner and builder; the reviewer comes in slice 7. The core decides every stop condition the slice has signals for (fix attempts, same signature, wall clock, invalid plan, failing step, stopped task); the others arrive with their slices |
 | 3. Agent tools and questions | Done: `ask` (blocking, timed, log only), `log_assumption`, `task_done`; answers and timed defaults go back by resuming the step's conversation; the Loop screen's answer panel and "make it a rule". Claude Code steps only, like slice 2 |
-| 4 to 9 | Not started |
+| 4. Telegram | Loop half done: S4; pairing, the token in the vault, long polling; question cards with option buttons, "…and make it a rule" and reply answers; STOPPED, MILESTONE (Approve), phase done (silent), DONE; `/status`, `/pause`, `/resume`, `/approve`, `/stop`; Settings → Phone. To do: HANDOFF-P13's session features as D101 decided |
+| 5 to 9 | Not started |
 
 Differences from the plan: fixture F1 uses Node's own test runner instead of Vitest, so it needs no
 install; each step is a fresh session whose context is the run's files, not a conversation.
@@ -123,6 +149,9 @@ clean; secret scan clean.
 | Questions, deterministic | `run_loop::tests`: a blocking question waits until answered and becomes a rule that is committed; a timed question takes its default and logs it; the tools endpoint refuses a wrong token, records a question (a key in it scrubbed), an assumption and a summary, and says a stopped step has ended | All pass |
 | The answer panel | A scripted question in the app, answered by clicking an option, ticking Make it a rule and Answer (`loop-question.png`) | The rule lands in decisions.md and the step goes on to pass and tag |
 | Real questions (scenarios 8 and 10) | F1 whose decisions.md says to ask before wording any message a user sees; Claude Code (Sonnet) steps | P01's planner asked a blocking question with its proposed wording; answered with a rule, its conversation resumed with the answer and finished, logging 4 assumptions and calling `task_done`. P02's `product` used the rule's wording and asked nothing. P03's planner asked about the help text (not covered by the rule); answered, it built exactly that. 37 tests pass, 15 assumptions logged, Done with tags `phase-01` to `phase-03`; allowance moved by under 1% of the 5-hour window |
+
+| The relay, deterministic | `relay::tests` (no network): strangers and groups dropped; a wrong pairing code then the right one; a question card with three buttons and a key in it scrubbed; a button works once; a plain message gets the hint; a reply answers and the card's edit is queued; a second answer refused; a forwarded `/stop` ignored; a milestone settled once, edited if sent and rewritten if not. Core: parsing, `admit`, pairing lockout, commands, rendering, the token pattern | All pass. `npm run check` at `51f4e45`: 55 vitest, 122 app and 525 core Rust tests, clippy and the secret scan clean |
+| The relay with a real bot (S4) | Matthew's dev bot and phone; scripted F1 runs (`--question --phone`) and a stuck run in the p15 instance; details in [spikes/P15.md](spikes/P15.md) S4 | Pairing; four questions answered by button, by "…and make it a rule" (in decisions.md) and by a reply, each card edited; silent phase done, milestones, DONE, STOPPED without a path; all five commands; Offline with its cause and recovery without a restart; 409 shown in both instances; no token-shaped string in 223 files |
 
 **Not yet verified:** a Chorus restart in the middle of a real step, or while a step waits on a question (the code
 runs the first again and keeps the second waiting; untested in the app); a timed question reaching its
@@ -155,6 +184,11 @@ spike doc); codex-cli 0.163.0; opencode 2.1.4; Node 24.15; git on PATH.
 | P15-D13 | A timed question's default is taken after `limits.timedMinutes` (15 by default, 1 minute to 24 hours, per run) and logged in assumptions.md |
 | P15-D14 | "Make it a rule" appends the answer to the run's decisions.md under "Rules from your answers", committed with the next task |
 | P15-D15 | Each step gets its own token for Chorus's tools, in its environment only; the MCP config file names the variable |
+| P15-D16 | The relay hears only paired users in their own private chat; a group, a bot or a forwarded message is dropped and audited, never answered. Pairing codes are six digits, single-use, ten minutes, five tries |
+| P15-D17 | A loop question goes to the phone with its options as buttons and "…and make it a rule" for each; a reply in words answers it; every sent copy is edited once it's answered, defaulted or closed |
+| P15-D18 | Every milestone has Approve, the last one finishing the run; approved or stopped from anywhere, its message is edited to say which and loses the button |
+| P15-D19 | Nothing is queued while no phone is paired, so a backlog never floods a newly paired phone; a message not sent within a day or 30 tries is dropped with the reason; a command more than 120 s old is refused |
+| P15-D20 | A Bot API call whose connection never opened is tried twice more (it carried nothing); a timeout or a refusal is not |
 
 **Lessons:** P15-L1 to P15-L6 are in [spikes/P15.md](spikes/P15.md). From slice 2:
 
@@ -165,14 +199,21 @@ spike doc); codex-cli 0.163.0; opencode 2.1.4; Node 24.15; git on PATH.
   question on 2.1.310, past D75's 60 s window.
 - **P15-L9 — `tauri dev` rebuilds and restarts the app on any source change;** an instance that runs
   long jobs needs `--no-watch`.
-- **P15-L12 — A first TLS connection from Windows (Schannel) to api.telegram.org can be reset,** and
-  the next one succeed, with curl as well as `reqwest`. A connect error carried no request, so retry
-  it, and say "couldn't reach" rather than "didn't accept" when the token was never checked.
+- **P15-L10 — specta refuses 64-bit integers and two exported types with one name across crates,**
+  and ignores serde's container rename for the exported name.
 - **P15-L11 — Told in decisions.md to ask before wording user-facing messages, Claude Code (Sonnet)
   asks at planning time, once, with its proposal,** and a rule from the answer kept the next phase from
   asking (F1, 2.1.310).
-- **P15-L10 — specta refuses 64-bit integers and two exported types with one name across crates,**
-  and ignores serde's container rename for the exported name.
+- **P15-L12 — A first TLS connection from Windows (Schannel) to api.telegram.org can be reset,** and
+  the next one succeed, with curl as well as `reqwest`. A connect error carried no request, so retry
+  it, and say "couldn't reach" rather than "didn't accept" when the token was never checked.
+- **P15-L13 — Telegram answers a second long poll on the same bot with 409, and the first one too
+  while they overlap,** so two pollers both report the conflict; the survivor recovers on its next poll.
+- **P15-L14 — `reqwest` honours `HTTPS_PROXY`,** so a closed local proxy port, then a CONNECT-only
+  tunnel on it, tests offline and recovery without a restart and without seeing the request.
+- **P15-L15 — On a phone, an answer typed under a bot's message isn't a reply unless it is sent as
+  one** (swipe the message, or tap it and choose Reply); a bot can only tell what it answers by
+  `reply_to_message`.
 
 ## 9. Questions for Matthew
 
@@ -198,7 +239,12 @@ after slice 3: done as D100 on `fix/claude-repo-trust`, merged into this branch.
   safer calling tools directly. Test integrity (slice 6) covers weakened tests.
 - Only Claude Code runs steps so far; Codex and opencode first prompts and MCP configuration come
   with slice 7 (spike S3 has the shapes).
-- Questions are answered only on the Loop screen until Telegram (slice 4).
+- Bot chats aren't end-to-end encrypted: loop questions' text and options reach Telegram (D98); a run
+  can send status only. Nothing listens on a port.
+- A milestone queued while the phone was offline and approved before it went is rewritten in the
+  outbox; if the sender is mid-send at that moment, the phone keeps a stale Approve that answers
+  "isn't waiting for your review".
+- Session approvals, questions and prompts aren't on the phone yet (slice 4's second half, D101).
 - A run started before `run-state.json` was ignored has it tracked, so it shows as modified after a tag
   (the F1 run made before that fix).
 - Step sessions stay in the session list after they finish (exited), one per step.
@@ -218,3 +264,7 @@ Read `crates/chorus-core/src/run_loop/mod.rs` (the decisions), then `src-tauri/s
 5. For a free run, set "Scripted steps" to a file from `make-f1-script.mjs`; with `--question` its
    first build asks a question to answer on the Loop screen.
 6. For real questions, make F1 with `--always-ask`; its planner asks about message wording.
+7. For the phone: make a dev bot with BotFather, paste its token in Settings → Phone, Pair, and send
+   the `/pair` line to the bot. A scripted run from `make-f1-script.mjs --question --phone` then sends
+   two questions, milestones and DONE; answer by button and by replying, and try `/status`,
+   `/pause`, `/resume`, `/approve` and `/stop`.
