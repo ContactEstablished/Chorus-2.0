@@ -144,7 +144,7 @@ counts, the model per step, Telegram message ids) lives in Chorus's database, wi
    model logged per step, and every stop condition. Prove it with the scripted agent (§7), then with
    one real run on fixture F1. *Done 2026-10-25; see [the review draft](HANDOFF-P15-REVIEW.md).*
 3. **Agent tools and questions in Chorus.** `ask`, `log_assumption` and `task_done`; the three
-   classes, timed defaults, the assumptions log, and "make it a rule".
+   classes, timed defaults, the assumptions log, and "make it a rule". *Done 2026-10-25.*
 4. **Telegram.** Spike S4 first, then HANDOFF-P13's P13a, with phone answers now possible (P6 built the reply channels),
    plus the loop's message types, buttons, reply routing and commands.
 5. **Chaining and the plan grill.** Kickoff files, the planner reading the code the last phase left,
