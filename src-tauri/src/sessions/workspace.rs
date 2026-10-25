@@ -10,7 +10,6 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 
 use super::{SessionManager, SessionSummary, check_cwd};
-use crate::agents;
 use crate::git;
 use crate::store::worktrees::{self as worktree_rows, NewWorktree};
 use crate::store::{sessions as rows, settings, tags as tag_rows};
@@ -207,25 +206,6 @@ impl SessionManager {
         }
         if made.id != 0 {
             let _ = worktree_rows::delete(&self.store, made.id);
-        }
-    }
-
-    /// Claude Code asks to trust every new folder (LESSONS L33), and a worktree is always new. When
-    /// it already trusts `source` (the folder the session was asked for) or the repository, Chorus
-    /// records the same trust for the folder that holds the repository's worktrees,
-    /// `<parent>\.chorus2\<repo>`, which covers this one and the next (D55). A folder the user
-    /// hasn't trusted through its repository stays untrusted, and Claude Code asks as usual.
-    pub(super) fn trust_worktree_for_claude(&self, worktree_id: u32, source: &str) {
-        let Some(w) = worktree_rows::get(&self.store, worktree_id).ok().flatten() else { return };
-        let Some(home) = Path::new(&w.path).parent().map(|p| p.display().to_string()) else { return };
-        let env: Vec<(String, String)> = std::env::vars().collect();
-        let trusted = |folder: &str| agents::claude_folder_trusted(&env, folder) == Some(true);
-        if trusted(&w.path) || !(trusted(source) || trusted(&w.repo_root)) {
-            return;
-        }
-        if let Err(e) = agents::claude_trust_folder(&env, &home) {
-            // The session still starts; Claude Code then asks, and the session says so.
-            eprintln!("chorus: couldn't record Claude Code's trust for {home}: {e}");
         }
     }
 

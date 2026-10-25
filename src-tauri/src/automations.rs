@@ -741,7 +741,7 @@ mod tests {
         assert_eq!(untrusted_folder(&env, &cwd), None, "no config: Chorus can't tell, so it doesn't block");
         std::fs::write(dir.join(".claude.json"), r#"{"projects":{}}"#).unwrap();
         assert!(untrusted_folder(&env, &cwd).is_some_and(|p| p.contains("doesn't trust") && p.contains(&cwd)));
-        crate::agents::claude_trust_folder(&env, &cwd).unwrap();
+        std::fs::write(dir.join(".claude.json"), format!(r#"{{"projects":{{"{}":{{"hasTrustDialogAccepted":true}}}}}}"#, cwd.replace('\\', "/"))).unwrap();
         assert_eq!(untrusted_folder(&env, &cwd), None);
         let _ = std::fs::remove_dir_all(&dir);
     }

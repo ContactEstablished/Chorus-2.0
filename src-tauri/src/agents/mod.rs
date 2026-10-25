@@ -173,45 +173,13 @@ fn read_claude_config(path: &Path) -> Option<String> {
     std::fs::read_to_string(path).ok()
 }
 
-/// Whether Claude Code trusts `cwd` or a folder above it, from its own config, read only. `None`
-/// when unreadable.
+/// Whether Claude Code will start in `cwd` without asking to trust it, from its own config, read
+/// only: through the main working tree's own entry when `cwd` is in a git repository (worktrees
+/// included), else through `cwd` or a folder above it (D100, L66). `None` when either can't be read.
 pub fn claude_folder_trusted(parent_env: &[(String, String)], cwd: &str) -> Option<bool> {
-    chorus_core::claude::folder_trusted(&read_claude_config(&claude_config_path(parent_env)?)?, cwd)
-}
-
-/// Records in Claude Code's config that it trusts `folder` (D55): the only write Chorus makes
-/// there. The config is read again just before, written to a file beside it and renamed over it,
-/// so Claude Code never reads half a file, then read back. A config that isn't there yet is left
-/// alone (Claude Code makes it on first run). Returns whether anything changed.
-pub fn claude_trust_folder(parent_env: &[(String, String)], folder: &str) -> Result<bool, String> {
-    let path = claude_config_path(parent_env).ok_or("no home folder for Claude Code's config")?;
-    if !path.is_file() {
-        return Ok(false);
-    }
-    let config = read_claude_config(&path).ok_or("Claude Code's config couldn't be read")?;
-    if chorus_core::claude::folder_trusted(&config, folder) == Some(true) {
-        return Ok(false);
-    }
-    let updated = chorus_core::claude::with_folder_trusted(&config, folder).ok_or("Claude Code's config isn't in the shape Chorus knows")?;
-    let temp = path.with_file_name(format!(".claude.json.chorus2-{}.tmp", std::process::id()));
-    std::fs::write(&temp, updated).map_err(|e| format!("writing {}: {e}", temp.display()))?;
-    // Claude Code may hold the file open for a moment.
-    let mut renamed = std::fs::rename(&temp, &path);
-    for _ in 0..4 {
-        if renamed.is_ok() {
-            break;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(50));
-        renamed = std::fs::rename(&temp, &path);
-    }
-    if let Err(e) = renamed {
-        let _ = std::fs::remove_file(&temp);
-        return Err(format!("replacing Claude Code's config: {e}"));
-    }
-    match read_claude_config(&path).and_then(|c| chorus_core::claude::folder_trusted(&c, folder)) {
-        Some(true) => Ok(true),
-        _ => Err("Claude Code rewrote its config at the same moment, so the trust didn't stick".into()),
-    }
+    let config = read_claude_config(&claude_config_path(parent_env)?)?;
+    let facts = crate::git::facts(Path::new(cwd)).ok()?;
+    chorus_core::claude::trusted_at(&config, cwd, facts.as_ref().map(|f| f.main_root.as_str()))
 }
 
 /// Whether the agent has recorded the conversation `id`, so the next run resumes it instead of
@@ -321,23 +289,27 @@ mod tests {
     }
 
     #[test]
-    fn trusting_a_folder_rewrites_claude_codes_config_in_place() {
+    fn claude_codes_trust_follows_the_repository() {
         let dir = std::env::temp_dir().join(format!("chorus-claude-trust-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
+        let repo = dir.join("repo");
+        let plain = dir.join("plain");
+        std::fs::create_dir_all(repo.join("src")).unwrap();
+        std::fs::create_dir_all(&plain).unwrap();
+        let git = |args: &[&str]| assert!(std::process::Command::new("git").arg("-C").arg(&repo).args(args).status().unwrap().success());
+        git(&["init", "-q"]);
+        git(&["-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-q", "--allow-empty", "-m", "first"]);
         let env = vec![("CLAUDE_CONFIG_DIR".to_owned(), dir.display().to_string())];
-        let home = dir.join(".chorus2").join("ledger").display().to_string();
-        assert_eq!(claude_trust_folder(&env, &home), Ok(false), "no config yet: Claude Code makes it, not Chorus");
-        assert!(!dir.join(".claude.json").exists());
-
-        std::fs::write(dir.join(".claude.json"), r#"{"numStartups":3,"projects":{}}"#).unwrap();
-        std::fs::create_dir_all(dir.join(".chorus2")).unwrap();
-        assert_eq!(claude_trust_folder(&env, &home), Ok(true));
-        let worktree = dir.join(".chorus2").join("ledger").join("1a2b3c4d").join("web");
-        assert_eq!(claude_folder_trusted(&env, &worktree.display().to_string()), Some(true));
-        assert_eq!(claude_trust_folder(&env, &home), Ok(false), "already trusted: nothing written");
-        let left: Vec<_> = std::fs::read_dir(&dir).unwrap().flatten().map(|e| e.file_name()).collect();
-        assert_eq!(left.len(), 2, "the config and the worktree folder only, no temp file: {left:?}");
+        let at = |p: &Path| claude_folder_trusted(&env, &p.display().to_string());
+        assert_eq!(at(&repo), None, "no config yet: unknown");
+        let key = |p: &Path| p.display().to_string().replace('\\', "/");
+        // The folder above both is trusted: the plain folder is, the repository isn't.
+        std::fs::write(dir.join(".claude.json"), format!(r#"{{"projects":{{"{}":{{"hasTrustDialogAccepted":true}}}}}}"#, key(&dir))).unwrap();
+        assert_eq!(at(&plain), Some(true));
+        assert_eq!(at(&repo.join("src")), Some(false));
+        // The repository's own entry trusts it and everything in it.
+        std::fs::write(dir.join(".claude.json"), format!(r#"{{"projects":{{"{}":{{"hasTrustDialogAccepted":true}}}}}}"#, key(&repo))).unwrap();
+        assert_eq!(at(&repo.join("src")), Some(true));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

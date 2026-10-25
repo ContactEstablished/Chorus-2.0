@@ -955,11 +955,6 @@ impl SessionManager {
         if join.is_none() {
             self.remember_folder(&asked);
         }
-        if req.agent == AgentKind::Claude
-            && let Some(w) = worktree_id
-        {
-            self.trust_worktree_for_claude(w, &asked);
-        }
         if let (Some(choice), Some(model)) = (req.routing, options.model.as_deref())
             && req.agent == AgentKind::Opencode
             && req.provider_id.is_some()
