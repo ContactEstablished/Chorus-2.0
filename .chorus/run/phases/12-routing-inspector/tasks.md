@@ -9,7 +9,7 @@ Read `spec.md` beside this file and `.chorus/run/decisions.md` before starting a
 - Accept: `routing_refusal` returns `Some(REFUSE_FIRST_PARTY)` for `anthropic/claude-sonnet-5`, `Anthropic/claude-opus-5.5`, `openai/gpt-5.5`, `OPENAI/o9`, `~anthropic/claude-sonnet-latest` and `openai` (no `/`)
 - Accept: `routing_refusal` returns `None` for `deepseek/deepseek-v4.1-flash`, `anthropic-labs/x`, `meta/openai-compat` and `~deepseek/x`
 - Accept: a stored Balanced selection and a stored Nitro selection for `anthropic/claude-sonnet-5` still read back through `parse_stored_selection` as selections, and `plan_routing_relaunch` returns `Routed` for them
-- Status: pending
+- Status: done
 
 ## T2 · Core: upper bounds for the ranking settings
 - Depends on: none
