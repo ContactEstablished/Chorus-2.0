@@ -56,6 +56,12 @@ export const commands = {
 	routingRefresh: (providerId: number, model: string, effort: "fast" | "balanced" | "deep" | "max" | null) => typedError<RefreshOutcome_Serialize, string>(__TAURI_INVOKE("routing_refresh", { providerId, model, effort })),
 	/**  Which provider's key keeps refreshed models' speeds fresh every 30 minutes; `None` stops it. */
 	routingWatch: (providerId: number | null) => typedError<null, string>(__TAURI_INVOKE("routing_watch", { providerId })),
+	/**  The saved ranking settings over the defaults, the defaults, and whether a row is stored. */
+	routingSettings: () => typedError<RoutingSettingsView, string>(__TAURI_INVOKE("routing_settings")),
+	/**  Saves the whole object. serde has already refused unknown fields; `validate` refuses the rest. */
+	routingSettingsSave: (settings: RoutingSettings) => typedError<RoutingSettingsView, string>(__TAURI_INVOKE("routing_settings_save", { settings })),
+	/**  Restore defaults: deletes the saved row. */
+	routingSettingsReset: () => typedError<RoutingSettingsView, string>(__TAURI_INVOKE("routing_settings_reset")),
 	sessionsList: () => typedError<SessionSummary[], string>(__TAURI_INVOKE("sessions_list")),
 	/**  Open only this session's recorded working directory; the frontend cannot supply an arbitrary path. */
 	sessionOpenFolder: (sessionId: number) => typedError<null, string>(__TAURI_INVOKE("session_open_folder", { sessionId })),
@@ -591,6 +597,9 @@ export type CredentialUse = {
 	id: number,
 	envVar: string,
 };
+
+/**  OpenRouter's `provider.data_collection` preference (MR-D11). */
+export type DataCollection = "deny" | "allow";
 
 export type Delivered = {
 	promptId: number,
@@ -1303,6 +1312,38 @@ export type RoutingProfileId =
  */
 "helper";
 
+/**  The ranker's knobs. [`RoutingSettings::validate`] is Chorus 1's `routingSettingsSchema`. */
+export type RoutingSettings = {
+	minUptimePct: number | null,
+	/**  An endpoint that fell below the minimum inside its window needs this much to come back. */
+	readmitUptimePct: number | null,
+	outageGuard5mPct: number | null,
+	unknownQuantPolicy: UnknownQuantPolicy,
+	smoothingWindow: number,
+	stableMinObservations: number,
+	observationMaxAgeDays: number | null,
+	snapshotMaxAgeMinutes: number | null,
+	budgetMinTps: number | null,
+	budgetMedianFraction: number | null,
+	tierWeights: TierWeights,
+	tieRatio: number | null,
+	fallbackCount: number,
+	dataCollection: DataCollection,
+};
+
+/**
+ *  Settings → Routing's ranking settings: what applies now, the defaults beside them, and whether
+ *  a row is stored.
+ */
+export type RoutingSettingsView = {
+	settings: RoutingSettings,
+	defaults: RoutingSettings,
+	/**  A `routing_settings` row exists, readable or not. */
+	stored: boolean,
+	/**  Set when the stored row can't be read, so the defaults apply. Reading never rewrites it. */
+	problem: string | null,
+};
+
 /**  What a run's instructions held, kept on the run and shown in session facts. */
 export type RunInstructions = {
 	/**  The text reached the agent's launch (it was written and passed on). */
@@ -1583,6 +1624,12 @@ export type TierSelections_Serialize = {
 	fast: TierSelection_Serialize | null,
 };
 
+export type TierWeights = {
+	budget: number | null,
+	balanced: number | null,
+	fast: number | null,
+};
+
 /**  New session's routing section for one provider and model. */
 export type TiersView = TiersView_Serialize | TiersView_Deserialize;
 
@@ -1654,6 +1701,16 @@ export type TurnEntry = {
 	asks: AskEntry[],
 	progress: ProgressEntry[],
 };
+
+/**  What an endpoint that declares no quantization needs to be admitted (MR-D7). */
+export type UnknownQuantPolicy = 
+/**  Never admitted. */
+"strict" | 
+/**
+ *  Admitted at native precision from the model's first party, or with an active verification
+ *  record for the tag.
+ */
+"first-party-and-verified";
 
 /**  How a found version relates to the one Chorus checked. */
 export type VersionFit = "verified" | "newer" | "older" | 

@@ -88,9 +88,52 @@ impl Routing {
     }
 }
 
-/// The ranker's settings: the defaults, under anything stored (P12's inspector will edit them).
+/// The ranker's settings: the defaults, under anything stored (Settings → Routing edits them).
 pub fn settings(store: &Store) -> RoutingSettings {
     parse_routing_settings_value(setting_rows::get(store, SETTINGS_KEY).ok().flatten().as_deref()).value
+}
+
+/// Shown when the stored row isn't JSON, has an unknown field or fails `validate`.
+const SETTINGS_UNREADABLE: &str = "The saved ranking settings couldn't be read, so the defaults apply. Save or Restore defaults replaces them.";
+
+/// Settings → Routing's ranking settings: what applies now, the defaults beside them, and whether
+/// a row is stored.
+#[derive(Debug, Clone, PartialEq, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RoutingSettingsView {
+    pub settings: RoutingSettings,
+    pub defaults: RoutingSettings,
+    /// A `routing_settings` row exists, readable or not.
+    pub stored: bool,
+    /// Set when the stored row can't be read, so the defaults apply. Reading never rewrites it.
+    pub problem: Option<String>,
+}
+
+/// A failed read of the row is an error, not "nothing stored": that would hide a database fault.
+pub fn settings_view(store: &Store) -> Result<RoutingSettingsView, String> {
+    let raw = setting_rows::get(store, SETTINGS_KEY)?;
+    let parsed = parse_routing_settings_value(raw.as_deref());
+    Ok(RoutingSettingsView {
+        settings: parsed.value,
+        defaults: RoutingSettings::default(),
+        stored: raw.is_some(),
+        problem: parsed.warning.map(|_| SETTINGS_UNREADABLE.to_owned()),
+    })
+}
+
+/// Stores the whole object once `validate` accepts it; otherwise returns its message and leaves the
+/// row as it was (an unreadable one included). Applies to the next ranking, never to a selection
+/// already made.
+pub fn save_settings(store: &Store, settings: &RoutingSettings) -> Result<RoutingSettingsView, String> {
+    settings.validate()?;
+    setting_rows::set(store, SETTINGS_KEY, &serde_json::to_string(settings).map_err(|e| e.to_string())?)?;
+    settings_view(store)
+}
+
+/// Restore defaults: deletes the row, so Data collection goes back to its default too.
+pub fn reset_settings(store: &Store) -> Result<RoutingSettingsView, String> {
+    setting_rows::delete(store, SETTINGS_KEY)?;
+    settings_view(store)
 }
 
 fn read<T: DeserializeOwned>(store: &Store, model: &str, kind: Kind) -> Option<T> {
@@ -730,5 +773,139 @@ mod tests {
         remember(&s, "a/b", RoutingLaunchChoice::Fast);
         remember(&s, "c/d", RoutingLaunchChoice::Default);
         assert_eq!((remembered(&s, "a/b"), remembered(&s, "c/d")), (Some(RoutingLaunchChoice::Fast), Some(RoutingLaunchChoice::Default)));
+    }
+
+    const UNREADABLE: &str = "The saved ranking settings couldn't be read, so the defaults apply. Save or Restore defaults replaces them.";
+
+    fn stored_row(s: &Store) -> Option<String> {
+        setting_rows::get(s, SETTINGS_KEY).unwrap()
+    }
+
+    #[test]
+    fn with_no_row_the_settings_view_holds_the_defaults_and_no_problem() {
+        let s = Store::in_memory();
+        let view = settings_view(&s).unwrap();
+        assert_eq!(view, RoutingSettingsView { settings: RoutingSettings::default(), defaults: RoutingSettings::default(), stored: false, problem: None });
+        assert_eq!(stored_row(&s), None, "reading stores nothing");
+    }
+
+    #[test]
+    fn a_row_that_cannot_be_read_gives_the_defaults_and_the_problem_and_stays_as_it_was() {
+        // Not JSON, an unknown field, and a value above `validate`'s bound.
+        for raw in ["nope", r#"{"bogus":1}"#, r#"{"fallbackCount":6}"#] {
+            let s = Store::in_memory();
+            setting_rows::set(&s, SETTINGS_KEY, raw).unwrap();
+            let view = settings_view(&s).unwrap();
+            assert_eq!(view.settings, RoutingSettings::default(), "{raw}");
+            assert_eq!(view.defaults, RoutingSettings::default(), "{raw}");
+            assert!(view.stored, "{raw}: a row is there, even if it can't be read");
+            assert_eq!(view.problem.as_deref(), Some(UNREADABLE), "{raw}");
+            assert_eq!(stored_row(&s).as_deref(), Some(raw), "{raw}: reading leaves the row byte for byte as it was");
+            assert_eq!(settings(&s), RoutingSettings::default(), "{raw}: the ranker uses the defaults too");
+        }
+    }
+
+    #[test]
+    fn a_readable_row_reads_over_the_defaults_with_no_problem() {
+        let s = Store::in_memory();
+        // A row written before a field existed still reads, with the defaults underneath.
+        setting_rows::set(&s, SETTINGS_KEY, r#"{"fallbackCount":4}"#).unwrap();
+        let view = settings_view(&s).unwrap();
+        assert_eq!(view.settings, RoutingSettings { fallback_count: 4, ..RoutingSettings::default() });
+        assert_eq!((view.stored, view.problem), (true, None));
+        assert_eq!(view.defaults, RoutingSettings::default(), "the defaults stay the defaults");
+    }
+
+    #[test]
+    fn saving_a_valid_object_stores_it_whole_and_the_view_returns_it() {
+        let s = Store::in_memory();
+        let mut wanted = RoutingSettings { fallback_count: 1, min_uptime_pct: 99.0, readmit_uptime_pct: 99.1, ..RoutingSettings::default() };
+        wanted.data_collection = chorus_core::routing::types::DataCollection::Allow;
+        wanted.tier_weights.budget = 0.25;
+        let view = save_settings(&s, &wanted).unwrap();
+        assert_eq!(view.settings, wanted);
+        assert_eq!(view.defaults, RoutingSettings::default());
+        assert_eq!((view.stored, view.problem), (true, None));
+        // The whole object is stored, every field, not only what differs from the defaults.
+        let row: serde_json::Value = serde_json::from_str(&stored_row(&s).unwrap()).unwrap();
+        assert_eq!(row.as_object().unwrap().len(), 14, "{row}");
+        assert_eq!(serde_json::from_value::<RoutingSettings>(row).unwrap(), wanted);
+        assert_eq!(settings(&s), wanted, "the ranker reads it back");
+        // Saving the defaults stores them too: that is not the same as having no row.
+        assert!(save_settings(&s, &RoutingSettings::default()).unwrap().stored);
+        assert!(stored_row(&s).is_some());
+    }
+
+    #[test]
+    fn saving_an_invalid_object_returns_validates_message_and_leaves_the_row_as_it_was() {
+        let invalid = RoutingSettings { fallback_count: 6, ..RoutingSettings::default() };
+        // No row: still no row.
+        let s = Store::in_memory();
+        assert_eq!(save_settings(&s, &invalid).unwrap_err(), "fallbackCount must be at most 5");
+        assert_eq!(stored_row(&s), None);
+        // A readable row, and an unreadable one: both byte for byte as they were.
+        for raw in [serde_json::to_string(&RoutingSettings { fallback_count: 1, ..RoutingSettings::default() }).unwrap(), "nope".to_owned()] {
+            setting_rows::set(&s, SETTINGS_KEY, &raw).unwrap();
+            assert_eq!(save_settings(&s, &invalid).unwrap_err(), "fallbackCount must be at most 5", "{raw}");
+            assert_eq!(stored_row(&s).as_deref(), Some(raw.as_str()), "{raw}");
+        }
+        // The first failing rule is the one named.
+        let both = RoutingSettings { readmit_uptime_pct: 99.0, tie_ratio: 3.0, ..RoutingSettings::default() };
+        assert_eq!(save_settings(&s, &both).unwrap_err(), "readmitUptimePct below minUptimePct");
+    }
+
+    #[test]
+    fn saving_replaces_a_row_that_could_not_be_read() {
+        let s = Store::in_memory();
+        setting_rows::set(&s, SETTINGS_KEY, "nope").unwrap();
+        let view = save_settings(&s, &RoutingSettings { fallback_count: 3, ..RoutingSettings::default() }).unwrap();
+        assert_eq!((view.settings.fallback_count, view.problem), (3, None));
+    }
+
+    #[test]
+    fn reset_deletes_the_row() {
+        let s = Store::in_memory();
+        let allow = RoutingSettings { data_collection: chorus_core::routing::types::DataCollection::Allow, ..RoutingSettings::default() };
+        save_settings(&s, &allow).unwrap();
+        assert!(stored_row(&s).is_some());
+        let view = reset_settings(&s).unwrap();
+        assert_eq!(stored_row(&s), None, "the routing_settings row is gone");
+        assert_eq!(view, RoutingSettingsView { settings: RoutingSettings::default(), defaults: RoutingSettings::default(), stored: false, problem: None });
+        // With no row, and with a row that couldn't be read, it works the same.
+        assert!(!reset_settings(&s).unwrap().stored);
+        setting_rows::set(&s, SETTINGS_KEY, "nope").unwrap();
+        assert_eq!(reset_settings(&s).unwrap().problem, None);
+        assert_eq!(stored_row(&s), None);
+    }
+
+    #[test]
+    fn saved_settings_move_the_next_ranking_and_reset_moves_it_back_but_a_selection_already_made_stays() {
+        let s = Store::in_memory();
+        let provider = openrouter(&s);
+        stored_snapshot(&s, now_ms());
+        let routing = Routing::default();
+        let balanced_in_view = || view(&routing, &s, provider, SLUG, None).unwrap().result.unwrap().tiers.balanced.unwrap().endpoints.len();
+        let balanced_for_launch = || select_for_launch(&s, provider, SLUG, RoutingLaunchTier::Balanced, None).unwrap().endpoints.len();
+        assert_eq!((balanced_in_view(), balanced_for_launch()), (3, 3), "the default is the first endpoint and 2 fallbacks");
+
+        // A launch's selection, made before the save.
+        let options = LaunchOptions { model: Some(SLUG.into()), ..LaunchOptions::default() };
+        let before = for_launch(&s, AgentKind::Opencode, Some(provider), Some(RoutingLaunchChoice::Balanced), &options).unwrap().unwrap();
+        let described = describe(Some(&before)).unwrap();
+        assert!(described.ends_with(", then 2 more"), "{described}");
+        let parsed_before = parse_stored_selection(Some(&before));
+        assert!(matches!(&parsed_before, StoredSelection::Selection(sel) if sel.endpoints.len() == 3));
+
+        save_settings(&s, &RoutingSettings { fallback_count: 1, ..RoutingSettings::default() }).unwrap();
+        assert_eq!((balanced_in_view(), balanced_for_launch()), (2, 2), "one fallback after the first");
+        assert_eq!(describe(Some(&before)).as_deref(), Some(described.as_str()), "the earlier selection describes the same");
+        assert_eq!(parse_stored_selection(Some(&before)), parsed_before, "and reads back unchanged, with its 3 endpoints");
+        let after = for_launch(&s, AgentKind::Opencode, Some(provider), Some(RoutingLaunchChoice::Balanced), &options).unwrap().unwrap();
+        assert!(describe(Some(&after)).unwrap().ends_with(", then 1 more"), "a launch after the save takes the new ranking");
+
+        reset_settings(&s).unwrap();
+        assert_eq!((balanced_in_view(), balanced_for_launch()), (3, 3), "back to the default after a reset");
+        assert_eq!(describe(Some(&before)).as_deref(), Some(described.as_str()));
+        assert_eq!(setting_rows::get(&s, CHOICES_KEY).unwrap(), None, "view and the settings commands write no routing_launch_choices row");
     }
 }

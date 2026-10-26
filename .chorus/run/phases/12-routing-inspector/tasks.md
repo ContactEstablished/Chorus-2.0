@@ -50,7 +50,7 @@ Read `spec.md` beside this file and `.chorus/run/decisions.md` before starting a
 - Accept: reset deletes the `routing_settings` row
 - Accept: after saving `fallbackCount: 1`, `view` and `select_for_launch` for the stored golden model give Balanced 2 endpoints, and 3 again after reset; a selection JSON made by `for_launch` before the save gives the same `describe` text after it
 - Accept: `routing_settings`, `routing_settings_save` and `routing_settings_reset` are in `ipc.rs`, and `bindings_are_current` and `command_permissions_match_registration` pass
-- Status: pending
+- Status: done
 
 ## T6 · Rust: observer status and Stop observing
 - Depends on: T3, T5
