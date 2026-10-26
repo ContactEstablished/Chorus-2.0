@@ -39,7 +39,7 @@ Read `spec.md` beside this file and `.chorus/run/decisions.md` before starting a
 - Accept: `for_launch` on opencode with an OpenRouter provider and the model `openai/gpt-5.5` refuses Budget, Balanced, Fast and Nitro with `REFUSE_FIRST_PARTY`, and returns `Ok(None)` for OpenRouter default
 - Accept: calling `view` for the golden model writes no `routing_launch_choices` row
 - Accept: `a_launch_takes_a_tier_ranked_from_what_is_stored` and every other existing test pass unchanged
-- Status: pending
+- Status: done
 
 ## T5 · Rust: commands for the ranking settings
 - Depends on: T2, T4

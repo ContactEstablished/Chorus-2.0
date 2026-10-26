@@ -22,7 +22,7 @@ use chorus_core::routing::endpoints::extract_observations;
 use chorus_core::agent::{AgentKind, LaunchOptions};
 use chorus_core::routing::launch::{
     REFUSE_NITRO_MODEL, REFUSE_NO_MODEL, REFUSE_NOT_OPENCODE, RoutingLaunchChoice, RoutingLaunchSelection, RoutingLaunchTier, StoredSelection,
-    parse_stored_selection, resolve_launch_selection,
+    parse_stored_selection, resolve_launch_selection, routing_refusal,
 };
 use chorus_core::routing::payload::NITRO_SUFFIX;
 use chorus_core::routing::preflight::{PreflightStep, rows_per_tag};
@@ -240,6 +240,9 @@ pub fn view(routing: &Routing, store: &Store, provider_id: u32, model: &str, eff
     if !is_model_slug(model) {
         return Err(format!("{model:?} isn't an OpenRouter model id."));
     }
+    if let Some(reason) = routing_refusal(model) {
+        return Err(reason.into());
+    }
     let now = now_ms();
     let ranked = rank_stored(store, model, Some(provider_id), effort, now)?;
     let remembered = remembered(store, model);
@@ -279,6 +282,10 @@ pub struct RefreshOutcome {
 pub fn refresh(routing: &Routing, store: &Store, provider_id: u32, model: &str, effort: Option<&str>) -> Result<RefreshOutcome, String> {
     if !is_model_slug(model) {
         return Err(format!("{model:?} isn't an OpenRouter model id."));
+    }
+    // Before the provider check, so a refused model starts no cooldown.
+    if let Some(reason) = routing_refusal(model) {
+        return Err(reason.into());
     }
     let provider = routing_provider(store, provider_id)?;
     let wait = routing.wait_secs(model, now_ms());
@@ -471,6 +478,9 @@ pub fn for_launch(
     if model.ends_with(NITRO_SUFFIX) {
         return Err(REFUSE_NITRO_MODEL.into());
     }
+    if let Some(reason) = routing_refusal(model) {
+        return Err(reason.into());
+    }
     let effort = chorus_core::opencode::wanted_variant(agent.spec(), options);
     let selection = select_for_launch(store, provider.id, model, tier, effort.as_deref())?;
     serde_json::to_string(&selection).map(Some).map_err(|e| e.to_string())
@@ -570,6 +580,7 @@ fn observe_tick(store: &Store, routing: &Routing) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chorus_core::routing::launch::REFUSE_FIRST_PARTY;
 
     #[test]
     fn the_preselected_choice_follows_chorus_1() {
@@ -604,11 +615,16 @@ mod tests {
     }
 
     fn stored_snapshot(s: &Store, fetched_at_ms: i64) {
+        stored_snapshot_as(s, SLUG, fetched_at_ms);
+    }
+
+    /// The golden endpoints, stored under `slug`.
+    fn stored_snapshot_as(s: &Store, slug: &str, fetched_at_ms: i64) {
         let value: serde_json::Value = serde_json::from_str(FIXTURE).unwrap();
         let parsed = chorus_core::routing::endpoints::parse_endpoints_response(&value).unwrap();
         let snapshot = EndpointSnapshot { fetched_at_ms, endpoints: parsed.endpoints };
-        write(s, SLUG, Kind::Snapshot, &snapshot).unwrap();
-        observe(s, SLUG, &snapshot, &RoutingSettings::default()).unwrap();
+        write(s, slug, Kind::Snapshot, &snapshot).unwrap();
+        observe(s, slug, &snapshot, &RoutingSettings::default()).unwrap();
     }
 
     #[test]
@@ -638,6 +654,73 @@ mod tests {
         assert!(for_launch(&s, AgentKind::Claude, Some(provider), Some(RoutingLaunchChoice::Fast), &options).is_err());
         stored_snapshot(&s, now_ms() - 61 * 60 * 1000);
         assert!(launch(RoutingLaunchChoice::Fast).unwrap_err().contains("more than 60 minutes old"));
+    }
+
+    #[test]
+    fn the_tiers_view_refuses_anthropic_and_openai_models_even_with_a_snapshot_stored() {
+        let s = Store::in_memory();
+        let provider = openrouter(&s);
+        let routing = Routing::default();
+        for model in ["anthropic/claude-sonnet-5", "OpenAI/gpt-5.5"] {
+            stored_snapshot_as(&s, model, now_ms());
+            assert!(rows::get(&s, model, Kind::Snapshot).unwrap().is_some(), "{model}: the golden snapshot is stored");
+            assert!(rank_stored(&s, model, Some(provider), None, now_ms()).unwrap().is_some(), "{model}: it would rank without the refusal");
+            assert_eq!(view(&routing, &s, provider, model, None).unwrap_err(), REFUSE_FIRST_PARTY, "{model}");
+        }
+        // A bad slug is still reported as one, and a model from another author still ranks.
+        assert!(view(&routing, &s, provider, "a b", None).unwrap_err().contains("isn't an OpenRouter model id"));
+        stored_snapshot(&s, now_ms());
+        assert!(view(&routing, &s, provider, SLUG, None).unwrap().result.is_some());
+    }
+
+    #[test]
+    fn a_refresh_of_an_anthropic_or_openai_model_is_refused_before_the_provider_and_starts_no_cooldown() {
+        let s = Store::in_memory();
+        let routing = Routing::default();
+        let missing = 404;
+        // With no such provider, a model from another author gets the provider's reason...
+        assert_eq!(refresh(&routing, &s, missing, SLUG, None).unwrap_err(), "That provider no longer exists.");
+        // ...and a refused one gets the refusal, first.
+        for model in ["anthropic/claude-sonnet-5", "openai/gpt-5.5", "~OpenAI/o9"] {
+            assert_eq!(refresh(&routing, &s, missing, model, None).unwrap_err(), REFUSE_FIRST_PARTY, "{model}");
+            assert_eq!(routing.wait_secs(model, now_ms()), 0, "{model}: no cooldown");
+            assert!(routing.take(model).is_some(), "{model}: no slot is held");
+        }
+        assert!(routing.ended.lock().unwrap().is_empty(), "no model has an end time");
+        assert!(routing.busy.lock().unwrap().is_empty(), "no slot is held");
+    }
+
+    #[test]
+    fn a_launch_refuses_every_tier_for_anthropic_and_openai_models_but_not_openrouter_default() {
+        let s = Store::in_memory();
+        let provider = openrouter(&s);
+        for model in ["openai/gpt-5.5", "anthropic/claude-sonnet-5"] {
+            // A stored snapshot doesn't matter: the refusal comes first.
+            stored_snapshot_as(&s, model, now_ms());
+            let options = LaunchOptions { model: Some(model.into()), ..LaunchOptions::default() };
+            for choice in [RoutingLaunchChoice::Budget, RoutingLaunchChoice::Balanced, RoutingLaunchChoice::Fast, RoutingLaunchChoice::Nitro] {
+                let launch = for_launch(&s, AgentKind::Opencode, Some(provider), Some(choice), &options);
+                assert_eq!(launch.unwrap_err(), REFUSE_FIRST_PARTY, "{model} on {choice:?}");
+            }
+            assert_eq!(for_launch(&s, AgentKind::Opencode, Some(provider), Some(RoutingLaunchChoice::Default), &options).unwrap(), None, "{model}");
+            assert_eq!(for_launch(&s, AgentKind::Opencode, Some(provider), None, &options).unwrap(), None, "{model}");
+        }
+        // The :nitro check still comes first.
+        let nitro = LaunchOptions { model: Some("openai/gpt-5.5:nitro".into()), ..LaunchOptions::default() };
+        let launch = for_launch(&s, AgentKind::Opencode, Some(provider), Some(RoutingLaunchChoice::Balanced), &nitro);
+        assert_eq!(launch.unwrap_err(), REFUSE_NITRO_MODEL);
+    }
+
+    #[test]
+    fn the_tiers_view_writes_no_launch_choice() {
+        let s = Store::in_memory();
+        let provider = openrouter(&s);
+        stored_snapshot(&s, now_ms());
+        assert_eq!(setting_rows::get(&s, CHOICES_KEY).unwrap(), None);
+        let view = view(&Routing::default(), &s, provider, SLUG, None).unwrap();
+        assert_eq!(view.preselect, RoutingLaunchChoice::Balanced, "it preselects Balanced without remembering it");
+        assert_eq!(view.remembered, None);
+        assert_eq!(setting_rows::get(&s, CHOICES_KEY).unwrap(), None, "no routing_launch_choices row");
     }
 
     #[test]
