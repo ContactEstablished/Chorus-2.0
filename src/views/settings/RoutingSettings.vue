@@ -5,10 +5,12 @@
  */
 import { ref } from 'vue'
 import RoutingInspect from './RoutingInspect.vue'
+import RoutingObservation from './RoutingObservation.vue'
 import RoutingRanking from './RoutingRanking.vue'
 import { INTRO } from './routingInspect'
 
-// Bumped when the ranking settings change, so the inspector ranks again with them.
+// Bumped when the ranking settings change, so the inspector ranks again with them (and the
+// observation reads its status again; it also reloads itself when a check is due).
 const inspectVersion = ref(0)
 </script>
 
@@ -18,6 +20,7 @@ const inspectVersion = ref(0)
     <p class="intro">{{ INTRO }}</p>
     <RoutingInspect :version="inspectVersion" />
     <RoutingRanking @saved="inspectVersion++" />
+    <RoutingObservation :version="inspectVersion" />
   </section>
 </template>
 

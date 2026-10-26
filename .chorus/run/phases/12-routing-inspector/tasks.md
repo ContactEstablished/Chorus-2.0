@@ -123,7 +123,7 @@ Read `spec.md` beside this file and `.chorus/run/decisions.md` before starting a
 - Accept: `modelRows` gives "Updated 12 min ago · 40 samples", "· 1 sample", "Not updated yet" with no snapshot time, and "Stopped" with "Observe again" for a stopped model, else "Stop observing"
 - Accept: `observerProviders` lists only OpenRouter providers, and one without its own key is disabled with "Routing needs <name>'s own API key (a management key can't fetch endpoints)."
 - Accept: `npm run typecheck` passes
-- Status: pending
+- Status: done
 
 ## T12 · UI: Speed history and the Refresh log
 - Depends on: T11
