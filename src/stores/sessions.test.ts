@@ -111,6 +111,29 @@ describe('sessions store', () => {
     expect(store.list).toHaveLength(1)
   })
 
+  it('closes many, going on past one that is refused', async () => {
+    ipc.sessionsList.mockResolvedValue({ status: 'ok', data: [session(1), session(2, { locked: true }), session(3)] })
+    ipc.sessionClose.mockImplementation(async (id: number) =>
+      id === 2
+        ? { status: 'error', error: 'Shell 2 is locked. Unlock it before you close it.' }
+        : { status: 'ok', data: { killed: 1, spared: 0, worktreeNote: null } },
+    )
+    const store = useSessionsStore()
+    await store.init()
+    const heard: number[] = []
+    const out = await store.closeMany([1, 2, 3], true, (r) => heard.push(r.id))
+    expect(out.map((r) => [r.id, r.name, r.error ?? 'closed'])).toEqual([
+      [1, 'Shell 1', 'closed'],
+      [2, 'Shell 2', 'Shell 2 is locked. Unlock it before you close it.'],
+      [3, 'Shell 3', 'closed'],
+    ])
+    expect(heard.sort()).toEqual([1, 2, 3])
+    expect(ipc.sessionClose).toHaveBeenCalledWith(1, true)
+    expect(store.list.map((s) => s.id)).toEqual([2])
+    // Each failure is in its result, not the store's single error.
+    expect(store.error).toBeNull()
+  })
+
   it('selects a session it creates', async () => {
     ipc.sessionsList.mockResolvedValue({ status: 'ok', data: [session(1)] })
     ipc.sessionCreate.mockResolvedValue({ status: 'ok', data: session(5) })

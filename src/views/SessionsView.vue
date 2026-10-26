@@ -2,11 +2,13 @@
 /**
  * Sessions: every open session, searchable, as a list or as the Wall of live Raw terminals (D26).
  * On the Wall each terminal is the real one: typing goes to the agent, and the PTY takes the tile's
- * size until a bigger view attaches (as Chorus 1's grid did).
+ * size until a bigger view attaches (as Chorus 1's grid did). In the list, Select picks sessions,
+ * or all the search shows, to close together (D104).
  */
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import Icon from '../components/Icon.vue'
 import SessionTerminal from '../raw/SessionTerminal.vue'
+import CloseSessionsDialog from './CloseSessionsDialog.vue'
 import type { SessionSummary } from '../ipc'
 import { useSessionsStore } from '../stores/sessions'
 import { useProjectsStore } from '../stores/projects'
@@ -15,6 +17,7 @@ import { useAppStore } from '../stores/app'
 import { useNoticesStore } from '../stores/notices'
 import { AGENT_LABELS } from '../raw/labels'
 import { AGENT_CHIPS, ATTENTION, ago, byUrgency, lastActive, shortPath } from '../shell/status'
+import { pickable, pickedState } from '../shell/bulkClose'
 import { useNow } from '../shell/now'
 
 const sessions = useSessionsStore()
@@ -50,6 +53,45 @@ const shown = computed(() => {
 })
 
 const project = (s: SessionSummary) => (s.projectId === null ? null : (projects.byId.get(s.projectId) ?? null))
+
+// Select: pick sessions in the list and close them together.
+const selecting = ref(false)
+const picked = ref(new Set<number>())
+/** The sessions the confirm dialog closes, fixed when it opens. */
+const confirming = ref<SessionSummary[] | null>(null)
+const pickedShown = computed(() => shown.value.filter((s) => picked.value.has(s.id)))
+const allState = computed(() => pickedState(shown.value, picked.value))
+const canPick = computed(() => shown.value.filter(pickable).length)
+const lockedShown = computed(() => shown.value.length - canPick.value)
+
+// What's picked is always on screen and closable: a session the search hides, or that closes or
+// is locked, drops out.
+watch(shown, (list) => {
+  const ids = new Set(list.filter(pickable).map((s) => s.id))
+  if ([...picked.value].some((id) => !ids.has(id))) picked.value = new Set([...picked.value].filter((id) => ids.has(id)))
+})
+watch(
+  () => view.sessionsLayout,
+  () => stopSelecting(),
+)
+
+function stopSelecting(): void {
+  selecting.value = false
+  picked.value = new Set()
+}
+function togglePick(s: SessionSummary): void {
+  if (!pickable(s)) return
+  const next = new Set(picked.value)
+  if (!next.delete(s.id)) next.add(s.id)
+  picked.value = next
+}
+function toggleAll(): void {
+  picked.value = allState.value === 'all' ? new Set() : new Set(shown.value.filter(pickable).map((s) => s.id))
+}
+function onDialogClose(ran: boolean): void {
+  confirming.value = null
+  if (ran) stopSelecting()
+}
 </script>
 
 <template>
@@ -66,6 +108,16 @@ const project = (s: SessionSummary) => (s.projectId === null ? null : (projects.
           <option value="recent">Most recent</option>
           <option value="name">Name</option>
         </select>
+        <button
+          v-if="view.sessionsLayout === 'list' && sessions.list.length"
+          class="select-toggle"
+          :class="{ on: selecting }"
+          :aria-pressed="selecting"
+          title="Pick sessions, or all the search shows, to close together"
+          @click="selecting ? stopSelecting() : (selecting = true)"
+        >
+          <Icon name="check" :size="15" /> Select
+        </button>
         <div class="segmented" role="radiogroup" aria-label="Layout">
           <button role="radio" :aria-checked="view.sessionsLayout === 'list'" :class="{ on: view.sessionsLayout === 'list' }" title="List" @click="view.sessionsLayout = 'list'">
             <Icon name="sessions" :size="15" /> List
@@ -82,9 +134,32 @@ const project = (s: SessionSummary) => (s.projectId === null ? null : (projects.
     </p>
     <p v-else-if="!shown.length" class="none">Nothing matches “{{ query }}”.</p>
 
+    <div v-if="selecting && view.sessionsLayout === 'list' && sessions.list.length" class="pickbar" role="toolbar" aria-label="Selected sessions">
+      <label class="all">
+        <input type="checkbox" :checked="allState === 'all'" :indeterminate="allState === 'some'" :disabled="!canPick" @change="toggleAll" />
+        Select all {{ canPick }}{{ query.trim() ? ' matching' : '' }}
+      </label>
+      <span class="count">{{ pickedShown.length }} selected</span>
+      <span v-if="lockedShown" class="muted">{{ lockedShown }} locked: unlock {{ lockedShown === 1 ? 'it' : 'them' }} to close</span>
+      <span class="spacer" />
+      <button class="danger" :disabled="!pickedShown.length" @click="confirming = [...pickedShown]">
+        <Icon name="trash" :size="14" /> Close {{ pickedShown.length || '' }}…
+      </button>
+      <button class="quiet" @click="stopSelecting">Cancel</button>
+    </div>
+
     <ul v-if="view.sessionsLayout === 'list'" class="list">
       <li v-for="s in shown" :key="s.id">
-        <button class="row" :class="`st-${s.attention}`" @click="view.openSession(s.id)">
+        <button
+          class="row"
+          :class="[`st-${s.attention}`, { picking: selecting, picked: selecting && picked.has(s.id) }]"
+          :role="selecting ? 'checkbox' : undefined"
+          :aria-checked="selecting ? picked.has(s.id) : undefined"
+          :disabled="selecting && !pickable(s)"
+          :title="selecting && !pickable(s) ? 'Locked: unlock it to close it' : undefined"
+          @click="selecting ? togglePick(s) : view.openSession(s.id)"
+        >
+          <span v-if="selecting" class="box" aria-hidden="true"><Icon v-if="picked.has(s.id)" name="check" :size="12" /></span>
           <span class="dot" :class="{ pulse: s.attention === 'working' && !s.noSignal }" />
           <span class="agent-chip" :class="`agent-${s.agent}`">{{ AGENT_CHIPS[s.agent] }}</span>
           <span class="main">
@@ -116,6 +191,8 @@ const project = (s: SessionSummary) => (s.projectId === null ? null : (projects.
         </div>
       </article>
     </div>
+
+    <CloseSessionsDialog v-if="confirming" :targets="confirming" @close="onDialogClose" />
   </section>
 </template>
 
@@ -188,6 +265,60 @@ h1 {
   color: var(--text);
   font-weight: 600;
 }
+.select-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  font-size: 13px;
+}
+.select-toggle.on {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+}
+.pickbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-bottom: 10px;
+  padding: 7px 10px 7px 16px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-control);
+  background: var(--surface-raised);
+  font-size: 13px;
+}
+.all {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.all input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--accent);
+}
+.count {
+  color: var(--text-2);
+}
+.muted {
+  color: var(--text-muted);
+}
+.spacer {
+  flex: 1;
+}
+.pickbar button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  font-size: 13px;
+}
 .none {
   color: var(--text-muted);
 }
@@ -220,6 +351,29 @@ h1 {
 }
 .row:hover:not(:disabled) {
   background: var(--surface-raised);
+}
+.row.picking {
+  grid-template-columns: 16px 8px auto minmax(0, 1fr) minmax(0, 160px) 150px 80px 16px;
+}
+.row.picking .go {
+  visibility: hidden;
+}
+.row.picked,
+.row.picked:hover:not(:disabled) {
+  background: var(--accent-soft);
+}
+.box {
+  width: 16px;
+  height: 16px;
+  display: grid;
+  place-items: center;
+  border: 1.5px solid var(--border-strong);
+  border-radius: 4px;
+}
+.row.picked .box {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
 }
 .main {
   display: flex;
@@ -336,6 +490,9 @@ h1 {
   }
   .row {
     grid-template-columns: 8px auto minmax(0, 1fr) 16px;
+  }
+  .row.picking {
+    grid-template-columns: 16px 8px auto minmax(0, 1fr) 16px;
   }
   .proj,
   .state,

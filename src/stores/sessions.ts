@@ -10,6 +10,7 @@ import {
   type LaunchRequest,
   type SessionSummary,
 } from '../ipc'
+import { CLOSE_AT_ONCE, eachLimited, type CloseResult } from '../shell/bulkClose'
 
 /**
  * Sessions as the back end reports them. The back end owns every session (ARCHITECTURE §1); this
@@ -116,6 +117,26 @@ export const useSessionsStore = defineStore('sessions', () => {
     return report
   }
 
+  /**
+   * Closes each of `ids`, a few at a time (D104). One that's refused doesn't stop the others: each
+   * result says what happened, and `onResult` hears of it as soon as it does.
+   */
+  async function closeMany(ids: number[], removeWorktree: boolean, onResult?: (r: CloseResult) => void): Promise<CloseResult[]> {
+    return eachLimited(ids, CLOSE_AT_ONCE, async (id) => {
+      const name = byId.value[id]?.name ?? `Session ${id}`
+      let result: CloseResult
+      try {
+        result = { id, name, report: await unwrap(commands.sessionClose(id, removeWorktree)) }
+        const s = byId.value[id]
+        if (s) apply({ ...s, status: 'closed' })
+      } catch (e) {
+        result = { id, name, error: e instanceof Error ? e.message : String(e) }
+      }
+      onResult?.(result)
+      return result
+    })
+  }
+
   async function setTags(id: number, tags: string[]): Promise<boolean> {
     const s = await attempt(() => unwrap(commands.sessionSetTags(id, tags)))
     if (s) apply(s)
@@ -144,6 +165,7 @@ export const useSessionsStore = defineStore('sessions', () => {
     setProject,
     restart,
     close,
+    closeMany,
     setLocked,
     setTags,
   }
