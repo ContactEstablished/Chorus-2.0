@@ -10,11 +10,13 @@
 //! [`endpoints::extract_observations`] (stored with [`store::merge_observations`]) →
 //! [`registry::entry_for`] → [`tiers::compute_tiers`] → [`launch::resolve_launch_selection`] →
 //! [`payload`] values for opencode's configuration. [`preflight`] reads the account's own
-//! filters; [`cache_probe`] checks which endpoints really serve cached reads.
+//! filters; [`cache_probe`] checks which endpoints really serve cached reads; [`history`]
+//! summarises the stored observations per endpoint and holds the Refresh log's records.
 
 pub mod cache_probe;
 pub mod eligibility;
 pub mod endpoints;
+pub mod history;
 mod js;
 mod json;
 pub mod launch;
@@ -54,6 +56,8 @@ mod tests {
             super::cache_probe::CacheProbeOutcome::definition(&mut types),
             super::preflight::PreflightIssue::definition(&mut types),
             super::preflight::PreflightStep::definition(&mut types),
+            super::history::SpeedHistoryRow::definition(&mut types),
+            super::history::RefreshLogEntry::definition(&mut types),
         ];
         let text = format!("{types:?} {roots:?}");
         assert!(text.contains("Primitive(f64)") && text.contains("Primitive(u32)"), "the check sees the primitives");

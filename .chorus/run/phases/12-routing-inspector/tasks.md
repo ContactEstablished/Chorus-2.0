@@ -29,7 +29,7 @@ Read `spec.md` beside this file and `.chorus/run/decisions.md` before starting a
 - Accept: `sample_count` of 3 tags observed at 2 instants is 2
 - Accept: `append_refresh_log` puts the new entry first and keeps the newest 50 of 51; `parse_refresh_log(None)` is an empty log; `"nope"`, `"{}"` and an array holding an object with an unknown field are errors; an appended log serialized to JSON reads back equal
 - Accept: `SpeedHistoryRow` and `RefreshLogEntry` are among the roots of `front_end_types_export_without_big_integers`, which passes
-- Status: pending
+- Status: done
 
 ## T4 · Rust: the refusal in tiers, Refresh and launch
 - Depends on: T1
