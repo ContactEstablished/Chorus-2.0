@@ -1,7 +1,7 @@
 {
   "name": "chorus",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Chorus 2.0: supervise AI coding agents running in real terminals",
   "type": "module",
   "engines": {
