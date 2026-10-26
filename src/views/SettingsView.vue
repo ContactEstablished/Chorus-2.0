@@ -1,27 +1,18 @@
 <script setup lang="ts">
 /** Settings: appearance, projects, providers, keys and the agent lock, and the agent CLIs found. */
 import Icon from '../components/Icon.vue'
-import type { IconName } from '../components/icons'
 import AppearanceSettings from './settings/AppearanceSettings.vue'
 import ProjectsSettings from './settings/ProjectsSettings.vue'
 import AgentsSettings from './settings/AgentsSettings.vue'
 import NarratorSettings from './settings/NarratorSettings.vue'
 import PhoneSettings from './settings/PhoneSettings.vue'
+import RoutingSettings from './settings/RoutingSettings.vue'
 import ProvidersPanel from '../raw/ProvidersPanel.vue'
 import KeysPanel from '../raw/KeysPanel.vue'
-import { useViewStore, type SettingsSection } from '../stores/view'
+import { SECTIONS } from './settings/sections'
+import { useViewStore } from '../stores/view'
 
 const view = useViewStore()
-
-const SECTIONS: { key: SettingsSection; label: string; icon: IconName }[] = [
-  { key: 'appearance', label: 'Appearance', icon: 'palette' },
-  { key: 'projects', label: 'Projects', icon: 'folder' },
-  { key: 'providers', label: 'Providers', icon: 'plug' },
-  { key: 'narrator', label: 'Narrator', icon: 'agents' },
-  { key: 'phone', label: 'Phone', icon: 'bell' },
-  { key: 'keys', label: 'Keys and lock', icon: 'key' },
-  { key: 'agents', label: 'Agents', icon: 'agents' },
-]
 </script>
 
 <template>
@@ -44,6 +35,7 @@ const SECTIONS: { key: SettingsSection; label: string; icon: IconName }[] = [
         <AppearanceSettings v-if="view.settingsSection === 'appearance'" />
         <ProjectsSettings v-else-if="view.settingsSection === 'projects'" />
         <ProvidersPanel v-else-if="view.settingsSection === 'providers'" />
+        <RoutingSettings v-else-if="view.settingsSection === 'routing'" />
         <NarratorSettings v-else-if="view.settingsSection === 'narrator'" />
         <PhoneSettings v-else-if="view.settingsSection === 'phone'" />
         <KeysPanel v-else-if="view.settingsSection === 'keys'" />

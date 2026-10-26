@@ -101,8 +101,8 @@ pub struct ParsedSetting<T> {
 
 /// The routing settings from their stored JSON, with the defaults underneath, so a row written
 /// before a field existed still reads. A row that isn't JSON, isn't an object, has an unknown
-/// field or fails [`RoutingSettings::validate`] reads as the defaults, with a warning that never
-/// quotes the row.
+/// field or fails [`RoutingSettings::validate`] (its upper bounds included) reads as the defaults,
+/// with a warning that never quotes the row.
 pub fn parse_routing_settings_value(raw: Option<&str>) -> ParsedSetting<RoutingSettings> {
     const SUBJECT: &str = "stored routing settings";
     let fallback = |warning: Option<String>| ParsedSetting { value: RoutingSettings::default(), warning };
@@ -251,6 +251,36 @@ mod tests {
         assert_eq!(
             parse_routing_settings_value(Some("nope")),
             ParsedSetting { value: RoutingSettings::default(), warning: Some("stored routing settings were not JSON; using defaults".into()) }
+        );
+    }
+
+    #[test]
+    fn a_stored_value_above_an_upper_bound_reads_as_the_defaults_with_the_did_not_validate_warning() {
+        let not_valid = Some("stored routing settings did not validate; using defaults".to_owned());
+        assert_eq!(parse_routing_settings_value(Some(r#"{"fallbackCount":6}"#)), ParsedSetting { value: RoutingSettings::default(), warning: not_valid.clone() });
+        for raw in [
+            r#"{"smoothingWindow":51}"#,
+            r#"{"observationMaxAgeDays":30.5}"#,
+            r#"{"snapshotMaxAgeMinutes":1441}"#,
+            r#"{"tieRatio":2.01}"#,
+            r#"{"budgetMinTps":10000.5}"#,
+        ] {
+            assert_eq!(parse_routing_settings_value(Some(raw)), ParsedSetting { value: RoutingSettings::default(), warning: not_valid.clone() }, "{raw}");
+        }
+        let at_the_bounds = r#"{"smoothingWindow":50,"observationMaxAgeDays":30,"snapshotMaxAgeMinutes":1440,"fallbackCount":5,"tieRatio":2,"budgetMinTps":10000}"#;
+        let parsed = parse_routing_settings_value(Some(at_the_bounds));
+        assert_eq!(parsed.warning, None, "each bound is accepted exactly");
+        assert_eq!(
+            parsed.value,
+            RoutingSettings {
+                smoothing_window: 50,
+                observation_max_age_days: 30.0,
+                snapshot_max_age_minutes: 1440.0,
+                fallback_count: 5,
+                tie_ratio: 2.0,
+                budget_min_tps: 10_000.0,
+                ..RoutingSettings::default()
+            }
         );
     }
 }

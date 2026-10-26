@@ -56,6 +56,23 @@ export const commands = {
 	routingRefresh: (providerId: number, model: string, effort: "fast" | "balanced" | "deep" | "max" | null) => typedError<RefreshOutcome_Serialize, string>(__TAURI_INVOKE("routing_refresh", { providerId, model, effort })),
 	/**  Which provider's key keeps refreshed models' speeds fresh every 30 minutes; `None` stops it. */
 	routingWatch: (providerId: number | null) => typedError<null, string>(__TAURI_INVOKE("routing_watch", { providerId })),
+	/**  The saved ranking settings over the defaults, the defaults, and whether a row is stored. */
+	routingSettings: () => typedError<RoutingSettingsView, string>(__TAURI_INVOKE("routing_settings")),
+	/**  Saves the whole object. serde has already refused unknown fields; `validate` refuses the rest. */
+	routingSettingsSave: (settings: RoutingSettings) => typedError<RoutingSettingsView, string>(__TAURI_INVOKE("routing_settings_save", { settings })),
+	/**  Restore defaults: deletes the saved row. */
+	routingSettingsReset: () => typedError<RoutingSettingsView, string>(__TAURI_INVOKE("routing_settings_reset")),
+	/**
+	 *  The background observation: the watched provider, the last check, the next one, and the models it
+	 *  follows.
+	 */
+	routingObserver: () => typedError<ObserverView, string>(__TAURI_INVOKE("routing_observer")),
+	/**  Stop observing a model (`observe` false) or observe it again. Its routing data stays. */
+	routingObserveModel: (model: string, observe: boolean) => typedError<ObserverView, string>(__TAURI_INVOKE("routing_observe_model", { model, observe })),
+	/**  The model's speed history per endpoint, from the observations stored for it: free, no request. */
+	routingHistory: (model: string) => typedError<SpeedHistoryRow[], string>(__TAURI_INVOKE("routing_history", { model })),
+	/**  The last 50 Refreshes, newest first, for every model. */
+	routingRefreshLog: () => typedError<RefreshLogView, string>(__TAURI_INVOKE("routing_refresh_log")),
 	sessionsList: () => typedError<SessionSummary[], string>(__TAURI_INVOKE("sessions_list")),
 	/**  Open only this session's recorded working directory; the frontend cannot supply an arbitrary path. */
 	sessionOpenFolder: (sessionId: number) => typedError<null, string>(__TAURI_INVOKE("session_open_folder", { sessionId })),
@@ -541,6 +558,15 @@ export type Check = {
 	timeoutSecs: number,
 };
 
+/**  How one observer check ended. */
+export type CheckOutcome = 
+/**  Models whose endpoints were refetched and stored. */
+{ kind: "updated"; count: number } | { kind: "nothing-due" } | 
+/**  The watched provider can't be used; `routing_provider`'s reason. */
+{ kind: "no-provider"; reason: string } | 
+/**  OpenRouter refused the key. */
+{ kind: "key-refused" } | { kind: "rate-limited" } | { kind: "failed"; message: string };
+
 /**  One check as the gatekeeper ran it. */
 export type CheckRun = {
 	name: string,
@@ -649,6 +675,9 @@ export type CredentialUse = {
 	id: number,
 	envVar: string,
 };
+
+/**  OpenRouter's `provider.data_collection` preference (MR-D11). */
+export type DataCollection = "deny" | "allow";
 
 export type Delivered = {
 	promptId: number,
@@ -818,6 +847,12 @@ export type InstructionSupport = {
 	agent: AgentKind,
 	supported: boolean,
 	text: string,
+};
+
+/**  The last check that recorded an outcome, and when its tick ended. */
+export type LastCheck = {
+	atMs: number | null,
+	outcome: CheckOutcome,
 };
 
 /**
@@ -1050,6 +1085,33 @@ export type Observed = {
 	model: string,
 	variant: string | null,
 	agent: string | null,
+};
+
+/**  One model the observer follows. */
+export type ObservedModel = {
+	model: string,
+	/**  When its endpoints were last stored; `None` when the snapshot can't be read. */
+	fetchedAtMs: number | null,
+	/**  How many updates its speed history holds (distinct update times). */
+	sampleCount: number,
+	stopped: boolean,
+};
+
+/**  Settings → Routing's background observation. */
+export type ObserverView = {
+	/**  The watched provider; `None` is off. */
+	providerId: number | null,
+	/**  `None` when off or when the provider no longer exists. */
+	providerName: string | null,
+	/**  What `routing_provider` says about the watched provider now. */
+	problem: string | null,
+	lastCheck: LastCheck | null,
+	/**  `None` only if the observer never started. */
+	nextAtMs: number | null,
+	/**  Set when the stopped list can't be read; the observer then fetches nothing. */
+	stoppedProblem: string | null,
+	/**  Every model with a stored snapshot that routing doesn't refuse, in slug order. */
+	models: ObservedModel[],
 };
 
 /**
@@ -1363,6 +1425,29 @@ export type QueuedPrompt = {
 /**  The three tiers the ranker orders. Nitro is never ranked: OpenRouter chooses. */
 export type RankedTier = "budget" | "balanced" | "fast";
 
+/**
+ *  One Refresh that passed the checks made before any request. `error` is `None` when it
+ *  succeeded (the inspector says "Done"); a failure carries zero figures.
+ */
+export type RefreshLogEntry = {
+	/**  When the Refresh ended. */
+	atMs: number | null,
+	model: string,
+	providerName: string,
+	error: string | null,
+	endpointsTested: number,
+	spentUsd: number | null,
+	estimateUsd: number | null,
+};
+
+/**  Settings → Routing's Refresh log. */
+export type RefreshLogView = {
+	/**  Newest first; empty when the log can't be read. */
+	entries: RefreshLogEntry[],
+	/**  Set when the stored log can't be read. Reading never rewrites it. */
+	problem: string | null,
+};
+
 /**  What one Refresh did. */
 export type RefreshOutcome = RefreshOutcome_Serialize | RefreshOutcome_Deserialize;
 
@@ -1509,6 +1594,38 @@ export type RoutingProfileId =
  *  golden results pin the ranker.
  */
 "helper";
+
+/**  The ranker's knobs. [`RoutingSettings::validate`] is Chorus 1's `routingSettingsSchema`. */
+export type RoutingSettings = {
+	minUptimePct: number | null,
+	/**  An endpoint that fell below the minimum inside its window needs this much to come back. */
+	readmitUptimePct: number | null,
+	outageGuard5mPct: number | null,
+	unknownQuantPolicy: UnknownQuantPolicy,
+	smoothingWindow: number,
+	stableMinObservations: number,
+	observationMaxAgeDays: number | null,
+	snapshotMaxAgeMinutes: number | null,
+	budgetMinTps: number | null,
+	budgetMedianFraction: number | null,
+	tierWeights: TierWeights,
+	tieRatio: number | null,
+	fallbackCount: number,
+	dataCollection: DataCollection,
+};
+
+/**
+ *  Settings → Routing's ranking settings: what applies now, the defaults beside them, and whether
+ *  a row is stored.
+ */
+export type RoutingSettingsView = {
+	settings: RoutingSettings,
+	defaults: RoutingSettings,
+	/**  A `routing_settings` row exists, readable or not. */
+	stored: boolean,
+	/**  Set when the stored row can't be read, so the defaults apply. Reading never rewrites it. */
+	problem: string | null,
+};
 
 /**  A run's settings, which only Matthew edits, in Chorus. */
 export type RunConfig = {
@@ -1732,6 +1849,22 @@ export type Snapshot = {
 	diffNote: string | null,
 };
 
+/**  One endpoint tag's stored observations, summarised. A `None` is unknown, not zero. */
+export type SpeedHistoryRow = {
+	tag: string,
+	/**  How many observations of the tag are within the age asked for. */
+	samples: number,
+	newestAtMs: number | null,
+	/**  The newest observation's status; the inspector flags anything but 0. */
+	newestStatus: number | null,
+	/**  The median of the positive `tps_p50` values. */
+	medianTps: number | null,
+	/**  The median of the positive `latency_p50_ms` values, in seconds. */
+	medianLatencyS: number | null,
+	/**  The lowest `uptime_1d`. */
+	lowestUptime1d: number | null,
+};
+
 export type StepKind = "plan" | "build" | "check" | "tag";
 
 export type StepState = "running" | "done" | "failed";
@@ -1885,6 +2018,12 @@ export type TierSelections_Serialize = {
 	fast: TierSelection_Serialize | null,
 };
 
+export type TierWeights = {
+	budget: number | null,
+	balanced: number | null,
+	fast: number | null,
+};
+
 /**  New session's routing section for one provider and model. */
 export type TiersView = TiersView_Serialize | TiersView_Deserialize;
 
@@ -1956,6 +2095,16 @@ export type TurnEntry = {
 	asks: AskEntry[],
 	progress: ProgressEntry[],
 };
+
+/**  What an endpoint that declares no quantization needs to be admitted (MR-D7). */
+export type UnknownQuantPolicy = 
+/**  Never admitted. */
+"strict" | 
+/**
+ *  Admitted at native precision from the model's first party, or with an active verification
+ *  record for the tag.
+ */
+"first-party-and-verified";
 
 /**  How a found version relates to the one Chorus checked. */
 export type VersionFit = "verified" | "newer" | "older" | 

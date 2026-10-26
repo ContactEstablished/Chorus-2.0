@@ -15,6 +15,7 @@ import {
   type TierSelection,
   type TiersView,
 } from '../../ipc'
+import { details, price, tiersBlocked, tps, why } from './routingFormat'
 
 const props = defineProps<{ providerId: number; model: string; effort: Effort | null; modelValue: RoutingLaunchChoice | null }>()
 const emit = defineEmits<{ 'update:modelValue': [choice: RoutingLaunchChoice | null] }>()
@@ -94,41 +95,9 @@ const updated = computed(() => {
   return minutes < 1 ? 'Updated just now' : `Updated ${minutes} min ago`
 })
 
-function tps(n: number | null | undefined): string {
-  return n == null ? '—' : `${Math.round(n)} tok/s`
-}
-function price(n: number | null | undefined): string {
-  return n == null ? '—' : `$${n >= 1 ? n.toFixed(2) : n.toPrecision(3)}/M`
-}
-function pct(n: number | null | undefined): string {
-  return n == null ? '—' : `${n.toFixed(2)}%`
-}
-function secs(n: number | null | undefined): string {
-  return n == null ? '—' : `${n.toFixed(2)} s`
-}
-
-// How each tier chose, in Chorus 1's words.
-function why(tier: 'budget' | 'balanced' | 'fast'): string {
-  const n = eligible.value.length
-  if (tier === 'budget') {
-    const above = eligible.value.filter((c) => !c.budgetFloorExcluded).length
-    const floor = result.value?.budgetFloorTps
-    return `First of ${above} endpoints at or above the ${floor == null ? '?' : floor.toFixed(1)} tok/s Budget floor, scored mostly on price.`
-  }
-  return tier === 'balanced' ? `First of ${n} eligible endpoints, scored equally on price and speed.` : `First of ${n} eligible endpoints, scored on speed only.`
-}
-
-function details(c: CandidateExplanation | undefined): string[] {
-  if (!c) return []
-  const lines = [
-    `${c.tag} (${c.providerName}), ${c.quantization}`,
-    `${price(c.cost?.blended)} blended · ${tps(c.tpsP50)} · ${c.effectiveTps == null ? '—' : `${c.effectiveTps.toFixed(1)} effective tok/s`}`,
-    `${secs(c.latencyP50S)} latency · ${pct(c.uptime1d)} uptime`,
-  ]
-  const flags = [c.cost?.cacheCredit ? 'cache verified' : 'cache not verified', c.limitedHistory ? 'limited history' : `${c.observations} observations`]
-  lines.push(flags.join(' · '))
-  return lines
-}
+// Set when routing_tiers failed (a refused model, a provider that is gone): the tiers and Refresh
+// can't be used, and the error says why. OpenRouter default stays available.
+const blocked = computed(() => tiersBlocked(view.value, error.value))
 
 interface Row {
   choice: RoutingLaunchChoice
@@ -146,13 +115,14 @@ const rows = computed<Row[]>(() => {
     const primary = sel ? candidates.value.get(sel.endpoints[0] ?? '') : undefined
     const label = tier[0]!.toUpperCase() + tier.slice(1)
     let title: string
-    if (!r) title = 'Refresh to rank this model’s endpoints.'
+    if (blocked.value) title = blocked.value
+    else if (!r) title = 'Refresh to rank this model’s endpoints.'
     else if (!sel) title = `${label} has no eligible endpoints.`
     else
       title = [
         ...details(primary),
         sel.endpoints.length > 1 ? `Then: ${sel.endpoints.slice(1).join(', ')}` : 'No fallbacks',
-        why(tier),
+        why(tier, r),
       ].join('\n')
     out.push({
       choice: tier,
@@ -160,7 +130,7 @@ const rows = computed<Row[]>(() => {
       provider: primary ? `${primary.providerName}` : !r ? 'not ranked yet' : 'no eligible endpoint',
       speed: primary ? tps(primary.tpsP50) : '',
       title: r?.stale && sel ? `${title}\n\nOlder than 60 min: Refresh before launching with it.` : title,
-      disabled: !sel || !!r?.stale,
+      disabled: !!blocked.value || !sel || !!r?.stale,
     })
   }
   const likely = r?.nitro.likely ?? null
@@ -169,15 +139,17 @@ const rows = computed<Row[]>(() => {
     label: 'Nitro',
     provider: likely ? `likely ${likely.providerName}` : 'OpenRouter picks the fastest',
     speed: likely ? tps(likely.tpsP50) : '',
-    title: [
-      'Unfiltered provider routing: the :nitro model id, and OpenRouter sends each request to the fastest endpoint.',
-      likely ? `Likely ${likely.providerName} (${likely.tag}) at ${tps(likely.tpsP50)}: an estimate; actual routing may differ.` : '',
-      r?.nitro.likelyFailsRules.length ? `That endpoint fails: ${r.nitro.likelyFailsRules.join('; ')}.` : '',
-      'Requests may be billed at a provider’s priority-tier price. Your account’s guardrails still apply.',
-    ]
-      .filter(Boolean)
-      .join('\n'),
-    disabled: false,
+    title:
+      blocked.value ??
+      [
+        'Unfiltered provider routing: the :nitro model id, and OpenRouter sends each request to the fastest endpoint.',
+        likely ? `Likely ${likely.providerName} (${likely.tag}) at ${tps(likely.tpsP50)}: an estimate; actual routing may differ.` : '',
+        r?.nitro.likelyFailsRules.length ? `That endpoint fails: ${r.nitro.likelyFailsRules.join('; ')}.` : '',
+        'Requests may be billed at a provider’s priority-tier price. Your account’s guardrails still apply.',
+      ]
+        .filter(Boolean)
+        .join('\n'),
+    disabled: !!blocked.value,
   })
   out.push({
     choice: 'default',
@@ -209,8 +181,8 @@ const spentText = computed(() => {
       <button
         type="button"
         class="refresh"
-        :disabled="busy || !!view?.problem || (view?.retryInSecs ?? 0) > 0"
-        :title="view?.problem ?? ((view?.retryInSecs ?? 0) > 0 ? `Refreshed less than a minute ago: again in ${view?.retryInSecs} s` : refreshTitle)"
+        :disabled="busy || !!blocked || !!view?.problem || (view?.retryInSecs ?? 0) > 0"
+        :title="blocked ?? view?.problem ?? ((view?.retryInSecs ?? 0) > 0 ? `Refreshed less than a minute ago: again in ${view?.retryInSecs} s` : refreshTitle)"
         @click="refresh"
       >
         {{ busy ? 'Refreshing…' : 'Refresh' }}

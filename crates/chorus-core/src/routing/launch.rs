@@ -240,6 +240,17 @@ pub const REFUSE_PROFILE_ENV: &str =
 pub const REFUSE_STORED_INVALID: &str = "This session's saved routing could not be read. Start a new session from the launch dialog.";
 pub const REFUSE_RELAUNCH_UNAVAILABLE: &str = "Model routing is not available right now, so this routed session cannot be relaunched.";
 pub const REFUSE_RELAUNCH_CREDENTIAL: &str = "This session was routed, but its launch profile's credential can no longer be used for model routing.";
+pub const REFUSE_FIRST_PARTY: &str = "Chorus doesn't route Anthropic or OpenAI models through OpenRouter. Run them in Claude Code or Codex on your own sign-in.";
+
+/// Why routing won't take this model: Anthropic and OpenAI models run in Claude Code and Codex on
+/// the user's own sign-in. The author is the text before the first `/` (the whole slug without
+/// one), minus one leading `~`, compared ignoring ASCII case. A stored selection isn't checked
+/// here: a session that already has one keeps it.
+pub fn routing_refusal(model: &str) -> Option<&'static str> {
+    let author = model.split('/').next().unwrap_or_default();
+    let author = author.strip_prefix('~').unwrap_or(author);
+    (author.eq_ignore_ascii_case("anthropic") || author.eq_ignore_ascii_case("openai")).then_some(REFUSE_FIRST_PARTY)
+}
 
 /// What a launch knows when it decides about routing.
 #[derive(Debug, Clone, Copy)]
@@ -633,6 +644,61 @@ mod tests {
         assert_eq!(REFUSE_STORED_INVALID, "This session's saved routing could not be read. Start a new session from the launch dialog.");
         assert_eq!(REFUSE_RELAUNCH_UNAVAILABLE, "Model routing is not available right now, so this routed session cannot be relaunched.");
         assert_eq!(REFUSE_RELAUNCH_CREDENTIAL, "This session was routed, but its launch profile's credential can no longer be used for model routing.");
+    }
+
+    #[test]
+    fn the_first_party_refusal_text_is_decisions_md_exactly() {
+        assert_eq!(
+            REFUSE_FIRST_PARTY,
+            "Chorus doesn't route Anthropic or OpenAI models through OpenRouter. Run them in Claude Code or Codex on your own sign-in."
+        );
+        assert!(!REFUSE_FIRST_PARTY.contains('\n') && !REFUSE_FIRST_PARTY.contains('’'), "one line, straight apostrophes");
+    }
+
+    #[test]
+    fn anthropic_and_openai_models_are_refused_whatever_their_case_or_tilde() {
+        for model in [
+            "anthropic/claude-sonnet-5",
+            "Anthropic/claude-opus-5.5",
+            "openai/gpt-5.5",
+            "OPENAI/o9",
+            "~anthropic/claude-sonnet-latest",
+            "openai",
+        ] {
+            assert_eq!(routing_refusal(model), Some(REFUSE_FIRST_PARTY), "{model}");
+        }
+    }
+
+    #[test]
+    fn other_authors_are_allowed_even_when_they_only_look_alike() {
+        for model in ["deepseek/deepseek-v4.1-flash", "anthropic-labs/x", "meta/openai-compat", "~deepseek/x", SLUG] {
+            assert_eq!(routing_refusal(model), None, "{model}");
+        }
+        // Only the text before the first `/` is the author, and only one `~` is dropped.
+        for model in ["~~anthropic/x", "x/anthropic/y", "openai-x", "anthropics", "", "/anthropic", "~"] {
+            assert_eq!(routing_refusal(model), None, "{model}");
+        }
+    }
+
+    #[test]
+    fn a_stored_selection_for_a_first_party_model_still_reads_back_and_relaunches() {
+        const MODEL: &str = "anthropic/claude-sonnet-5";
+        let balanced = RoutingLaunchSelection { model: MODEL.into(), sent_model_id: MODEL.into(), ..balanced_selection() };
+        let nitro = RoutingLaunchSelection { model: MODEL.into(), sent_model_id: format!("{MODEL}:nitro"), ..nitro_selection() };
+        assert!(routing_refusal(MODEL).is_some(), "the model is one routing now refuses");
+        for selection in [balanced, nitro] {
+            let stored = serde_json::to_string(&selection).unwrap();
+            assert_eq!(parse_stored_selection(Some(&stored)), StoredSelection::Selection(selection.clone()), "{:?}", selection.tier);
+            let facts = RoutingRelaunchFacts {
+                agent: AgentKind::Opencode,
+                routing_json: Some(&stored),
+                credential_id: Some(C),
+                routing_available: true,
+                routing_credential_ids: &[C],
+                profile_env_keys: &[],
+            };
+            assert_eq!(plan_routing_relaunch(&facts), RoutingRelaunchPlan::Routed(selection.clone()), "{:?}", selection.tier);
+        }
     }
 
     #[test]
