@@ -1,6 +1,6 @@
 //! Persist-before-write receipts and prompt echo matching. No automatic retry after uncertainty.
 
-use chorus_core::actions::{PromptSource, echo_matches};
+use chorus_core::actions::{PromptSource, echo_matches_within, echo_window};
 use rusqlite::{OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -75,12 +75,12 @@ pub fn unobserved(store: &Store, run: u32) -> Result<bool, String> {
 /// Called under the run recorder lock, once for each opened turn. Consume oldest matching echo.
 pub fn observe(store: &Store, run: u32, text: &str, now: i64) -> Result<Option<i64>, String> {
     store.with(|c| {
-        let mut stmt = c.prepare("SELECT d.prompt_id,p.text,d.attempted_at FROM prompt_deliveries d
+        let mut stmt = c.prepare("SELECT d.prompt_id,p.text,d.attempted_at,p.source FROM prompt_deliveries d
             JOIN prompts p ON p.id=d.prompt_id WHERE d.run_id=?1 AND d.status!='observed' ORDER BY d.prompt_id")?;
-        let rows = stmt.query_map([run], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?)))?;
+        let rows = stmt.query_map([run], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?, r.get::<_, String>(3)?)))?;
         for row in rows {
-            let (id, expected, at) = row?;
-            if echo_matches(run, run, &expected, text, at, now) {
+            let (id, expected, at, source) = row?;
+            if echo_matches_within(run, run, &expected, text, at, now, echo_window(&source)) {
                 c.execute("UPDATE prompt_deliveries SET status='observed' WHERE prompt_id=?1", [id])?;
                 return Ok(Some(id));
             }

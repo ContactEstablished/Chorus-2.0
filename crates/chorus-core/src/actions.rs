@@ -125,8 +125,22 @@ pub fn prompt_write(text: &str) -> String {
 }
 
 pub fn echo_matches(expected_run: u32, actual_run: u32, expected: &str, actual: &str, sent_ms: i64, now_ms: i64) -> bool {
+    echo_matches_within(expected_run, actual_run, expected, actual, sent_ms, now_ms, ECHO_WINDOW_MS)
+}
+
+/// A prompt passed on the command line at launch (an automation's or a loop step's) is the run's
+/// first turn whenever the agent is ready to take it, which a trust question or a slow start can
+/// put well past [`ECHO_WINDOW_MS`] (P15 measured 103 s). Its echo is matched within this instead.
+pub const LAUNCH_ECHO_WINDOW_MS: i64 = 30 * 60_000;
+
+/// How long after it was given a prompt from `source` may be echoed.
+pub fn echo_window(source: &str) -> i64 {
+    if matches!(source, "automation" | "loop") { LAUNCH_ECHO_WINDOW_MS } else { ECHO_WINDOW_MS }
+}
+
+pub fn echo_matches_within(expected_run: u32, actual_run: u32, expected: &str, actual: &str, sent_ms: i64, now_ms: i64, window_ms: i64) -> bool {
     expected_run == actual_run && (expected == actual || pasted_echo(actual) == Some(expected))
-        && (0..=ECHO_WINDOW_MS).contains(&now_ms.saturating_sub(sent_ms))
+        && (0..=window_ms).contains(&now_ms.saturating_sub(sent_ms))
 }
 
 /// Claude 2.1.308 wraps longer bracketed pastes in its UserPromptSubmit hook. Accept only
@@ -168,6 +182,14 @@ mod tests {
         assert!(!echo_matches(1, 1, "one\ntwo", &wrapped.replace("</pasted_content id=\"a1b2", "</pasted_content id=\"ffff"), 100, 101));
         assert!(!echo_matches(1, 1, "one", wrapped, 100, 101));
         assert!(!echo_matches(1, 1, "one\ntwo", &(wrapped.to_owned() + "extra"), 100, 101));
+    }
+    #[test]
+    fn a_launch_prompt_may_be_echoed_late() {
+        let late = 100 + 103_000;
+        assert!(!echo_matches_within(1, 1, "go", "go", 100, late, echo_window("composer")));
+        assert!(echo_matches_within(1, 1, "go", "go", 100, late, echo_window("loop")));
+        assert!(echo_matches_within(1, 1, "go", "go", 100, late, echo_window("automation")));
+        assert!(!echo_matches_within(1, 1, "go", "go", 100, 100 + LAUNCH_ECHO_WINDOW_MS + 1, echo_window("loop")));
     }
     #[test]
     fn guarded_delivery_cannot_answer_an_approval_or_guess_idle() {

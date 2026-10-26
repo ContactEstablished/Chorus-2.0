@@ -41,6 +41,7 @@ impl Fixture {
             routing: None,
             bot_id: None,
             first_prompt: None,
+            loop_step: None,
         };
         let s = self.manager.create(req).unwrap();
         assert!(s.live, "shell should be running: {:?}", s.note);
@@ -311,7 +312,7 @@ fn expired_raw_answered_locked_and_stale_requests_cannot_reply() {
     assert_eq!(receiver.try_recv(), Err(tokio::sync::oneshot::error::TryRecvError::Closed));
     let (ask, receiver) = held_approval(&f, &run, "a2");
     let request = actions::ActionRequest { run_id: run.id, request_id: OTHER_REQUEST.into(), action: SessionAction::Release { ask_id: ask }};
-    run.recorder.lock().unwrap().replies.get_mut(&i64::from(ask)).unwrap().opened -= Duration::from_secs(121);
+    run.recorder.lock().unwrap().replies.get_mut(&i64::from(ask)).unwrap().opened -= Duration::from_secs(chorus_core::replies::REPLY_WAIT_SECS + 1);
     assert!(actions::ActionRouter::dispatch(&f.manager, id, request.clone()).is_err());
     assert!(run.recorder.lock().unwrap().pending_replies()[0].blocked_reason.is_some());
     drop(receiver);
@@ -447,7 +448,7 @@ fn delivered_secrets_are_scrubbed_and_echoes_are_run_and_time_scoped() {
     let (id, run, _) = delivery_fixture(&f, false);
     *run.recorder.lock().unwrap() = Recorder::new(id, run.id, "hook", Arc::new(vec![b"example-private-value".to_vec()]), Arc::new(builtin_patterns()));
     run.recorder.lock().unwrap().record(&f.manager.store, "test", &serde_json::json!({}), &[chorus_core::events::AgentEvent::Idle], 0);
-    let result = delivery::deliver_prompt(&f.manager, id, run.id, DELIVERY_REQUEST, "use example-private-value", PromptSource::Automation).unwrap();
+    let result = delivery::deliver_prompt(&f.manager, id, run.id, DELIVERY_REQUEST, "use example-private-value", PromptSource::Composer).unwrap();
     let stored: String = f.manager.store.with(|c| c.query_row("SELECT text FROM prompts WHERE id=?1", [result.prompt_id], |r| r.get(0))).unwrap();
     assert!(!stored.contains("example-private-value"));
     assert!(receipts::observe(&f.manager.store, run.id + 1, &stored, crate::store::now_ms()).unwrap().is_none());
@@ -682,6 +683,7 @@ fn bad_input_is_refused_at_the_boundary() {
         routing: None,
         bot_id: None,
         first_prompt: None,
+        loop_step: None,
     };
     assert!(f.manager.create(req.clone()).unwrap_err().contains("full path"));
     req.cwd = f.dir.join("missing").display().to_string();
@@ -716,6 +718,7 @@ fn a_preset_launch_names_and_notes_its_sessions() {
         routing: None,
         bot_id: None,
         first_prompt: None,
+        loop_step: None,
     };
     // A shell can't build: Workbench and Pair say so, and nothing starts.
     let refused = f.manager.launch(LaunchRequest { preset: Preset::Workbench, session: session.clone(), count: None }).unwrap_err();
@@ -761,7 +764,7 @@ fn worktree_request(f: &Fixture) -> CreateSession {
     CreateSession {
         agent: AgentKind::Shell, cwd: repo.display().to_string(), name: None, credential: None,
         cols: 100, rows: 30, options: Default::default(), provider_id: None, description: None,
-        project_id: None, tags: Vec::new(), workspace: Workspace::NewWorktree, routing: None, bot_id: None, first_prompt: None,
+        project_id: None, tags: Vec::new(), workspace: Workspace::NewWorktree, routing: None, bot_id: None, first_prompt: None, loop_step: None,
     }
 }
 
@@ -936,6 +939,7 @@ fn a_session_can_work_in_a_worktree_of_its_own() {
         routing: None,
         bot_id: None,
         first_prompt: None,
+        loop_step: None,
     };
     let first = f.manager.create(request.clone()).unwrap();
     assert_eq!(first.tags, ["spike", "review"]);
@@ -1012,6 +1016,7 @@ fn a_worktree_git_removed_only_in_part_is_reported_so() {
             routing: None,
             bot_id: None,
             first_prompt: None,
+            loop_step: None,
         })
         .unwrap();
     let wt = s.worktree.clone().unwrap();

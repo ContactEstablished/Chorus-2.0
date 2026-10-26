@@ -95,11 +95,21 @@ pub fn session_action_capabilities(state: Manager<'_>, session_id: u32) -> Resul
 #[tauri::command]
 #[specta::specta]
 pub fn session_pending_replies(state: Manager<'_>, session_id: u32) -> Result<Vec<PendingReply>, String> {
-    let row = state.row(session_id)?;
-    let Some(run) = state.open_live(session_id).ok().and_then(|l| l.current_run()) else { return Ok(Vec::new()) };
+    pending_replies(&state, session_id)
+}
+
+/// A session's held replies, for the views and the phone relay alike.
+pub fn pending_replies(manager: &SessionManager, session_id: u32) -> Result<Vec<PendingReply>, String> {
+    let row = manager.row(session_id)?;
+    let Some(run) = manager.open_live(session_id).ok().and_then(|l| l.current_run()) else { return Ok(Vec::new()) };
     let mut pending = run.recorder.lock().expect("recorder lock").pending_replies();
     if row.locked { for p in &mut pending { p.blocked_reason = Some("Session is locked. Unlock it to reply.".into()); } }
     Ok(pending)
+}
+
+/// The session's current run, which a delivery or reply must name, if it has a live one.
+pub fn current_run_id(manager: &SessionManager, session_id: u32) -> Option<u32> {
+    manager.open_live(session_id).ok().and_then(|l| l.current_run()).map(|r| r.id)
 }
 
 #[tauri::command]

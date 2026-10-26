@@ -15,6 +15,9 @@ and written up in `S<n>.md`; raw evidence stays in `_verify/`, which is never co
 | S8 | Per-user installer beside Chorus 1 | [Pass, one collision](S8.md): no admin, Chorus 1 untouched, data kept on uninstall; but shortcut names collide with Chorus 1's (Q20, answered by D51) |
 | S9 | DeepSeek Harness (`dsh`) on Windows: interfaces, events, key, sessions, cost (D59, Q21) | Planned for P14 |
 
+Later phases' spikes: [P15.md](P15.md) (unattended permissions, allowances, agent tools on a loopback
+MCP endpoint, Telegram).
+
 ## Toolchain (verified 2026-10-18)
 
 | Tool | Version |

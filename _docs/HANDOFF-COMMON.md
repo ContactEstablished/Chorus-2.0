@@ -14,9 +14,10 @@ P4 and P5. **Read this file first, then your phase's plan:**
 | P11 Measurement, made visible | [HANDOFF-P11-measurement.md](HANDOFF-P11-measurement.md) | `_docs/HANDOFF-P11-REVIEW.md` | `p11` | 1431 |
 | P13 Phone relay (Telegram) | [HANDOFF-P13-telegram.md](HANDOFF-P13-telegram.md) | `_docs/HANDOFF-P13-REVIEW.md` | `p13` | 1433 |
 | P14 More agents and ship | [HANDOFF-P14-agents-ship.md](HANDOFF-P14-agents-ship.md) | `_docs/HANDOFF-P14-REVIEW.md` | `p14` | 1434 |
+| P15 Autonomous phase loop | [HANDOFF-P15-loop.md](HANDOFF-P15-loop.md) | `_docs/HANDOFF-P15-REVIEW.md` | `p15` | 1437 |
 
-`CLAUDE.md` says to build phases in order. **Matthew has made an exception for these five**, so you
-may build your phase now. Everything else in `CLAUDE.md` still applies. Read these in full before you
+`CLAUDE.md` says to build phases in order. **Matthew has made an exception for P7, P8, P11, P13 and
+P14**, so you may build your phase now; P15 is next in order (D97). Everything else in `CLAUDE.md` still applies. Read these in full before you
 write code: `CLAUDE.md`, `_docs/PLAN.md`, `_docs/ARCHITECTURE.md`, `_docs/SCOPE.md`,
 `_docs/DECISIONS.md`, `_docs/LESSONS.md`, `_docs/OPEN-QUESTIONS.md` and `_docs/design/DESIGN.md`.
 

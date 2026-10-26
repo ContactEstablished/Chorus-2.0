@@ -29,6 +29,7 @@ const NotesView = defineAsyncComponent(() => import('../views/NotesView.vue'))
 const BotsView = defineAsyncComponent(() => import('../views/BotsView.vue'))
 const DocumentsView = defineAsyncComponent(() => import('../views/DocumentsView.vue'))
 const AutomationsView = defineAsyncComponent(() => import('../views/AutomationsView.vue'))
+const LoopView = defineAsyncComponent(() => import('../views/LoopView.vue'))
 const NewSessionDialog = defineAsyncComponent(() => import('../views/NewSessionDialog.vue'))
 const CommandPalette = defineAsyncComponent(() => import('../shell/CommandPalette.vue'))
 
@@ -116,6 +117,7 @@ watch(
         <SessionsView v-else-if="view.name === 'sessions'" />
         <BotsView v-else-if="view.name === 'bots'" />
         <AutomationsView v-else-if="view.name === 'automations'" />
+        <LoopView v-else-if="view.name === 'loop'" />
         <DocumentsView v-else-if="view.name === 'documents'" />
         <NotesView v-else-if="view.name === 'notes'" />
         <OverviewView v-else />

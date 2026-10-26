@@ -25,6 +25,7 @@ const NAV: { name: ViewName; label: string; icon: IconName }[] = [
   { name: 'sessions', label: 'Sessions', icon: 'sessions' },
   { name: 'bots', label: 'Bots', icon: 'bots' },
   { name: 'automations', label: 'Automations', icon: 'automations' },
+  { name: 'loop', label: 'Loop', icon: 'loop' },
   { name: 'documents', label: 'Documents', icon: 'documents' },
   { name: 'notes', label: 'Notes', icon: 'notes' },
   { name: 'settings', label: 'Settings', icon: 'settings' },

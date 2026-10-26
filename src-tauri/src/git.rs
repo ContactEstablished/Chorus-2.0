@@ -131,6 +131,58 @@ pub fn remove_worktree(main_root: &Path, path: &str) -> Result<(), String> {
     if r.ok { Ok(()) } else { Err(complaint(&r.stderr)) }
 }
 
+/// P15: makes a worktree at `path` on `branch`, which already exists (a run that resumes).
+pub fn add_worktree_on(main_root: &Path, path: &str, branch: &str) -> Result<(), String> {
+    if let Some(parent) = Path::new(path).parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("creating {}: {e}", parent.display()))?;
+    }
+    let r = run(main_root, &["worktree", "add", path, branch], SLOW)?;
+    if r.ok { Ok(()) } else { Err(format!("git couldn't make the worktree: {}", complaint(&r.stderr))) }
+}
+
+/// P15: the commit `rev` names, or none when it names nothing.
+pub fn rev(dir: &Path, rev: &str) -> Result<Option<String>, String> {
+    let spec = format!("{rev}^{{commit}}");
+    let r = run(dir, &["rev-parse", "--verify", "--quiet", &spec], QUICK)?;
+    Ok(r.ok.then(|| r.stdout.trim().to_owned()).filter(|s| !s.is_empty()))
+}
+
+/// P15: stages every change in the working tree and commits it, with the repository's own hooks
+/// and identity. Returns the new commit, or none when there was nothing to commit.
+pub fn commit_all(dir: &Path, message: &str) -> Result<Option<String>, String> {
+    let add = run(dir, &["add", "--all"], SLOW)?;
+    if !add.ok {
+        return Err(format!("git add: {}", complaint(&add.stderr)));
+    }
+    let staged = run(dir, &["diff", "--cached", "--quiet"], QUICK)?;
+    if staged.ok {
+        return Ok(None);
+    }
+    let c = run(dir, &["commit", "--quiet", "-m", message], SLOW)?;
+    if !c.ok {
+        return Err(format!("git commit: {}", complaint(if c.stderr.trim().is_empty() { &c.stdout } else { &c.stderr })));
+    }
+    rev(dir, "HEAD")
+}
+
+/// P15: tags the current commit. A tag that already names it is left alone; one that names another
+/// commit is refused, so a passing phase's tag is never moved.
+pub fn tag(dir: &Path, name: &str, message: &str) -> Result<(), String> {
+    let head = rev(dir, "HEAD")?.ok_or("The branch has no commit to tag.")?;
+    if let Some(existing) = rev(dir, &format!("refs/tags/{name}"))? {
+        return if existing == head { Ok(()) } else { Err(format!("The tag {name} already names another commit.")) };
+    }
+    let r = run(dir, &["tag", "-a", name, "-m", message], QUICK)?;
+    if r.ok { Ok(()) } else { Err(format!("git tag: {}", complaint(&r.stderr))) }
+}
+
+/// P15: a file's text at `rev`, or none when it isn't there.
+pub fn show(dir: &Path, rev: &str, path: &str) -> Result<Option<String>, String> {
+    let spec = format!("{rev}:{}", path.replace('\\', "/"));
+    let r = run(dir, &["show", &spec], QUICK)?;
+    Ok(r.ok.then_some(r.stdout))
+}
+
 pub fn worktrees(root: &Path) -> Result<Vec<Tree>, String> {
     let r = run(root, &["worktree", "list", "--porcelain", "-z"], QUICK)?;
     if !r.ok { return Err(format!("git worktree list: {}", complaint(&r.stderr))); }

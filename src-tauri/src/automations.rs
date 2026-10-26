@@ -153,7 +153,7 @@ fn row(store: &Store, id: u32) -> Result<Option<AutoRow>, String> {
 
 /// The local offset, in minutes east of UTC, at a UTC instant, from SQLite's `localtime`, which
 /// follows the system's time zone and its daylight-saving rules.
-fn offset_at(store: &Store, utc_ms: i64) -> i32 {
+pub(crate) fn offset_at(store: &Store, utc_ms: i64) -> i32 {
     store
         .with(|c| {
             c.query_row(
@@ -487,6 +487,7 @@ fn fire(m: &Arc<SessionManager>, a: &AutoRow, trigger: Trigger, due_at: i64) -> 
         routing: None,
         bot_id: Some(bot.id),
         first_prompt: Some(a.prompt.clone()),
+        loop_step: None,
     };
     match m.create(request) {
         Ok(s) if s.live => record_run(store, a.id, trigger, due_at, Outcome::Started, Some(s.id), None),
@@ -561,15 +562,15 @@ pub fn start(manager: &Arc<SessionManager>) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
-/// Persists an automation's first prompt for a session just made: scrubbed, source `automation`,
-/// with no run yet. The run that passes it links it (`launched`).
-pub fn stage_prompt(store: &Store, session_id: u32, prompt: Option<&str>) -> Result<(), String> {
+/// Persists a first prompt for a session just made: scrubbed, with no run yet, from `source`
+/// (`automation`, or `loop` for a loop step). The run that passes it links it (`launched`).
+pub fn stage_prompt(store: &Store, session_id: u32, source: &str, prompt: Option<&str>) -> Result<(), String> {
     let Some(p) = prompt else { return Ok(()) };
-    stage(store, session_id, "automation", p).map(|_| ())
+    stage(store, session_id, source, p).map(|_| ())
 }
 
 /// Persists a first prompt for the session's next run, scrubbed, with no run yet: an
-/// automation's, or the composer's for Restart and send (D96). Returns its id.
+/// automation's, a loop step's, or the composer's for Restart and send (D96). Returns its id.
 pub fn stage(store: &Store, session_id: u32, source: &str, prompt: &str) -> Result<i64, String> {
     let (keys, _) = vault::all_for_scrubbing(store);
     let text = String::from_utf8_lossy(&scrub_all(prompt.as_bytes(), &keys, &builtin_patterns())).into_owned();
@@ -600,7 +601,7 @@ pub fn staged(store: &Store, row: &SessionRow) -> Option<Staged> {
     store
         .with(|c| {
             c.query_row(
-                "SELECT p.id, p.text FROM prompts p WHERE p.session_id = ?1 AND p.run_id IS NULL AND p.source IN ('automation', 'composer')
+                "SELECT p.id, p.text FROM prompts p WHERE p.session_id = ?1 AND p.run_id IS NULL AND p.source IN ('automation', 'loop', 'composer')
                    AND NOT EXISTS (SELECT 1 FROM prompt_deliveries d WHERE d.prompt_id = p.id)
                  ORDER BY p.id LIMIT 1",
                 [row.id],
@@ -640,7 +641,7 @@ pub fn launched(store: &Store, session_id: u32, run_id: u32, p: &Staged) {
 pub fn unstage(store: &Store, session_id: u32) {
     let _ = store.with(|c| {
         c.execute(
-            "DELETE FROM prompts WHERE session_id = ?1 AND run_id IS NULL AND source IN ('automation', 'composer')
+            "DELETE FROM prompts WHERE session_id = ?1 AND run_id IS NULL AND source IN ('automation', 'loop', 'composer')
                AND NOT EXISTS (SELECT 1 FROM prompt_deliveries d WHERE d.prompt_id = prompts.id)",
             [session_id],
         )

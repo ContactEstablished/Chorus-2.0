@@ -5,7 +5,9 @@ use specta::Type;
 
 use crate::actions::{ApprovalDecision, SessionAction, clean_prompt};
 
-pub const REPLY_WAIT_SECS: u64 = 120;
+/// How long Chorus holds a Claude Code approval or question open for an answer: five minutes, so the
+/// phone can answer too (D102, was two minutes under D76). Claude Code's hook timeout is 5 s longer.
+pub const REPLY_WAIT_SECS: u64 = 300;
 pub const MAX_REQUEST_BYTES: usize = 32 * 1024;
 
 /// A completed call resolves only its own approval. Some PermissionRequest payloads lack a

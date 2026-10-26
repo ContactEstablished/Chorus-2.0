@@ -120,3 +120,24 @@ export type {
   SessionBot,
   SessionInstructions,
 } from './bindings'
+
+// P15: the autonomous phase loop.
+export type {
+  Check as LoopCheck,
+  CheckRun as LoopCheckRun,
+  Limits as LoopLimits,
+  LoopFolder,
+  LoopRole,
+  NewRun as LoopNewRun,
+  PhaseView as LoopPhase,
+  QuestionView as LoopQuestion,
+  RoleSetting as LoopRoleSetting,
+  RunConfig as LoopRunConfig,
+  RunState as LoopRunState,
+  RunView as LoopRun,
+  StepView as LoopStep,
+  TaskProgress as LoopTask,
+  RelayView,
+  RelayUser,
+  RelayProject,
+} from './bindings'

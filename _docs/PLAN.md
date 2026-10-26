@@ -62,7 +62,7 @@ scraping the screen, and records **every prompt durably** in SQLite.
 ### Current position (priority updated 2026-10-25)
 
 **Priority override (2026-10-25, D102):** prioritize P10 Council and P12 Routing inspector.
-P10 remains part of the autonomous phase loop (P15, D97 on its development branch); this priority
+P10 remains part of the autonomous phase loop (P15, D97); this priority
 change does not interrupt that ongoing work or create a second Council implementation.
 Move P14 and P11 to the end of the roadmap, with P11 last. Both are **on hold until Matthew
 explicitly resumes them**. Do not start their remaining implementation or acceptance checks under
@@ -71,8 +71,8 @@ these held items later as a real-world test; this is not authorization to start 
 Keep completed work and phase identifiers. M3's full scope remains, with no completion date while
 these phases are held. This override takes precedence over the historical execution order below.
 
-The original roadmap has **14 phases**: P0–P14 with P9 removed; P11 and P14 are now on hold,
-and P15 is being developed separately as noted above. Keep these identifiers: scope and decisions
+There are **15 active phases**: P0–P15 with P9 removed; P11 and P14 are now on hold (D102).
+Keep these identifiers: scope and decisions
 already refer to them. P0–P5 are closed; P4's full-day acceptance check was explicitly waived on
 2026-10-22, not performed (D72). P5's remaining work passed its app checks on 2026-10-22.
 M1 is complete with the recorded P1/P4 waivers. P6's final narrator slice is ready for review. Work brought forward from P12 and P14
@@ -90,11 +90,12 @@ does not close those phases.
 | P7 | Attention and notifications | Built 2026-10-24 and ready for review: inbox order and ages, notification centre, tray badge, fleet strip, Raw search, transcript export and Claude fleet addressing; exit gate and D23 seen in the app ([review](HANDOFF-P7-REVIEW.md)). tray click and menu, strip focus and inbox keys checked with real input. A third review's fixes (a hang when a restart changed the tray while a keystroke arrived, reproduced first; the strip's shield size, show/hide races and swapped buttons) checked in the app. Each window now calls only its own commands (D92, D93), seen in the app. Other DPI scales, a real monitor change and swapped buttons deferred (D88); opencode 2.1.4: Ctrl+Shift+F opens Raw search and sends opencode nothing, Ctrl+F still reaches it |
 | P8 | Bots, Automations, Notes, Documents | Built 2026-10-24 and ready for review: Bots from profiles, Notes and per-run instructions (Claude; Codex through its app-server, kept with Friendly waiting for them, D89), Documents for Claude Code and Codex, Automations for Claude Code that close a finished run's agent (D84) and skip while any of their sessions is busy (D85) ([review](HANDOFF-P8-REVIEW.md); decisions D84–D96 and what was verified in [one list](HANDOFF-P6-P8-DECISIONS.md)) |
 | P9 | Voice | Removed; separate dictation app (D22); Chorus retains compatibility (D23) |
-| P10 | Council | Priority work (D102); to be built once inside the ongoing P15 autonomous phase loop (D97 on its development branch) |
+| P10 | Council | Priority work (D102). Built once inside P15, for the loop (D97) |
 | P12 | Routing inspector | Priority work (D102). Launch routing built in P4; Settings → Routing, observer status and history remain |
-| P13 | Phone relay | Planned; P13a delivers prompts and status; P13b answers questions and approvals after P6 |
+| P13 | Phone relay | Built once inside P15, for the loop, from [its design](HANDOFF-P13-telegram.md) (D97); P6 has since built the reply channels P13b needed |
 | P14 | More agents and ship | **On hold until further notice (D102); at the end, before P11.** Partly built: Gemini, Aider, Ollama, CI, installer polish and Q28–Q30 fixes; complete real turns, DeepSeek spike/adapter, signing, updates and eventual name migration remain for a future Chorus 2 real-world test |
 | P11 | Measurement, made visible | **On hold until further notice (D102); last priority.** Tokens, costs, attention and Usage UI remain for a future Chorus 2 real-world test; forecasts remain gated on data completeness |
+| P15 | Autonomous phase loop | Next (D97): [plan](HANDOFF-P15-loop.md). Runs a roadmap phase after phase, stopping at milestones or real blockers; includes Council (P10) and the Telegram relay (P13) |
 
 **Execution order agreed 2026-10-22:** roadmap consolidation, Q28–Q30 and P5 are complete. Build P6
 and P7 for M2, then finish the remaining capability and release phases for M3. P6 began with the
@@ -102,6 +103,8 @@ structured action/plan channel and Friendly timeline. Following the 2026-10-23 r
 the Friendly composer and durable queue were prioritised and verified (D78). Progress/control and
 multi-phase tasks followed (D81); narrator and Next steps now follow in D82. Review this final P6
 slice, then move to P7 attention and notifications.
+**2026-10-24:** P6–P8 merged to main. P15, the autonomous phase loop, is next, and builds P10's
+Council and P13's relay once, for the loop, with Telegram in its first version (D97).
 Record runtime evidence before closing a phase. P4's full-day check was waived by the user, not
 replaced by a short smoke test (D72).
 
@@ -120,6 +123,7 @@ P7 and P8 are now merged; P14 is partly merged. Contracts from unfinished phases
 | [P8](HANDOFF-P8-bots-notes.md) | Bots, schedules, notes, documents and shared prompt delivery |
 | [P11](HANDOFF-P11-measurement.md) | Measurement UI and explicit completeness |
 | [P13](HANDOFF-P13-telegram.md) | Initial relay; interactive answers depend on P6 |
+| [P15](HANDOFF-P15-loop.md) | The autonomous phase loop, with Council and the relay built for it |
 | [P14](HANDOFF-P14-agents-ship.md) · [review](HANDOFF-P14-REVIEW.md) | Original hand-off and actual result; this roadmap includes the later DeepSeek addition |
 | [opencode port](HANDOFF-OC2-opencode.md) · [merge notes](HANDOFF-P14-OC2-MERGE.md) | Historical, superseded/completed; retain for context, do not restart |
 
@@ -422,6 +426,13 @@ Gemini trust, honest Aider permission labels and per-session Aider history (D69�
 complete real Gemini/Aider turns and option/resume verification; DeepSeek Harness (spike S9, Q21);
 and implementing/validating the release designs when the release decisions are settled.
 opencode 2.x came from main (D58), not this phase.
+
+### P15 — Autonomous phase loop
+Matthew's spec (2026-10-24), planned in [HANDOFF-P15-loop.md](HANDOFF-P15-loop.md): after one kickoff,
+phases run back to back on a run branch, each planned, grilled by a second vendor, built in task
+worktrees, checked by scripts, reviewed by a different vendor and tagged, until a milestone or a
+limit stops them. Questions are blocking, timed or log only; Counsel settles hard calls; Telegram
+carries questions, stops and milestone packets. P10 and P13 are built inside it (D97).
 
 ## 5. Ways of working
 

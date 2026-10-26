@@ -230,6 +230,20 @@ pub struct CreateSession {
     #[serde(skip)]
     #[specta(skip)]
     pub first_prompt: Option<String>,
+    /// P15: a loop step's launch. Never from IPC.
+    #[serde(skip)]
+    #[specta(skip)]
+    pub loop_step: Option<LoopLaunch>,
+}
+
+/// What a loop step adds to its session's launch (P15).
+#[derive(Debug, Clone, Default)]
+pub struct LoopLaunch {
+    /// Arguments for the first run only, before the positional prompt: the step's unattended
+    /// permissions and tools. A Restart starts the agent as usual, for whoever takes it over.
+    pub args: Vec<String>,
+    /// Environment the run gets, redacted like a key: the step's token for Chorus's tools.
+    pub secrets: Vec<(String, String)>,
 }
 
 /// Starts the sessions a preset makes. `session` is the first; the others are derived from it.
@@ -537,6 +551,8 @@ pub struct SessionManager {
     hook_listener: OnceLock<Result<u16, String>>,
     /// How far the restore at start has got, for the splash.
     restore: Mutex<RestoreProgress>,
+    /// P15: loop steps' arguments, taken by each step's first run.
+    loop_args: Mutex<HashMap<u32, LoopLaunch>>,
 }
 
 /// The sessions Chorus relaunches at start, and how many are back (each started or failed).
@@ -562,6 +578,7 @@ impl SessionManager {
             agents: Detector::default(),
             hook_listener: OnceLock::new(),
             restore: Mutex::new(RestoreProgress::default()),
+            loop_args: Mutex::new(HashMap::new()),
         })
     }
 
@@ -671,6 +688,16 @@ impl SessionManager {
             }
         }
         found
+    }
+
+    /// P15: what the session's next run adds for its loop step; taken by that run only.
+    pub fn set_loop_launch(&self, id: u32, launch: LoopLaunch) {
+        self.loop_args.lock().unwrap_or_else(std::sync::PoisonError::into_inner).insert(id, launch);
+    }
+
+    /// The loopback listener's port, which agent hooks and Chorus's tools use.
+    pub fn listener_port(&self) -> Option<u16> {
+        self.hook_listener.get().and_then(|r| r.as_ref().ok()).copied()
     }
 
     pub fn data_dir(&self) -> &Path {
@@ -951,7 +978,11 @@ impl SessionManager {
         drop(workspace_guard);
         tag_rows::set(&self.store, id, &tags)?;
         crate::bots::attach(&self.store, id, bot.as_ref())?;
-        crate::automations::stage_prompt(&self.store, id, req.first_prompt.as_deref())?;
+        let source = if req.loop_step.is_some() { "loop" } else { "automation" };
+        crate::automations::stage_prompt(&self.store, id, source, req.first_prompt.as_deref())?;
+        if let Some(step) = &req.loop_step {
+            self.set_loop_launch(id, step.clone());
+        }
         if join.is_none() {
             self.remember_folder(&asked);
         }
@@ -998,6 +1029,11 @@ impl SessionManager {
             launch.additions.push(("CODEX_INTERNAL_ORIGINATOR_OVERRIDE", chorus_core::codex::originator_for(row.id)));
         }
         let mut secrets: Vec<(String, String)> = Vec::new();
+        // A loop step's launch, taken by this run only: its token joins the redacted environment.
+        let step = self.loop_args.lock().unwrap_or_else(std::sync::PoisonError::into_inner).remove(&row.id);
+        if let Some(s) = &step {
+            secrets.extend(s.secrets.iter().cloned());
+        }
         match (row.credential_id, &row.credential_env) {
             (Some(cid), Some(var)) => secrets.push((var.clone(), vault::decrypt(&self.store, cid)?)),
             (None, Some(_)) => return Err("the key this session uses has been deleted".into()),
@@ -1152,7 +1188,11 @@ impl SessionManager {
             // goes last because for Codex it is a subcommand.
             args.extend(route_args);
             args.extend(hook_args);
-            args.extend(spec.option_args(&options));
+            // A loop step's own arguments, on its first run only. A step that sets its own
+            // permission mode replaces the Bot's.
+            let step_args = step.map(|s| s.args).unwrap_or_default();
+            let own_permission = step_args.iter().any(|a| a == "--permission-mode");
+            args.extend(spec.option_args(&LaunchOptions { permission: options.permission.filter(|_| !own_permission), ..options.clone() }));
             // Gemini CLI refuses to create an id whose chat file already exists, and to resume one
             // with no turns in it. A session that ended before its first prompt has exactly that,
             // so it gets a fresh id rather than a launch that fails with exit 42.
@@ -1168,6 +1208,8 @@ impl SessionManager {
             let exists = conversation.is_some_and(|id| agents::conversation_exists(row.agent, id, &parent));
             args.extend(spec.conversation_args(conversation, exists));
             args.extend(spec.name_args(&row.name));
+            // Before the positional prompt, which p8's arguments end with.
+            args.extend(step_args);
             args.extend(p8.args.iter().cloned());
             (None, exists && spec.resume.kind() != ResumeKind::None)
         };
@@ -1689,6 +1731,22 @@ impl SessionManager {
         Ok(())
     }
 
+    /// P15: ends the session's agent whoever typed in it, for an explicit Stop (a loop run stopped
+    /// by Matthew, or past its time cap). A locked session is still refused. The session stays,
+    /// exited, with `note`.
+    pub fn end_agent(&self, id: u32, note: &str) -> Result<(), String> {
+        let live = self.open_live(id)?;
+        let _action = live.action.lock().expect("action lock");
+        self.refuse_if_locked(&self.row(id)?, "close")?;
+        if self.run_input(id).is_none() {
+            return Ok(());
+        }
+        self.end_run_for(&live, ExitCause::AutomationFinished);
+        rows::set_state(&self.store, id, SessionState::Exited, Some(note))?;
+        self.notify_id(id);
+        Ok(())
+    }
+
     pub fn restart(self: &Arc<Self>, id: u32) -> Result<SessionSummary, String> {
         if self.row(id)?.state == SessionState::Closed {
             return Err("a closed session can't be restarted".into());
@@ -1768,6 +1826,7 @@ impl SessionManager {
                 // The partner is another agent: the Bot's instructions are for its own.
                 bot_id: None,
                 first_prompt: None,
+                loop_step: None,
             };
             let (session, error) = match self.create_in(derived, worktree) {
                 Ok(s) => (Some(s), None),
