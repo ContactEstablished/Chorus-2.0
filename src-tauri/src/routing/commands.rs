@@ -5,10 +5,11 @@
 use std::sync::Arc;
 
 use chorus_core::agent::{AgentKind, Effort, LaunchOptions};
+use chorus_core::routing::history::SpeedHistoryRow;
 use chorus_core::routing::types::RoutingSettings;
 use tauri::State;
 
-use super::{ObserverView, RefreshOutcome, Routing, RoutingSettingsView, TiersView};
+use super::{ObserverView, RefreshLogView, RefreshOutcome, Routing, RoutingSettingsView, TiersView};
 use crate::sessions::SessionManager;
 
 type Manager<'a> = State<'a, Arc<SessionManager>>;
@@ -62,6 +63,20 @@ pub fn routing_observer(state: Manager<'_>, routing: RoutingState<'_>) -> Result
 #[specta::specta]
 pub fn routing_observe_model(state: Manager<'_>, routing: RoutingState<'_>, model: String, observe: bool) -> Result<ObserverView, String> {
     super::observe_model(&routing, state.store(), model.trim(), observe)
+}
+
+/// The model's speed history per endpoint, from the observations stored for it: free, no request.
+#[tauri::command]
+#[specta::specta]
+pub fn routing_history(state: Manager<'_>, model: String) -> Result<Vec<SpeedHistoryRow>, String> {
+    super::model_history(state.store(), model.trim())
+}
+
+/// The last 50 Refreshes, newest first, for every model.
+#[tauri::command]
+#[specta::specta]
+pub fn routing_refresh_log(state: Manager<'_>) -> Result<RefreshLogView, String> {
+    super::refresh_log(state.store())
 }
 
 /// The saved ranking settings over the defaults, the defaults, and whether a row is stored.

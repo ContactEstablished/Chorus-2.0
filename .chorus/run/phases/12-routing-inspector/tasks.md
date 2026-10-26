@@ -76,7 +76,7 @@ Read `spec.md` beside this file and `.chorus/run/decisions.md` before starting a
 - Accept: a Refresh refused for no such provider, no own key, the cooldown or a busy slot leaves `routing_refresh_log` absent
 - Accept: `routing_refresh_log` returns the stored entries newest first, and the problem "The Refresh log couldn't be read." with no entries when the stored value is `nope`
 - Accept: `routing_history` and `routing_refresh_log` are in `ipc.rs`, and `bindings_are_current` passes
-- Status: pending
+- Status: done
 
 ## T8 · UI: shared routing formatting, and the refusal in New session
 - Depends on: none

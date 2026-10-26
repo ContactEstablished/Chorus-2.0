@@ -69,6 +69,10 @@ export const commands = {
 	routingObserver: () => typedError<ObserverView, string>(__TAURI_INVOKE("routing_observer")),
 	/**  Stop observing a model (`observe` false) or observe it again. Its routing data stays. */
 	routingObserveModel: (model: string, observe: boolean) => typedError<ObserverView, string>(__TAURI_INVOKE("routing_observe_model", { model, observe })),
+	/**  The model's speed history per endpoint, from the observations stored for it: free, no request. */
+	routingHistory: (model: string) => typedError<SpeedHistoryRow[], string>(__TAURI_INVOKE("routing_history", { model })),
+	/**  The last 50 Refreshes, newest first, for every model. */
+	routingRefreshLog: () => typedError<RefreshLogView, string>(__TAURI_INVOKE("routing_refresh_log")),
 	sessionsList: () => typedError<SessionSummary[], string>(__TAURI_INVOKE("sessions_list")),
 	/**  Open only this session's recorded working directory; the frontend cannot supply an arbitrary path. */
 	sessionOpenFolder: (sessionId: number) => typedError<null, string>(__TAURI_INVOKE("session_open_folder", { sessionId })),
@@ -1260,6 +1264,29 @@ export type QueuedPrompt = {
 /**  The three tiers the ranker orders. Nitro is never ranked: OpenRouter chooses. */
 export type RankedTier = "budget" | "balanced" | "fast";
 
+/**
+ *  One Refresh that passed the checks made before any request. `error` is `None` when it
+ *  succeeded (the inspector says "Done"); a failure carries zero figures.
+ */
+export type RefreshLogEntry = {
+	/**  When the Refresh ended. */
+	atMs: number | null,
+	model: string,
+	providerName: string,
+	error: string | null,
+	endpointsTested: number,
+	spentUsd: number | null,
+	estimateUsd: number | null,
+};
+
+/**  Settings → Routing's Refresh log. */
+export type RefreshLogView = {
+	/**  Newest first; empty when the log can't be read. */
+	entries: RefreshLogEntry[],
+	/**  Set when the stored log can't be read. Reading never rewrites it. */
+	problem: string | null,
+};
+
 /**  What one Refresh did. */
 export type RefreshOutcome = RefreshOutcome_Serialize | RefreshOutcome_Deserialize;
 
@@ -1564,6 +1591,22 @@ export type Snapshot = {
 	/**  Net tracked changes against HEAD (empty tree before the first commit). */
 	diff: Diff | null,
 	diffNote: string | null,
+};
+
+/**  One endpoint tag's stored observations, summarised. A `None` is unknown, not zero. */
+export type SpeedHistoryRow = {
+	tag: string,
+	/**  How many observations of the tag are within the age asked for. */
+	samples: number,
+	newestAtMs: number | null,
+	/**  The newest observation's status; the inspector flags anything but 0. */
+	newestStatus: number | null,
+	/**  The median of the positive `tps_p50` values. */
+	medianTps: number | null,
+	/**  The median of the positive `latency_p50_ms` values, in seconds. */
+	medianLatencyS: number | null,
+	/**  The lowest `uptime_1d`. */
+	lowestUptime1d: number | null,
 };
 
 export type Suggestion = {

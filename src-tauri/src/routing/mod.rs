@@ -3,9 +3,10 @@
 //! zero-cost account checks, ranks, tests prompt caching on the endpoints that need it (at most
 //! $0.05) and ranks again. The observer refetches only the endpoints of every refreshed model every
 //! 30 minutes, with the provider the user chose for it, skipping the models the user stopped; it
-//! keeps its last check in memory for Settings → Routing. A launch ranks what is stored and keeps the
-//! selection with the session, so Restart reuses it. Every decision is `chorus_core::routing`; this
-//! module does the IO.
+//! keeps its last check in memory for Settings → Routing. Every Refresh that got as far as sending a
+//! request is logged (the last 50, in the settings table). A launch ranks what is stored and keeps
+//! the selection with the session, so Restart reuses it. Every decision is `chorus_core::routing`;
+//! this module does the IO.
 
 pub mod client;
 pub mod commands;
@@ -20,7 +21,7 @@ use chorus_core::routing::cache_probe::{
     evaluate_probe, plan_cache_probe, probe_call_spend_usd,
 };
 use chorus_core::routing::endpoints::extract_observations;
-use chorus_core::routing::history::sample_count;
+use chorus_core::routing::history::{RefreshLogEntry, SpeedHistoryRow, append_refresh_log, parse_refresh_log, sample_count, speed_history};
 use chorus_core::agent::{AgentKind, LaunchOptions};
 use chorus_core::routing::launch::{
     REFUSE_NITRO_MODEL, REFUSE_NO_MODEL, REFUSE_NOT_OPENCODE, RoutingLaunchChoice, RoutingLaunchSelection, RoutingLaunchTier, StoredSelection,
@@ -61,6 +62,13 @@ const STOPPED_MAX: usize = 500;
 /// Shown when the stored list isn't a JSON array of at most `STOPPED_MAX` slugs; the observer then
 /// fetches nothing until Stop observing or Observe again replaces it.
 const STOPPED_UNREADABLE: &str = "The list of stopped models couldn't be read. Stop or observe a model to replace it.";
+/// A JSON array of `RefreshLogEntry`, newest first, at most `REFRESH_LOG_MAX`.
+const REFRESH_LOG_KEY: &str = "routing_refresh_log";
+/// Shown when the stored log isn't a JSON array of entries; Refreshes aren't logged until Chorus can
+/// read it again, and nothing rewrites it.
+const REFRESH_LOG_UNREADABLE: &str = "The Refresh log couldn't be read.";
+/// Held while the log is read and written back, so two Refreshes ending together both land in it.
+static REFRESH_LOG_LOCK: Mutex<()> = Mutex::new(());
 
 /// Refreshes under way, when each model's last one ended, and what the observer last did (in memory:
 /// after a restart there is no last check).
@@ -358,12 +366,86 @@ pub fn refresh(routing: &Routing, store: &Store, provider_id: u32, model: &str, 
     let _slot = routing.take(model).ok_or("A routing refresh or observation is already running for this model.")?;
     let key = key_for(store, &provider)?;
     let result = run_refresh(store, &key, provider_id, model, effort);
-    routing.ended.lock().expect("routing lock").insert(model.to_owned(), now_ms());
-    let (estimate_usd, spent_usd, probed, not_probed, rejected_rows, notes) = result?;
+    let (estimate_usd, spent_usd, probed, not_probed, rejected_rows, notes) = end_refresh(routing, store, &provider, model, result)?;
     Ok(RefreshOutcome { view: view(routing, store, provider_id, model, effort)?, estimate_usd, spent_usd, probed, not_probed, rejected_rows, notes })
 }
 
 type RefreshParts = (f64, f64, Vec<String>, Vec<ProbeSkip>, u32, Vec<String>);
+
+/// What every Refresh that sent a request does when it ends, worked or not: starts the model's
+/// cooldown and puts it in the Refresh log. Returns `result` as it was.
+fn end_refresh(routing: &Routing, store: &Store, provider: &ProviderRow, model: &str, result: Result<RefreshParts, String>) -> Result<RefreshParts, String> {
+    let ended = now_ms();
+    routing.ended.lock().expect("routing lock").insert(model.to_owned(), ended);
+    record_refresh(store, refresh_entry(ended, model, &provider.name, &result));
+    result
+}
+
+/// The Refresh log's entry for a Refresh that ended at `at_ms`. A failure carries its message and no
+/// figures: every failure in `run_refresh` comes before the cache test spends anything, bar storing
+/// its verdicts.
+fn refresh_entry(at_ms: i64, model: &str, provider_name: &str, result: &Result<RefreshParts, String>) -> RefreshLogEntry {
+    // A figure that isn't finite would be stored as null, and the whole log would stop reading.
+    let money = |usd: f64| if usd.is_finite() { usd } else { 0.0 };
+    let (error, endpoints_tested, spent_usd, estimate_usd) = match result {
+        Ok((estimate, spent, probed, ..)) => (None, u32::try_from(probed.len()).unwrap_or(u32::MAX), money(*spent), money(*estimate)),
+        Err(message) => (Some(message.clone()), 0, 0.0, 0.0),
+    };
+    RefreshLogEntry { at_ms, model: model.to_owned(), provider_name: provider_name.to_owned(), error, endpoints_tested, spent_usd, estimate_usd }
+}
+
+/// Puts `entry` first in the stored log, keeping the newest 50. A log that can't be read is left
+/// alone and the Refresh goes unlogged (Settings → Routing says so); the log never fails a Refresh.
+fn record_refresh(store: &Store, entry: RefreshLogEntry) {
+    let _held = REFRESH_LOG_LOCK.lock().expect("routing lock");
+    let Ok(raw) = setting_rows::get(store, REFRESH_LOG_KEY) else { return };
+    let Ok(log) = parse_refresh_log(raw.as_deref()) else { return };
+    if let Ok(json) = serde_json::to_string(&append_refresh_log(&log, entry)) {
+        let _ = setting_rows::set(store, REFRESH_LOG_KEY, &json);
+    }
+}
+
+/// Settings → Routing's Refresh log.
+#[derive(Debug, Clone, PartialEq, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct RefreshLogView {
+    /// Newest first; empty when the log can't be read.
+    pub entries: Vec<RefreshLogEntry>,
+    /// Set when the stored log can't be read. Reading never rewrites it.
+    pub problem: Option<String>,
+}
+
+/// A failed read of the row is an error, not an empty log: that would hide a database fault.
+pub fn refresh_log(store: &Store) -> Result<RefreshLogView, String> {
+    let raw = setting_rows::get(store, REFRESH_LOG_KEY)?;
+    Ok(match parse_refresh_log(raw.as_deref()) {
+        Ok(entries) => RefreshLogView { entries, problem: None },
+        Err(_) => RefreshLogView { entries: Vec::new(), problem: Some(REFRESH_LOG_UNREADABLE.to_owned()) },
+    })
+}
+
+/// The inspected model's speed history, one row per endpoint tag, from the stored observations no
+/// older than the saved `observationMaxAgeDays`. Rows follow the stored ranking's candidate order
+/// (ranked with no provider and no effort), or go by name when it can't rank.
+pub fn model_history(store: &Store, model: &str) -> Result<Vec<SpeedHistoryRow>, String> {
+    if !is_model_slug(model) {
+        return Err(format!("{model:?} isn't an OpenRouter model id."));
+    }
+    if model.ends_with(NITRO_SUFFIX) {
+        return Err(REFUSE_NITRO_MODEL.into());
+    }
+    if let Some(reason) = routing_refusal(model) {
+        return Err(reason.into());
+    }
+    let now = now_ms();
+    let observations: Vec<RoutingObservation> = rows::get(store, model, Kind::Observations)?.and_then(|raw| serde_json::from_str(&raw).ok()).unwrap_or_default();
+    let order: Vec<String> = rank_stored(store, model, None, None, now)
+        .ok()
+        .flatten()
+        .map(|(result, _)| result.candidates.into_iter().map(|c| c.tag).collect())
+        .unwrap_or_default();
+    Ok(speed_history(&observations, &order, settings(store).observation_max_age_days, now))
+}
 
 fn run_refresh(store: &Store, key: &str, provider_id: u32, model: &str, effort: Option<&str>) -> Result<RefreshParts, String> {
     let settings = settings(store);
@@ -1537,5 +1619,245 @@ mod tests {
         setting_rows::set(&s, WATCH_KEY, "404").unwrap();
         let view = observer_view(&routing, &s).unwrap();
         assert_eq!((view.provider_id, view.provider_name, view.problem.as_deref()), (Some(404), None, Some("That provider no longer exists.")));
+    }
+
+    // ── Speed history and the Refresh log ──
+
+    const DAY: i64 = 24 * 60 * MINUTE;
+
+    fn observation(tag: &str, at_ms: i64) -> RoutingObservation {
+        RoutingObservation {
+            tag: tag.into(),
+            observed_at_ms: at_ms,
+            uptime_1d: Some(99.9),
+            uptime_5m: Some(100.0),
+            status: 0,
+            tps_p50: Some(60.0),
+            tps_p90: Some(80.0),
+            latency_p50_ms: Some(900.0),
+            latency_p90_ms: Some(1800.0),
+        }
+    }
+
+    /// Adds observations to what `stored_snapshot` left for `SLUG`.
+    fn add_observations(s: &Store, extra: &[RoutingObservation]) {
+        let mut all: Vec<RoutingObservation> = read(s, SLUG, Kind::Observations).unwrap();
+        all.extend_from_slice(extra);
+        write(s, SLUG, Kind::Observations, &all).unwrap();
+    }
+
+    fn candidate_tags(s: &Store) -> Vec<String> {
+        let (result, _) = rank_stored(s, SLUG, None, None, now_ms()).unwrap().unwrap();
+        result.candidates.into_iter().map(|c| c.tag).collect()
+    }
+
+    #[test]
+    fn the_history_of_the_golden_model_has_one_row_per_candidate_tag_in_the_rankings_order() {
+        let s = Store::in_memory();
+        stored_snapshot(&s, now_ms());
+        let candidates = candidate_tags(&s);
+        assert!(candidates.len() >= 3, "{candidates:?}");
+
+        let rows = model_history(&s, SLUG).unwrap();
+        assert_eq!(rows.iter().map(|r| r.tag.clone()).collect::<Vec<_>>(), candidates, "one row per candidate tag, in the ranking's order");
+        assert!(rows.iter().all(|r| r.samples == 1 && r.median_tps.is_some() && r.median_latency_s.is_some()), "{rows:?}");
+
+        // A tag the ranking doesn't list comes after the candidates, though it sorts before them.
+        add_observations(&s, &[observation("aaa/extra", now_ms())]);
+        let rows = model_history(&s, SLUG).unwrap();
+        let tags: Vec<_> = rows.iter().map(|r| r.tag.as_str()).collect();
+        assert_eq!(tags.len(), candidates.len() + 1);
+        assert_eq!((&tags[..candidates.len()], tags.last()), (&candidates.iter().map(String::as_str).collect::<Vec<_>>()[..], Some(&"aaa/extra")));
+    }
+
+    #[test]
+    fn the_history_of_a_model_with_nothing_stored_is_empty() {
+        let s = Store::in_memory();
+        assert_eq!(model_history(&s, SLUG).unwrap(), vec![]);
+        // Observations without a snapshot (nothing to rank) still show, by name.
+        write(&s, SLUG, Kind::Observations, &[observation("b/fp8", now_ms()), observation("a/fp8", now_ms())]).unwrap();
+        let tags: Vec<_> = model_history(&s, SLUG).unwrap().into_iter().map(|r| r.tag).collect();
+        assert_eq!(tags, ["a/fp8", "b/fp8"]);
+        // A stored value that isn't observations is no history, not an error.
+        rows::set(&s, SLUG, Kind::Observations, "nope").unwrap();
+        assert_eq!(model_history(&s, SLUG).unwrap(), vec![]);
+        assert_eq!(rows::get(&s, SLUG, Kind::Observations).unwrap().as_deref(), Some("nope"), "reading leaves it as it was");
+    }
+
+    #[test]
+    fn the_history_keeps_only_the_saved_number_of_days() {
+        let s = Store::in_memory();
+        stored_snapshot(&s, now_ms());
+        add_observations(&s, &[observation("old/fp8", now_ms() - 3 * DAY)]);
+        let tags = |s: &Store| model_history(s, SLUG).unwrap().into_iter().map(|r| r.tag).collect::<Vec<_>>();
+        assert!(tags(&s).contains(&"old/fp8".to_owned()), "three days is within the default seven");
+        save_settings(&s, &RoutingSettings { observation_max_age_days: 1.0, ..RoutingSettings::default() }).unwrap();
+        assert!(!tags(&s).contains(&"old/fp8".to_owned()), "one day drops it");
+        assert!(!tags(&s).is_empty(), "and keeps the recent ones");
+        reset_settings(&s).unwrap();
+        assert!(tags(&s).contains(&"old/fp8".to_owned()));
+    }
+
+    #[test]
+    fn the_history_refuses_a_bad_slug_a_nitro_slug_and_an_anthropic_or_openai_model() {
+        let s = Store::in_memory();
+        assert!(model_history(&s, "a b").unwrap_err().contains("isn't an OpenRouter model id"));
+        assert_eq!(model_history(&s, "deepseek/deepseek-v4.1-flash:nitro").unwrap_err(), REFUSE_NITRO_MODEL);
+        for model in ["anthropic/claude-sonnet-5", "OpenAI/gpt-5.5", "~openai/o9"] {
+            // Even with observations stored under that slug.
+            write(&s, model, Kind::Observations, &[observation("a/fp8", now_ms())]).unwrap();
+            assert_eq!(model_history(&s, model).unwrap_err(), REFUSE_FIRST_PARTY, "{model}");
+        }
+    }
+
+    fn parts(estimate: f64, spent: f64, probed: &[&str]) -> RefreshParts {
+        (estimate, spent, probed.iter().map(|t| (*t).to_owned()).collect(), vec![], 1, vec!["a note".into()])
+    }
+
+    #[test]
+    fn a_successful_refresh_logs_the_endpoints_tested_the_spend_and_the_estimate() {
+        let entry = refresh_entry(1_700_000_000_000, SLUG, "My OpenRouter", &Ok(parts(0.05, 0.0123, &["a/fp8", "b/bf16"])));
+        assert_eq!(
+            entry,
+            RefreshLogEntry {
+                at_ms: 1_700_000_000_000,
+                model: SLUG.into(),
+                provider_name: "My OpenRouter".into(),
+                error: None,
+                endpoints_tested: 2,
+                spent_usd: 0.0123,
+                estimate_usd: 0.05,
+            }
+        );
+        let nothing_tested = refresh_entry(5, SLUG, "P", &Ok(parts(0.0, 0.0, &[])));
+        assert_eq!((nothing_tested.error, nothing_tested.endpoints_tested, nothing_tested.spent_usd, nothing_tested.estimate_usd), (None, 0, 0.0, 0.0));
+    }
+
+    #[test]
+    fn a_failed_refresh_logs_its_message_and_no_figures() {
+        let entry = refresh_entry(42, SLUG, "My OpenRouter", &Err("Could not reach OpenRouter.".into()));
+        assert_eq!(
+            entry,
+            RefreshLogEntry {
+                at_ms: 42,
+                model: SLUG.into(),
+                provider_name: "My OpenRouter".into(),
+                error: Some("Could not reach OpenRouter.".into()),
+                endpoints_tested: 0,
+                spent_usd: 0.0,
+                estimate_usd: 0.0,
+            }
+        );
+    }
+
+    #[test]
+    fn a_figure_that_is_not_finite_cannot_make_the_stored_log_unreadable() {
+        let entry = refresh_entry(1, SLUG, "P", &Ok(parts(f64::INFINITY, f64::NAN, &["a/fp8"])));
+        assert_eq!((entry.spent_usd, entry.estimate_usd, entry.endpoints_tested), (0.0, 0.0, 1));
+        let s = Store::in_memory();
+        record_refresh(&s, entry.clone());
+        assert_eq!(refresh_log(&s).unwrap(), RefreshLogView { entries: vec![entry], problem: None });
+    }
+
+    fn logged(n: i64) -> RefreshLogEntry {
+        RefreshLogEntry { at_ms: n, model: SLUG.into(), provider_name: "OpenRouter".into(), error: None, endpoints_tested: 2, spent_usd: 0.01, estimate_usd: 0.05 }
+    }
+
+    fn log_row(s: &Store) -> Option<String> {
+        setting_rows::get(s, REFRESH_LOG_KEY).unwrap()
+    }
+
+    #[test]
+    fn the_log_gets_the_newest_refresh_first_and_keeps_50() {
+        let s = Store::in_memory();
+        assert_eq!(log_row(&s), None, "no row until the first Refresh is logged");
+        for n in 1..=3 {
+            record_refresh(&s, logged(n));
+        }
+        let times = |s: &Store| refresh_log(s).unwrap().entries.iter().map(|e| e.at_ms).collect::<Vec<_>>();
+        assert_eq!(times(&s), [3, 2, 1]);
+        for n in 4..=51 {
+            record_refresh(&s, logged(n));
+        }
+        assert_eq!(times(&s), (2..=51).rev().collect::<Vec<_>>(), "the oldest of the 51 is gone");
+        let stored: serde_json::Value = serde_json::from_str(&log_row(&s).unwrap()).unwrap();
+        assert_eq!(stored.as_array().unwrap().len(), 50);
+        assert_eq!(refresh_log(&s).unwrap().problem, None);
+    }
+
+    #[test]
+    fn a_log_that_cannot_be_read_is_left_as_it_was_and_reported() {
+        for raw in ["nope", "{}", r#"[{"atMs":1,"bogus":true}]"#] {
+            let s = Store::in_memory();
+            setting_rows::set(&s, REFRESH_LOG_KEY, raw).unwrap();
+            record_refresh(&s, logged(1));
+            assert_eq!(log_row(&s).as_deref(), Some(raw), "{raw}: not logged, not rewritten");
+            let view = refresh_log(&s).unwrap();
+            assert_eq!((view.entries, view.problem.as_deref()), (vec![], Some("The Refresh log couldn't be read.")), "{raw}");
+            assert_eq!(log_row(&s).as_deref(), Some(raw), "{raw}: reading doesn't rewrite it either");
+        }
+    }
+
+    #[test]
+    fn the_log_view_of_a_stored_log_is_its_entries_newest_first() {
+        let s = Store::in_memory();
+        assert_eq!(refresh_log(&s).unwrap(), RefreshLogView { entries: vec![], problem: None });
+        setting_rows::set(&s, REFRESH_LOG_KEY, &serde_json::to_string(&[logged(9), logged(4)]).unwrap()).unwrap();
+        assert_eq!(refresh_log(&s).unwrap(), RefreshLogView { entries: vec![logged(9), logged(4)], problem: None });
+    }
+
+    #[test]
+    fn a_refresh_that_ends_starts_the_cooldown_and_is_logged_whether_it_worked_or_not() {
+        let s = Store::in_memory();
+        let routing = Routing::default();
+        let provider = provider_rows::get(&s, keyed_openrouter(&s)).unwrap().unwrap();
+        let before = now_ms();
+
+        let failed = end_refresh(&routing, &s, &provider, SLUG, Err("Could not reach OpenRouter.".into()));
+        assert_eq!(failed.unwrap_err(), "Could not reach OpenRouter.", "the result is passed on as it was");
+        assert!(routing.wait_secs(SLUG, now_ms()) > 0, "the cooldown started");
+        let log = refresh_log(&s).unwrap().entries;
+        assert_eq!(log.len(), 1);
+        assert_eq!((log[0].model.as_str(), log[0].provider_name.as_str(), log[0].error.as_deref()), (SLUG, "OpenRouter", Some("Could not reach OpenRouter.")));
+        assert!(log[0].at_ms >= before, "timed when the Refresh ended");
+        assert_eq!(routing.ended.lock().unwrap().get(SLUG).copied(), Some(log[0].at_ms), "the cooldown and the log share the end time");
+
+        let worked = end_refresh(&routing, &s, &provider, SLUG, Ok(parts(0.05, 0.0123, &["a/fp8"]))).unwrap();
+        assert_eq!(worked.2, ["a/fp8"], "and the parts too");
+        let log = refresh_log(&s).unwrap().entries;
+        assert_eq!(log.len(), 2);
+        assert_eq!((log[0].error.as_deref(), log[0].endpoints_tested, log[0].spent_usd, log[0].estimate_usd), (None, 1, 0.0123, 0.05), "newest first");
+        assert_eq!(log[1].error.as_deref(), Some("Could not reach OpenRouter."));
+    }
+
+    #[test]
+    fn a_refresh_refused_before_any_request_is_not_logged() {
+        let s = Store::in_memory();
+        let routing = Routing::default();
+        let keyed = keyed_openrouter(&s);
+        let refused = |provider: u32, model: &str| refresh(&routing, &s, provider, model, None).unwrap_err();
+
+        assert!(refused(keyed, "a b").contains("isn't an OpenRouter model id"));
+        assert_eq!(refused(keyed, "openai/gpt-5.5"), REFUSE_FIRST_PARTY);
+        assert_eq!(refused(404, SLUG), "That provider no longer exists.");
+        // A provider with no key of its own (providers are named uniquely, so in a store of its own).
+        let other = Store::in_memory();
+        let unkeyed = openrouter(&other);
+        assert_eq!(refresh(&routing, &other, unkeyed, SLUG, None).unwrap_err(), NO_OWN_KEY);
+        assert_eq!(setting_rows::get(&other, REFRESH_LOG_KEY).unwrap(), None);
+        // The cooldown, then a busy slot (cleared in between).
+        routing.ended.lock().unwrap().insert(SLUG.into(), now_ms());
+        assert!(refused(keyed, SLUG).contains("less than a minute ago"));
+        routing.ended.lock().unwrap().clear();
+        let busy = routing.take(SLUG).unwrap();
+        assert!(refused(keyed, SLUG).contains("already running"));
+        drop(busy);
+        // A key that can't be read: still before any request.
+        let credential = provider_rows::get(&s, keyed).unwrap().unwrap().credential_id.unwrap();
+        s.with(|c| c.execute("UPDATE credentials SET blob = x'00' WHERE id = ?1", [credential]).map(|_| ())).unwrap();
+        assert!(refused(keyed, SLUG).starts_with("decrypting a stored key"));
+
+        assert_eq!(log_row(&s), None, "no routing_refresh_log row");
+        assert!(routing.ended.lock().unwrap().is_empty(), "and none of them started a cooldown");
     }
 }
