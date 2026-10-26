@@ -5,6 +5,7 @@
  */
 import { ref } from 'vue'
 import RoutingInspect from './RoutingInspect.vue'
+import RoutingRanking from './RoutingRanking.vue'
 import { INTRO } from './routingInspect'
 
 // Bumped when the ranking settings change, so the inspector ranks again with them.
@@ -16,6 +17,7 @@ const inspectVersion = ref(0)
     <h2>Routing</h2>
     <p class="intro">{{ INTRO }}</p>
     <RoutingInspect :version="inspectVersion" />
+    <RoutingRanking @saved="inspectVersion++" />
   </section>
 </template>
 

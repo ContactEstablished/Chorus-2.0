@@ -113,7 +113,7 @@ Read `spec.md` beside this file and `.chorus/run/decisions.md` before starting a
 - Accept: `withDataCollection(saved, true)` differs from `saved` only in `dataCollection: 'allow'`; `switchBlocked` gives the view's problem when it has one and `null` otherwise
 - Accept: the switch label, its help, the Nitro line and the Keep-speed-history help are exactly decisions.md's texts, and Restore defaults' title is "Deletes the saved ranking settings, Data collection included: every setting goes back to its default."
 - Accept: `npm run typecheck` passes
-- Status: pending
+- Status: done
 
 ## T11 · UI: Background observation
 - Depends on: T10

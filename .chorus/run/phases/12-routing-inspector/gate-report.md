@@ -2,6 +2,18 @@
 
 The gatekeeper's check results for this phase, newest attempt first.
 
+## P12 T10, first build: every check passed
+
+| Check | Result | Time |
+|---|---|---|
+| deps | passed | 0.9 s |
+| bindings | passed | 1.2 s |
+| typecheck | passed | 5.2 s |
+| web tests | passed | 1.4 s |
+| run tests | passed | 15.6 s |
+| clippy | passed | 1.2 s |
+| secrets | passed | 0.5 s |
+
 ## P12 T9, first build: every check passed
 
 | Check | Result | Time |
