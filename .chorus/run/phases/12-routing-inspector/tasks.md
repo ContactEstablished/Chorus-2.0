@@ -101,7 +101,7 @@ Read `spec.md` beside this file and `.chorus/run/decisions.md` before starting a
 - Accept: `refreshState` gives disabled with the provider's problem as title, disabled with "Refreshed less than a minute ago: again in 42 s" for `retryInSecs` 42, disabled while busy, and enabled with the cost title otherwise; `refreshText` uses `usd` for the spend and estimate
 - Accept: `inspectorProviders` keeps only `openrouter` providers; `defaultProviderId` gives the watched id when it is an OpenRouter provider, else the first OpenRouter provider, else `null`; `EFFORT_CHOICES` is `[null, 'fast', 'balanced', 'deep', 'max']`; `modelSuggestions` gives the observer view's model slugs in order
 - Accept: `npm run typecheck` passes
-- Status: pending
+- Status: done
 
 ## T10 · UI: Data collection and Ranking settings
 - Depends on: T9
