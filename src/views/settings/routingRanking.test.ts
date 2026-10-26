@@ -517,6 +517,8 @@ describe('the section renders, and the logic stays in the module', () => {
     expect(settingsVue).toMatch(/import RoutingRanking from '\.\/RoutingRanking\.vue'/)
     expect(settingsVue).toContain('<RoutingRanking @saved="inspectVersion++" />')
     expect(settingsVue.indexOf('<RoutingInspect')).toBeLessThan(settingsVue.indexOf('<RoutingRanking'))
-    expect(settingsVue).toContain('<RoutingInspect :version="inspectVersion" />')
+    // T12 listens to the inspector's `inspect` and `refreshed` events for the History, so the tag may
+    // carry listeners; it must still reload on `inspectVersion`, which is what this pinned.
+    expect(settingsVue).toMatch(/<RoutingInspect :version="inspectVersion"( @[a-z]+="[^"]*")* \/>/)
   })
 })

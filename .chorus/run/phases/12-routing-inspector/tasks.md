@@ -132,7 +132,7 @@ Read `spec.md` beside this file and `.chorus/run/decisions.md` before starting a
 - Accept: `logRows` gives "just now", the model, the provider, "Done" for no error or the error's message, the endpoints tested, and "$0.0123" and "$0.0500" for spent and estimate
 - Accept: the speed history help is exactly decisions.md's text, and the empty states are "Inspect a model to see its speed history.", "No speed history for this model yet." and "No Refreshes yet."
 - Accept: `npm run typecheck` passes
-- Status: pending
+- Status: done
 
 ## T13 · Proposals for _docs
 - Depends on: T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12
