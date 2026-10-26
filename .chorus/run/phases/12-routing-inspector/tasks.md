@@ -140,4 +140,4 @@ Read `spec.md` beside this file and `.chorus/run/decisions.md` before starting a
 - Accept: `proposals.md` has the sections "Proposed decisions", "Proposed lessons", "PLAN status" and "Open questions", and assigns no new D-number or L-number (existing ones such as D57 may be cited)
 - Accept: its proposed decisions cover the Anthropic/OpenAI refusal, the new bounds, Settings → Routing's five parts, the keys `routing_observer_stopped` and `routing_refresh_log`, the observer status kept in memory, and the refusal shown in New session's tiers
 - Accept: its PLAN status gives P12's row as built, with the real-app check at the milestone review still to come, and it lists spec.md's two known limits as open items
-- Status: pending
+- Status: done
