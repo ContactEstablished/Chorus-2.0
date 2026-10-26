@@ -8,7 +8,7 @@ use chorus_core::agent::{AgentKind, Effort, LaunchOptions};
 use chorus_core::routing::types::RoutingSettings;
 use tauri::State;
 
-use super::{RefreshOutcome, Routing, RoutingSettingsView, TiersView};
+use super::{ObserverView, RefreshOutcome, Routing, RoutingSettingsView, TiersView};
 use crate::sessions::SessionManager;
 
 type Manager<'a> = State<'a, Arc<SessionManager>>;
@@ -47,6 +47,21 @@ pub async fn routing_refresh(
 #[specta::specta]
 pub fn routing_watch(state: Manager<'_>, provider_id: Option<u32>) -> Result<(), String> {
     super::set_watched_provider(state.store(), provider_id)
+}
+
+/// The background observation: the watched provider, the last check, the next one, and the models it
+/// follows.
+#[tauri::command]
+#[specta::specta]
+pub fn routing_observer(state: Manager<'_>, routing: RoutingState<'_>) -> Result<ObserverView, String> {
+    super::observer_view(&routing, state.store())
+}
+
+/// Stop observing a model (`observe` false) or observe it again. Its routing data stays.
+#[tauri::command]
+#[specta::specta]
+pub fn routing_observe_model(state: Manager<'_>, routing: RoutingState<'_>, model: String, observe: bool) -> Result<ObserverView, String> {
+    super::observe_model(&routing, state.store(), model.trim(), observe)
 }
 
 /// The saved ranking settings over the defaults, the defaults, and whether a row is stored.

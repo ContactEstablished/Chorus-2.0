@@ -64,7 +64,7 @@ Read `spec.md` beside this file and `.chorus/run/decisions.md` before starting a
 - Accept: `routing_observe_model` refuses `a b`, `deepseek/deepseek-v4.1-flash:nitro`, `openai/gpt-5.5` (with `REFUSE_FIRST_PARTY`) and a 501st stopped slug
 - Accept: the observer view lists every stored model except Anthropic and OpenAI ones, in slug order, each with its snapshot's `fetched_at_ms`, `sample_count` and stopped flag, and gives the watched provider's id, name and problem, the last check and `next_at_ms`
 - Accept: `routing_observer` and `routing_observe_model` are in `ipc.rs`, and `bindings_are_current` passes
-- Status: pending
+- Status: done
 
 ## T7 · Rust: speed history and the Refresh log
 - Depends on: T6

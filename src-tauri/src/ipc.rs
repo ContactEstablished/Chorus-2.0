@@ -51,6 +51,8 @@ pub fn builder() -> Builder<tauri::Wry> {
             routing::commands::routing_settings,
             routing::commands::routing_settings_save,
             routing::commands::routing_settings_reset,
+            routing::commands::routing_observer,
+            routing::commands::routing_observe_model,
             s::sessions_list,
             s::session_open_folder,
             s::session_create,

@@ -62,6 +62,13 @@ export const commands = {
 	routingSettingsSave: (settings: RoutingSettings) => typedError<RoutingSettingsView, string>(__TAURI_INVOKE("routing_settings_save", { settings })),
 	/**  Restore defaults: deletes the saved row. */
 	routingSettingsReset: () => typedError<RoutingSettingsView, string>(__TAURI_INVOKE("routing_settings_reset")),
+	/**
+	 *  The background observation: the watched provider, the last check, the next one, and the models it
+	 *  follows.
+	 */
+	routingObserver: () => typedError<ObserverView, string>(__TAURI_INVOKE("routing_observer")),
+	/**  Stop observing a model (`observe` false) or observe it again. Its routing data stays. */
+	routingObserveModel: (model: string, observe: boolean) => typedError<ObserverView, string>(__TAURI_INVOKE("routing_observe_model", { model, observe })),
 	sessionsList: () => typedError<SessionSummary[], string>(__TAURI_INVOKE("sessions_list")),
 	/**  Open only this session's recorded working directory; the frontend cannot supply an arbitrary path. */
 	sessionOpenFolder: (sessionId: number) => typedError<null, string>(__TAURI_INVOKE("session_open_folder", { sessionId })),
@@ -515,6 +522,15 @@ export type Changes = {
 	conflicts: number,
 };
 
+/**  How one observer check ended. */
+export type CheckOutcome = 
+/**  Models whose endpoints were refetched and stored. */
+{ kind: "updated"; count: number } | { kind: "nothing-due" } | 
+/**  The watched provider can't be used; `routing_provider`'s reason. */
+{ kind: "no-provider"; reason: string } | 
+/**  OpenRouter refused the key. */
+{ kind: "key-refused" } | { kind: "rate-limited" } | { kind: "failed"; message: string };
+
 /**  What closing a session would do to its worktree. */
 export type CloseCheck = {
 	worktree: WorktreeClose | null,
@@ -757,6 +773,12 @@ export type InstructionSupport = {
 	text: string,
 };
 
+/**  The last check that recorded an outcome, and when its tick ended. */
+export type LastCheck = {
+	atMs: number | null,
+	outcome: CheckOutcome,
+};
+
 /**
  *  What a session asks for. An empty field means the agent's declared default, or for the model,
  *  the CLI's own choice.
@@ -946,6 +968,33 @@ export type Observed = {
 	model: string,
 	variant: string | null,
 	agent: string | null,
+};
+
+/**  One model the observer follows. */
+export type ObservedModel = {
+	model: string,
+	/**  When its endpoints were last stored; `None` when the snapshot can't be read. */
+	fetchedAtMs: number | null,
+	/**  How many updates its speed history holds (distinct update times). */
+	sampleCount: number,
+	stopped: boolean,
+};
+
+/**  Settings → Routing's background observation. */
+export type ObserverView = {
+	/**  The watched provider; `None` is off. */
+	providerId: number | null,
+	/**  `None` when off or when the provider no longer exists. */
+	providerName: string | null,
+	/**  What `routing_provider` says about the watched provider now. */
+	problem: string | null,
+	lastCheck: LastCheck | null,
+	/**  `None` only if the observer never started. */
+	nextAtMs: number | null,
+	/**  Set when the stopped list can't be read; the observer then fetches nothing. */
+	stoppedProblem: string | null,
+	/**  Every model with a stored snapshot that routing doesn't refuse, in slug order. */
+	models: ObservedModel[],
 };
 
 /**
