@@ -18,7 +18,7 @@ Read `spec.md` beside this file and `.chorus/run/decisions.md` before starting a
 - Accept: `validate` refuses 51, 30.5, 1441, 6, 2.01 and 10000.5 for those fields with exactly "smoothingWindow must be at most 50", "observationMaxAgeDays must be at most 30", "snapshotMaxAgeMinutes must be at most 1440", "fallbackCount must be at most 5", "tieRatio must be at most 2" and "budgetMinTps must be at most 10000"
 - Accept: the existing `validate` messages and the assertions in `the_default_settings_are_chorus_1s_and_valid` are unchanged and pass
 - Accept: `parse_routing_settings_value(Some(r#"{"fallbackCount":6}"#))` returns the defaults with the warning "stored routing settings did not validate; using defaults"
-- Status: pending
+- Status: done
 
 ## T3 · Core: speed history and the Refresh log
 - Depends on: none

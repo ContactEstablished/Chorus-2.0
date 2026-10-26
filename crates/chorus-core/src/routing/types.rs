@@ -240,13 +240,16 @@ impl Default for RoutingSettings {
 impl RoutingSettings {
     /// The semantic rules of Chorus 1's schema: percentages in 0–100, weights in 0–1, positive
     /// ages, `tieRatio` at least 1, readmission at least the minimum, and no more stable
-    /// observations than the window holds. The error names the first field that fails.
+    /// observations than the window holds. Then the upper bounds Chorus 2.0 adds, so every input
+    /// is bounded: 50 samples, 30 days, 1440 minutes, 5 fallbacks, a tie ratio of 2 and a Budget
+    /// floor of 10 000 tok/s. The bounds come last, so an input that broke an older rule still
+    /// gets that rule's message. The error names the first field that fails.
     pub fn validate(&self) -> Result<(), String> {
         let pct = |v: f64| v.is_finite() && (0.0..=100.0).contains(&v);
         let weight = |v: f64| v.is_finite() && (0.0..=1.0).contains(&v);
         let positive = |v: f64| v.is_finite() && v > 0.0;
         let w = &self.tier_weights;
-        let checks: [(bool, &str); 15] = [
+        let checks: [(bool, &str); 21] = [
             (pct(self.min_uptime_pct), "minUptimePct must be between 0 and 100"),
             (pct(self.readmit_uptime_pct), "readmitUptimePct must be between 0 and 100"),
             (pct(self.outage_guard_5m_pct), "outageGuard5mPct must be between 0 and 100"),
@@ -262,6 +265,12 @@ impl RoutingSettings {
             (self.tie_ratio.is_finite() && self.tie_ratio >= 1.0, "tieRatio must be at least 1"),
             (self.readmit_uptime_pct >= self.min_uptime_pct, "readmitUptimePct below minUptimePct"),
             (self.stable_min_observations <= self.smoothing_window, "stableMinObservations exceeds smoothingWindow"),
+            (self.smoothing_window <= 50, "smoothingWindow must be at most 50"),
+            (self.observation_max_age_days <= 30.0, "observationMaxAgeDays must be at most 30"),
+            (self.snapshot_max_age_minutes <= 1440.0, "snapshotMaxAgeMinutes must be at most 1440"),
+            (self.fallback_count <= 5, "fallbackCount must be at most 5"),
+            (self.tie_ratio <= 2.0, "tieRatio must be at most 2"),
+            (self.budget_min_tps <= 10_000.0, "budgetMinTps must be at most 10000"),
         ];
         match checks.into_iter().find(|(ok, _)| !ok) {
             Some((_, message)) => Err(message.to_owned()),
@@ -702,6 +711,52 @@ mod tests {
         assert_eq!(bad(|s| s.tie_ratio = 0.99), "tieRatio must be at least 1");
         assert_eq!(bad(|s| s.tier_weights.fast = f64::NAN), "tierWeights.fast must be between 0 and 1");
         assert_eq!(bad(|s| s.snapshot_max_age_minutes = 0.0), "snapshotMaxAgeMinutes must be positive");
+    }
+
+    #[test]
+    fn every_ranking_input_has_an_upper_bound_that_is_accepted_exactly_and_refused_just_above() {
+        type Set = fn(&mut RoutingSettings);
+        let cases: [(Set, Set, &str); 6] = [
+            (|s| s.smoothing_window = 50, |s| s.smoothing_window = 51, "smoothingWindow must be at most 50"),
+            (|s| s.observation_max_age_days = 30.0, |s| s.observation_max_age_days = 30.5, "observationMaxAgeDays must be at most 30"),
+            (|s| s.snapshot_max_age_minutes = 1440.0, |s| s.snapshot_max_age_minutes = 1441.0, "snapshotMaxAgeMinutes must be at most 1440"),
+            (|s| s.fallback_count = 5, |s| s.fallback_count = 6, "fallbackCount must be at most 5"),
+            (|s| s.tie_ratio = 2.0, |s| s.tie_ratio = 2.01, "tieRatio must be at most 2"),
+            (|s| s.budget_min_tps = 10_000.0, |s| s.budget_min_tps = 10_000.5, "budgetMinTps must be at most 10000"),
+        ];
+        let with = |f: Set| {
+            let mut s = RoutingSettings::default();
+            f(&mut s);
+            s
+        };
+        for (at_bound, above, message) in cases {
+            assert_eq!(with(at_bound).validate(), Ok(()), "{message}");
+            assert_eq!(with(above).validate(), Err(message.to_owned()));
+        }
+        let mut all_at_their_bounds = RoutingSettings::default();
+        for (at_bound, _, _) in cases {
+            at_bound(&mut all_at_their_bounds);
+        }
+        assert_eq!(all_at_their_bounds.validate(), Ok(()), "the bounds hold together");
+    }
+
+    #[test]
+    fn an_input_that_broke_an_older_rule_keeps_that_rules_message_beside_a_new_bound() {
+        let bad = |f: fn(&mut RoutingSettings)| {
+            let mut s = RoutingSettings { fallback_count: 6, smoothing_window: 51, ..RoutingSettings::default() };
+            f(&mut s);
+            s.validate().unwrap_err()
+        };
+        assert_eq!(bad(|s| s.min_uptime_pct = 101.0), "minUptimePct must be between 0 and 100");
+        assert_eq!(bad(|s| s.stable_min_observations = 0), "stableMinObservations must be at least 1");
+        assert_eq!(bad(|s| s.stable_min_observations = 52), "stableMinObservations exceeds smoothingWindow");
+        // Not finite: the older rule reports it, never the bound.
+        assert_eq!(bad(|s| s.observation_max_age_days = f64::INFINITY), "observationMaxAgeDays must be positive");
+        assert_eq!(bad(|s| s.snapshot_max_age_minutes = f64::NAN), "snapshotMaxAgeMinutes must be positive");
+        assert_eq!(bad(|s| s.budget_min_tps = f64::INFINITY), "budgetMinTps must not be negative");
+        assert_eq!(bad(|s| s.tie_ratio = f64::INFINITY), "tieRatio must be at least 1");
+        // With nothing older broken, the first new bound in table order is the one named.
+        assert_eq!(bad(|_| {}), "smoothingWindow must be at most 50");
     }
 
     #[test]
