@@ -88,7 +88,7 @@ Read `spec.md` beside this file and `.chorus/run/decisions.md` before starting a
 - Accept: `ago` gives "just now" at 59 s and for a future time, "12 min ago", "3 h ago", "1 day ago" and "4 days ago"; `inTime` gives "in 18 min" for 17 min 10 s, "in 1 min" for 5 s or a past time, and "in 2 h" for 2 h 10 min
 - Accept: `tiersBlocked(null, 'x')` is 'x'; `tiersBlocked(view, 'x')` and `tiersBlocked(null, null)` are `null`
 - Accept: `npm run typecheck` passes
-- Status: pending
+- Status: done
 
 ## T9 · UI: Settings → Routing and the inspector
 - Depends on: T7, T8
