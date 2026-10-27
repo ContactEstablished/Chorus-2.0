@@ -6,6 +6,7 @@
 import { onMounted, ref } from 'vue'
 import Icon from '../../components/Icon.vue'
 import WorktreesPanel from './WorktreesPanel.vue'
+import { moveTo } from '../../shell/projectOrder'
 import { commands, type Project, type ProjectState } from '../../ipc'
 import { useProjectsStore } from '../../stores/projects'
 import { useSessionsStore } from '../../stores/sessions'
@@ -97,9 +98,7 @@ async function drop(target: number): Promise<void> {
   dragging.value = null
   over.value = null
   if (from === null || from === target) return
-  const ids = projects.list.map((p) => p.id).filter((id) => id !== from)
-  ids.splice(ids.indexOf(target), 0, from)
-  await projects.reorder(ids)
+  await projects.reorder(moveTo(projects.list.map((p) => p.id), from, target))
 }
 async function nudge(p: Project, by: number): Promise<void> {
   const ids = projects.list.map((x) => x.id)

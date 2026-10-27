@@ -582,3 +582,8 @@ $0.0010 billed, Budget $0.000043 vs $0.000026, Fast $0.0011 vs $0.0024, and Nitr
 (`…-flash:nitro`, not in opencode's catalog) **$0** vs $0.0024. Chorus labels the figure "opencode's
 estimate", leaves a turn with a `:nitro` step without a cost, and keeps the run key's figure as
 what OpenRouter billed.
+
+**L73 — Tauri's file-drop handler stops in-page drag and drop on Windows.** With the default
+`dragDropEnabled: true`, WebView2 never fires `drop` for HTML5 drags inside the page, so a
+draggable list can't reorder. The main window sets `"dragDropEnabled": false`; because the webview
+then opens a file dropped on it, `App.vue` cancels `dragover` and `drop` events that carry files.

@@ -16,7 +16,8 @@ import { useViewStore } from '../stores/view'
 import { useAppStore } from '../stores/app'
 import { useNoticesStore } from '../stores/notices'
 import { AGENT_LABELS } from '../raw/labels'
-import { AGENT_CHIPS, ATTENTION, ago, byUrgency, lastActive, shortPath } from '../shell/status'
+import { ATTENTION, ago, byUrgency, lastActive, shortPath } from '../shell/status'
+import AgentLogo from '../components/AgentLogo.vue'
 import { pickable, pickedState } from '../shell/bulkClose'
 import { useNow } from '../shell/now'
 
@@ -161,7 +162,7 @@ function onDialogClose(ran: boolean): void {
         >
           <span v-if="selecting" class="box" aria-hidden="true"><Icon v-if="picked.has(s.id)" name="check" :size="12" /></span>
           <span class="dot" :class="{ pulse: s.attention === 'working' && !s.noSignal }" />
-          <span class="agent-chip" :class="`agent-${s.agent}`">{{ AGENT_CHIPS[s.agent] }}</span>
+          <AgentLogo :agent="s.agent" />
           <span class="main">
             <span class="name">{{ s.name }}<span v-if="s.locked" class="locked">locked</span></span>
             <span class="sub">{{ s.description ?? shortPath(s.cwd, app.info?.homeDir ?? null) }}</span>
@@ -180,7 +181,7 @@ function onDialogClose(ran: boolean): void {
       <article v-for="s in shown" :key="s.id" class="tile" :class="`st-${s.attention}`">
         <header class="tile-head">
           <span class="dot" :class="{ pulse: s.attention === 'working' && !s.noSignal }" />
-          <span class="agent-chip" :class="`agent-${s.agent}`">{{ AGENT_CHIPS[s.agent] }}</span>
+          <AgentLogo :agent="s.agent" />
           <span class="tname" :title="s.cwd">{{ s.name }}</span>
           <span v-if="project(s)" class="project-tag" :style="{ '--tag': project(s)!.colour }">{{ project(s)!.name }}</span>
           <span class="tstate">{{ ATTENTION[s.attention].label }}</span>

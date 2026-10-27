@@ -6,7 +6,7 @@
  */
 import { computed, nextTick, ref, watch } from 'vue'
 import Icon from '../../components/Icon.vue'
-import codexLogo from '../../assets/agents/codex.png'
+import { AGENT_LOGOS } from '../../components/agentLogos'
 import { compactPath } from '../../shell/compactPath'
 import SessionTerminal from '../../raw/SessionTerminal.vue'
 import RawSearch from '../../raw/RawSearch.vue'
@@ -28,10 +28,10 @@ import { useLayoutStore } from '../../stores/layout'
 import { useAppStore } from '../../stores/app'
 import { useNoticesStore } from '../../stores/notices'
 import { AGENT_LABELS } from '../../raw/labels'
-import { AGENT_CHIPS, ATTENTION, shortPath } from '../../shell/status'
+import { ATTENTION, shortPath } from '../../shell/status'
 
 const props = defineProps<{ sessionId: number }>()
-const mode = ref<'friendly' | 'raw'>('raw')
+const mode = ref<'friendly' | 'raw'>('friendly')
 // The details panel's prompt list can scroll the Friendly conversation to a turn.
 const timeline = ref<InstanceType<typeof FriendlyTimeline> | null>(null)
 async function showTurn(turnId: number): Promise<void> {
@@ -207,8 +207,7 @@ async function send(bytes: string): Promise<void> {
     <header class="head">
       <button class="back" title="Back" aria-label="Back" @click="view.goBack()"><Icon name="back" :size="16" /></button>
       <span class="agent-chip big" :class="`agent-${s.agent}`" :title="AGENT_LABELS[s.agent]">
-        <img v-if="s.agent === 'codex'" :src="codexLogo" alt="Codex" />
-        <template v-else>{{ AGENT_CHIPS[s.agent] }}</template>
+        <img :src="AGENT_LOGOS[s.agent]" :alt="AGENT_LABELS[s.agent]" />
       </span>
       <div class="titles">
         <form v-if="nameDraft !== null" class="rename" @submit.prevent="saveName">

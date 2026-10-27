@@ -78,3 +78,20 @@ pub async fn session_image_read(state: Manager<'_>, session_id: u32, image_id: u
     .await
     .map_err(|e| e.to_string())?
 }
+/// Read an image file whose path an agent printed, so Friendly can show it under the message.
+#[tauri::command]
+#[specta::specta]
+pub async fn local_image_read(path: String) -> Result<Vec<u8>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        if !chorus_core::attachments::is_linkable_image_path(&path) {
+            return Err("That path is not an absolute image file path.".to_string());
+        }
+        let meta = std::fs::metadata(&path).map_err(|_| "That image file was not found.".to_string())?;
+        if !meta.is_file() || meta.len() > chorus_core::attachments::MAX_LINKED_IMAGE_BYTES {
+            return Err("That is not an image file under 20 MiB.".into());
+        }
+        std::fs::read(&path).map_err(|e| format!("Could not read that image: {e}"))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}

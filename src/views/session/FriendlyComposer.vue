@@ -68,11 +68,21 @@ async function poll() {
 watch(() => props.sessionId, () => { void poll() }, { immediate: true })
 onBeforeUnmount(() => { disposed = true; generation++; clearTimeout(timer) })
 async function send(queue: boolean) { await store.submit(props.sessionId, queue, !queue) }
-/** Ctrl+Enter is the one keyboard submit; Enter alone adds a line (D23: nothing sends itself). */
+/** Enter sends, Ctrl+Enter (or Shift+Enter) adds a line. Queueing is the Queue button only (D23: nothing sends itself). */
 function keydown(event: KeyboardEvent) {
-  if (event.key !== 'Enter' || !(event.ctrlKey || event.metaKey) || event.shiftKey || event.altKey) return
+  if (event.key !== 'Enter' || event.isComposing || event.altKey) return
+  if (event.shiftKey) return // native newline
+  const area = event.target as HTMLTextAreaElement
   event.preventDefault()
-  if (!restartable.value && !sendDisabled.value) void send(false)
+  if (event.ctrlKey || event.metaKey) {
+    // Browsers don't insert a newline for Ctrl+Enter, so do it and let the draft store see the edit.
+    area.setRangeText('\n', area.selectionStart, area.selectionEnd, 'end')
+    area.dispatchEvent(new Event('input', { bubbles: true }))
+    return
+  }
+  if (restartable.value) {
+    if (valid.value && entry.value.images.length === 0) void store.restartSend(props.sessionId)
+  } else if (!sendDisabled.value) void send(false)
 }
 async function attach(files: File[]) {
   if (imagesDisabled.value) return
@@ -117,7 +127,7 @@ async function removeImage(id: number) {
         <span class="spacer" />
         <button class="tool" :disabled="!valid || !!entry.pending || !state || !!state.queueReason" :title="state?.queueReason || 'Run it at the next confirmed pause'" @click="send(true)">Queue</button>
         <button v-if="restartable" class="primary tool" :disabled="!valid || entry.images.length > 0" @click="store.restartSend(sessionId)">{{ entry.busy ? 'Restarting…' : 'Restart and send' }}</button>
-        <button v-else class="primary tool" :disabled="sendDisabled" :title="sendBlocker || 'Send now (Ctrl+Enter)'" @click="send(false)">{{ entry.pending ? 'Retry same request' : 'Send' }}</button>
+        <button v-else class="primary tool" :disabled="sendDisabled" :title="sendBlocker || 'Send now (Enter)'" @click="send(false)">{{ entry.pending ? 'Retry same request' : 'Send' }}</button>
         <button v-if="entry.error && !entry.pending" class="quiet tool" :disabled="entry.saving || entry.busy" @click="store.reloadDraft(sessionId)">Reload saved draft</button>
       </div>
     </div>
@@ -154,7 +164,7 @@ async function removeImage(id: number) {
 </template>
 
 <style scoped>
-.composer { display: grid; gap: 6px; }
+.composer { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
 .field { padding: 8px 8px 8px 12px; border: 1px solid var(--border-strong); border-radius: 14px; background: var(--surface-raised); transition: border-color 0.15s; }
 .field:focus-within { border-color: var(--accent-line); box-shadow: 0 0 0 3px var(--accent-soft); }
 textarea { display: block; width: 100%; min-height: 46px; max-height: 240px; field-sizing: content; resize: none; padding: 6px 4px; border: 0; background: transparent; color: var(--text); font: inherit; font-size: 14px; line-height: 1.6; }

@@ -58,9 +58,33 @@ pub fn image_prompt(text: &str, paths: &[String]) -> Result<String, String> {
     crate::actions::clean_prompt(&out)
 }
 
+/// Largest image file Friendly will show from a path an agent printed.
+pub const MAX_LINKED_IMAGE_BYTES: u64 = 20 * 1024 * 1024;
+
+/// A path an agent printed is only shown when it is absolute, free of `..`, and names a common image type.
+pub fn is_linkable_image_path(path: &str) -> bool {
+    let p = path.replace('\\', "/");
+    let b = p.as_bytes();
+    let drive = b.len() > 2 && b[0].is_ascii_alphabetic() && b[1] == b':' && b[2] == b'/';
+    let ext = p.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase());
+    drive
+        && !p.split('/').any(|part| part == "..")
+        && !p.chars().any(|c| c.is_control())
+        && matches!(ext.as_deref(), Some("png" | "jpg" | "jpeg" | "webp" | "gif"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn linkable_image_paths() {
+        assert!(is_linkable_image_path(r"C:\Users\a\Temp\shot-1.JPG"));
+        assert!(is_linkable_image_path("C:/x/y.png"));
+        assert!(!is_linkable_image_path("shot.png"));
+        assert!(!is_linkable_image_path(r"\\server\share\a.png"));
+        assert!(!is_linkable_image_path(r"C:\a\..\b.png"));
+        assert!(!is_linkable_image_path(r"C:\a\notes.txt"));
+    }
     #[test]
     fn rejects_non_images_truncation_and_oversized_dimensions() {
         assert!(validate_png(b"<svg onload='bad'>").is_err());

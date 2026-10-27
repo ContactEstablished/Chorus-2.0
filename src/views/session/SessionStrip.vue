@@ -1,7 +1,8 @@
 <script setup lang="ts">
 /**
- * The session strip (D26, the filmstrip's job): every session as a small chip, most urgent first,
- * so switching is one click. Collapsible; the choice is kept in preferences.
+ * The session strip (D26, the filmstrip's job): the open session's project's sessions as small chips,
+ * most urgent first, so switching is one click. With only one session there is nothing to switch to,
+ * so the strip takes no room. Collapsible; the choice is kept in preferences.
  */
 import { computed } from 'vue'
 import Icon from '../../components/Icon.vue'
@@ -9,20 +10,23 @@ import { useSessionsStore } from '../../stores/sessions'
 import { useProjectsStore } from '../../stores/projects'
 import { useViewStore } from '../../stores/view'
 import { usePrefsStore } from '../../stores/prefs'
-import { AGENT_CHIPS, ATTENTION, byUrgency } from '../../shell/status'
+import { ATTENTION } from '../../shell/status'
+import { AGENT_LOGOS } from '../../components/agentLogos'
+import { AGENT_LABELS } from '../../raw/labels'
+import { stripSessions } from './stripSessions'
 
-defineProps<{ current: number }>()
+const props = defineProps<{ current: number }>()
 
 const sessions = useSessionsStore()
 const projects = useProjectsStore()
 const view = useViewStore()
 const prefs = usePrefsStore()
 
-const ordered = computed(() => [...sessions.list].sort(byUrgency))
+const ordered = computed(() => stripSessions(sessions.list, props.current))
 </script>
 
 <template>
-  <div class="strip" :class="{ collapsed: !prefs.prefs.sessionStrip }">
+  <div v-if="ordered.length > 1" class="strip" :class="{ collapsed: !prefs.prefs.sessionStrip }">
     <template v-if="prefs.prefs.sessionStrip">
       <button
         v-for="s in ordered"
@@ -34,7 +38,7 @@ const ordered = computed(() => [...sessions.list].sort(byUrgency))
         @click="view.openSession(s.id)"
       >
         <span class="dot" :class="{ pulse: s.attention === 'working' && !s.noSignal }" />
-        <span class="agent-chip" :class="`agent-${s.agent}`">{{ AGENT_CHIPS[s.agent] }}</span>
+        <span class="agent-chip" :class="`agent-${s.agent}`" :title="AGENT_LABELS[s.agent]"><img :src="AGENT_LOGOS[s.agent]" :alt="AGENT_LABELS[s.agent]" /></span>
         <span class="name">{{ s.name }}</span>
         <span
           v-if="s.projectId !== null && projects.byId.get(s.projectId)"
@@ -43,7 +47,7 @@ const ordered = computed(() => [...sessions.list].sort(byUrgency))
         />
       </button>
     </template>
-    <span v-else class="label">{{ sessions.list.length }} sessions</span>
+    <span v-else class="label">{{ ordered.length }} sessions</span>
     <button
       class="toggle"
       :title="prefs.prefs.sessionStrip ? 'Hide the session strip' : 'Show the session strip'"
@@ -89,9 +93,15 @@ const ordered = computed(() => [...sessions.list].sort(byUrgency))
   background: var(--accent-soft);
 }
 .chip .agent-chip {
-  height: 17px;
-  min-width: 22px;
-  font-size: 9.5px;
+  height: 20px;
+  width: 20px;
+  min-width: 20px;
+  padding: 0;
+}
+.chip .agent-chip img {
+  width: 15px;
+  height: 15px;
+  object-fit: contain;
 }
 .name {
   overflow: hidden;

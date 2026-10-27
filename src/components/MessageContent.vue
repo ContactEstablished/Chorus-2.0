@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import { renderMessage, webUrl } from './messageMarkdown'
 import { useNoticesStore } from '../stores/notices'
+import LinkedImages from './LinkedImages.vue'
 
 /** `plain` drops the label and Copy/Source toolbar: for a note inside a larger card. */
 const props = defineProps<{ text: string; plain?: boolean }>()
@@ -66,6 +67,7 @@ function followLink(event: MouseEvent): void {
     <pre v-if="source" class="message-source">{{ text }}</pre>
     <!-- Only the restricted Markdown renderer produces this HTML; source HTML is escaped. -->
     <div v-else class="message-content" @click="messageAction" @auxclick="followLink" v-html="html" />
+    <LinkedImages v-if="!source" :text="text" />
   </div>
 </template>
 

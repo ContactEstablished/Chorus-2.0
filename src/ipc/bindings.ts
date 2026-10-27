@@ -161,6 +161,8 @@ export const commands = {
 	sessionImageAdd: (sessionId: number, revision: number, name: string, png: number[]) => typedError<Draft, string>(__TAURI_INVOKE("session_image_add", { sessionId, revision, name, png })),
 	sessionImageRemove: (sessionId: number, revision: number, imageId: number) => typedError<Draft, string>(__TAURI_INVOKE("session_image_remove", { sessionId, revision, imageId })),
 	sessionImageRead: (sessionId: number, imageId: number) => typedError<number[], string>(__TAURI_INVOKE("session_image_read", { sessionId, imageId })),
+	/**  Read an image file whose path an agent printed, so Friendly can show it under the message. */
+	localImageRead: (path: string) => typedError<number[], string>(__TAURI_INVOKE("local_image_read", { path })),
 	notificationsList: () => typedError<NotificationsPage, string>(__TAURI_INVOKE("notifications_list")),
 	/**  Marks one notification read and returns the unread count. */
 	notificationRead: (id: number) => typedError<number, string>(__TAURI_INVOKE("notification_read", { id })),

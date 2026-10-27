@@ -3,8 +3,9 @@
  * The main window's frame (PLAN P4): the rail, the title bar, the view the rail picked, the status
  * bar and the notices. Global keys, outside a terminal: Ctrl+K, Ctrl+G and zoom with Ctrl +/-/0.
  */
-import { defineAsyncComponent, onMounted, onUnmounted, watch } from 'vue'
+import { defineAsyncComponent, onMounted, onUnmounted, ref, watch } from 'vue'
 import Rail from '../shell/Rail.vue'
+import ProjectDialog from '../shell/ProjectDialog.vue'
 import TitleBar from '../shell/TitleBar.vue'
 import StatusBar from '../shell/StatusBar.vue'
 import Notices from '../shell/Notices.vue'
@@ -40,6 +41,15 @@ const prefs = usePrefsStore()
 const view = useViewStore()
 const notices = useNoticesStore()
 const inbox = useInboxStore()
+
+// The rail's project dialog: a new project (id null) or an edit, optionally straight to its delete question.
+const projectEditor = ref<{ id: number | null; deleting: boolean } | null>(null)
+
+// File drops are switched off in Tauri so the rail can reorder by dragging; a file dropped on the
+// window must not make the webview navigate to it.
+function swallowFileDrag(e: DragEvent): void {
+  if (e.dataTransfer?.types.includes('Files')) e.preventDefault()
+}
 
 function onKey(e: KeyboardEvent): void {
   const target = e.target instanceof Element ? e.target : null
@@ -85,6 +95,8 @@ async function listenNavigate(): Promise<void> {
 
 onMounted(async () => {
   window.addEventListener('keydown', onKey, { capture: true })
+  window.addEventListener('dragover', swallowFileDrag)
+  window.addEventListener('drop', swallowFileDrag)
   void listenNavigate()
   await app.init()
   await Promise.all([prefs.load(), sessions.init(), projects.load()])
@@ -92,6 +104,8 @@ onMounted(async () => {
 })
 onUnmounted(() => {
   window.removeEventListener('keydown', onKey, { capture: true })
+  window.removeEventListener('dragover', swallowFileDrag)
+  window.removeEventListener('drop', swallowFileDrag)
   unlistenNavigate?.()
   sessions.dispose()
   app.dispose()
@@ -108,7 +122,11 @@ watch(
 
 <template>
   <div class="frame">
-    <Rail @new-project="view.openSettings('projects')" @edit-project="view.openSettings('projects')" />
+    <Rail
+      @new-project="projectEditor = { id: null, deleting: false }"
+      @edit-project="projectEditor = { id: $event, deleting: false }"
+      @delete-project="projectEditor = { id: $event, deleting: true }"
+    />
     <div class="main">
       <TitleBar @palette="view.palette = 'all'" />
       <main class="view scroll">
@@ -125,6 +143,7 @@ watch(
       <StatusBar />
     </div>
     <NewSessionDialog v-if="view.newSessionOpen" />
+    <ProjectDialog v-if="projectEditor" :id="projectEditor.id" :deleting="projectEditor.deleting" @close="projectEditor = null" />
     <CommandPalette v-if="view.palette" :key="view.palette" :mode="view.palette" />
     <Notices />
   </div>

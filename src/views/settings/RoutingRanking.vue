@@ -230,21 +230,25 @@ h4 {
 }
 .field {
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) minmax(160px, 260px) auto;
+  grid-template-columns: minmax(0, 1fr) 220px 190px;
   align-items: center;
-  gap: 4px 14px;
+  gap: 4px 16px;
+  padding: 2px 0;
   font-size: 12.5px;
 }
 .field label {
   color: var(--text-2);
 }
 .number {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 44px;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
 }
-.number input {
+.number input,
+.field select {
   width: 100%;
+  box-sizing: border-box;
 }
 .field select,
 .field input {
@@ -253,7 +257,9 @@ h4 {
 .unit,
 .default {
   color: var(--text-muted);
-  white-space: nowrap;
+}
+.default {
+  line-height: 1.35;
 }
 .help {
   grid-column: 1 / -1;
