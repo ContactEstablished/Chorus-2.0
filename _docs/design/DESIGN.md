@@ -61,8 +61,8 @@ Done and Dismiss, narrator cost and the project switch).
 
 **Friendly composer:** one field that grows with its text (two lines to about ten), its controls on
 a single row beneath: Attach images, the draft status, Queue and Send. The placeholder says what a
-message does in the session's current state (below). Enter adds a line; Send, Queue or Ctrl+Enter
-submits it, never anything else. Send targets the reviewed live run; Queue waits for the next
+message does in the session's current state (below). Enter or Send submits it; Ctrl+Enter (or
+Shift+Enter) adds a line; Queue is the button only, never anything else. Send targets the reviewed live run; Queue waits for the next
 confirmed pause. Disabled actions explain themselves in their tooltip and a line beneath. The queue
 and recent receipts fold beneath the field: each instruction with cancellation and review/resume
 controls for held items, and receipts that distinguish written-to-terminal, agent-confirmed and

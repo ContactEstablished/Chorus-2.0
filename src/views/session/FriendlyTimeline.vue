@@ -313,7 +313,7 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; max-heigh
 
 /* The dock: requests, the glance bar and the composer, always in reach. */
 .dock { flex: none; max-height: 62%; overflow: auto; padding: 10px clamp(18px, 3vw, 40px) 14px; border-top: 1px solid var(--border); background: var(--bg); scrollbar-width: thin; }
-.dock-inner { max-width: 920px; margin: 0 auto; display: grid; gap: 10px; }
+.dock-inner { max-width: 920px; margin: 0 auto; display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
 .pending { display: grid; gap: 10px; }
 
 @media (max-width: 720px) {

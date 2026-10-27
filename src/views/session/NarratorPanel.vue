@@ -122,7 +122,7 @@ async function toggle() {
 </template>
 
 <style scoped>
-.narrator { display: grid; gap: 6px; }
+.narrator { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
 .bar { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 14px; min-height: 28px; }
 .toggle { display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; padding: 3px 8px 3px 4px; border: 0; background: transparent; color: var(--text-2); font-size: 12.5px; text-align: left; }
 .toggle:hover { color: var(--text); background: var(--surface-chip); }

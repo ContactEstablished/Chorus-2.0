@@ -106,6 +106,7 @@ pub fn builder() -> Builder<tauri::Wry> {
             sessions::images::session_image_add,
             sessions::images::session_image_remove,
             sessions::images::session_image_read,
+            sessions::images::local_image_read,
             // P7: notifications, the tray and the fleet strip.
             attention::notifications_list,
             attention::notification_read,
