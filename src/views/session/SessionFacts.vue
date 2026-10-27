@@ -4,15 +4,15 @@
  * agent, options, provider, key, conversation, CLI version, worktree and folder. Anything degraded
  * says why.
  */
-import { computed, onMounted, ref } from 'vue'
-import { commands, type SessionSummary } from '../../ipc'
+import { computed, onMounted, ref, watch } from 'vue'
+import { commands, type SessionSummary, type SessionUsage } from '../../ipc'
 import TagInput from '../../components/TagInput.vue'
 import SessionGitFacts from './SessionGitFacts.vue'
 import SessionInstructionsFacts from './SessionInstructionsFacts.vue'
 import { useProjectsStore } from '../../stores/projects'
 import { useSessionsStore } from '../../stores/sessions'
 import { useAgentsStore } from '../../stores/agents'
-import { AGENT_LABELS, money, observedText, optionsText, versionText } from '../../raw/labels'
+import { AGENT_LABELS, money, observedText, optionsText, usageText, versionText } from '../../raw/labels'
 
 const props = defineProps<{ session: SessionSummary }>()
 const projects = useProjectsStore()
@@ -31,6 +31,27 @@ const capped = computed(() => {
   if (!k) return null
   const state = k.live ? (s.value.live ? 'live' : 'not revoked yet') : 'revoked'
   return `capped at ${money(k.limitUsd)}, ${state}${k.costUsd === null ? '' : `, cost ${money(k.costUsd)}`}${k.note ? ` (${k.note})` : ''}`
+})
+
+// Tokens and cost as the agent reported them (D107; opencode so far), read again as turns end.
+const usage = ref<SessionUsage | null>(null)
+async function loadUsage(): Promise<void> {
+  const id = s.value.id
+  const r = await commands.sessionUsage(id).catch(() => null)
+  if (s.value.id === id) usage.value = r?.status === 'ok' && r.data.turns > 0 ? r.data : null
+}
+watch(() => [s.value.id, s.value.activity, s.value.latest], loadUsage, { immediate: true })
+const tokensText = computed(() => {
+  const u = usage.value
+  if (!u) return null
+  const total = usageText(u.total) ?? 'unknown'
+  return u.turns > 1 ? `${total} over ${u.turns} turns` : total
+})
+const lastTurnText = computed(() => (usage.value && usage.value.turns > 1 ? `Last turn: ${usageText(usage.value.last) ?? 'unknown'}` : undefined))
+const costText = computed(() => {
+  const u = usage.value
+  if (!u) return null
+  return u.total.costUsd === null ? 'unknown' : `${money(u.total.costUsd)} (reported by ${AGENT_LABELS[s.value.agent]})`
 })
 
 async function move(value: string): Promise<void> {
@@ -84,6 +105,12 @@ async function retag(tags: string[]): Promise<void> {
         <template v-if="capped">
           <dt>Run key</dt>
           <dd>{{ capped }}</dd>
+        </template>
+        <template v-if="tokensText">
+          <dt>Tokens</dt>
+          <dd :title="lastTurnText">{{ tokensText }}</dd>
+          <dt>Cost</dt>
+          <dd :title="costText === 'unknown' ? 'The agent reported no cost for these turns.' : 'The agent’s own figure. The run key’s cost, when there is one, is OpenRouter’s.'">{{ costText }}</dd>
         </template>
         <dt>CLI</dt>
         <dd :class="{ warn: s.versionFit === 'newer' || s.versionFit === 'older' || s.versionFit === 'unreadable' }">

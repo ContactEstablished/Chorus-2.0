@@ -65,6 +65,8 @@ export type {
   Delivered,
   SessionStatus,
   SessionSummary,
+  SessionUsage,
+  TokenUsage,
   SharingSession,
   Slot,
   TagUse,

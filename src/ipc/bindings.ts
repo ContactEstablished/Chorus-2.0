@@ -85,6 +85,8 @@ export const commands = {
 	sessionSetDescription: (sessionId: number, description: string | null) => typedError<SessionSummary, string>(__TAURI_INVOKE("session_set_description", { sessionId, description })),
 	/**  A session's newest turns with their prompts, final messages, tool calls and asks. */
 	sessionHistory: (sessionId: number, limit: number) => typedError<SessionHistory, string>(__TAURI_INVOKE("session_history", { sessionId, limit })),
+	/**  A session's tokens and cost over its turns, and its newest turn's (D107). */
+	sessionUsage: (sessionId: number) => typedError<SessionUsage, string>(__TAURI_INVOKE("session_usage", { sessionId })),
 	profilesList: () => typedError<ProfileSummary[], string>(__TAURI_INVOKE("profiles_list")),
 	profileSave: (input: ProfileSave) => typedError<ProfileSummary, string>(__TAURI_INVOKE("profile_save", { input })),
 	profileDelete: (id: number) => typedError<boolean, string>(__TAURI_INVOKE("profile_delete", { id })),
@@ -1820,6 +1822,16 @@ export type SessionUpdated = {
 	session: SessionSummary,
 };
 
+/**  A session's usage: the sum over its turns that have any, and its newest such turn. */
+export type SessionUsage = {
+	/**  Turns with figures. */
+	turns: number,
+	total: TokenUsage,
+	last: TokenUsage | null,
+	/**  Where they came from, when any did. */
+	source: string | null,
+};
+
 export type SharingSession = {
 	id: number,
 	name: string,
@@ -2071,6 +2083,19 @@ export type TiersView_Serialize = {
 	problem: string | null,
 	/**  Seconds before Refresh may run again for this model. */
 	retryInSecs: number,
+};
+
+/**  One turn's usage, or a sum of turns'. */
+export type TokenUsage = {
+	/**  Prompt tokens not read from the cache. */
+	input: number | null,
+	/**  Prompt tokens read from the cache. */
+	cached: number | null,
+	cacheWrite: number | null,
+	output: number | null,
+	reasoning: number | null,
+	/**  What the agent says it cost, in US dollars. opencode reports 0 for its free models. */
+	costUsd: number | null,
 };
 
 export type ToolEntry = {
