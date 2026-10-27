@@ -531,3 +531,20 @@ folder was on neither the user nor the machine PATH, so `opencode.cmd` was insta
 yet Chorus reported "opencode.cmd not found on PATH". Chorus now looks there after PATH, says so on
 the agent, and adds the folder to that agent's own PATH so its tools resolve the same way. A custom
 npm prefix (`npm config get prefix`) is not searched.
+
+**L69 — opencode 2.1.4 reports usage per step, and its inbox carries more than prompts.** Measured
+against a scratch `opencode serve` (isolated `XDG_*` folders, `opencode/deepseek-v4.1-flash-free`):
+- `session.step.ended` carries `finish` (`stop`, `tool-calls`), `cost` in dollars (0 for free
+  models) and `tokens {input, output, reasoning, cache {read, write}}`; `input` excludes cached
+  tokens. `session.usage.updated` carries the session's running total, compactions included.
+  `session.message.updated` (1.x's usage event) no longer exists.
+- Inbox items are `user`, `synthetic`, `compaction` or `move` (`Session.Inbox.Info`). A compaction
+  (`POST /api/session/{id}/compact`, or opencode's own) runs as an execution of its own:
+  `inbox.delivered`, `compaction.started`/`delta`/`ended`, `usage.updated`, `execution.succeeded`,
+  with no step. A synthetic item (`POST /api/session/{id}/synthetic`) is answered like a prompt.
+- A steered prompt is delivered only after the running step ends; that step's `finish: "stop"`
+  means the earlier prompt's work is done.
+- Cancelling a queued prompt (`DELETE /api/session/{id}/inbox/{inboxID}`) emits
+  `session.inbox.cancelled` and nothing else.
+- The HTTP API drives all of this without the TUI: `POST /api/session/{id}/prompt` with
+  `delivery: "steer" | "queue"`.

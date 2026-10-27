@@ -13,6 +13,7 @@ use specta::Type;
 
 use crate::agent::{LaunchOptions, Spec};
 use crate::events::AgentEvent;
+use crate::measure::ledger::TokenUsage;
 
 /// The basic-auth user `opencode serve` expects when only a password is set.
 pub const USERNAME: &str = "opencode";
@@ -319,14 +320,25 @@ pub fn observed_from_event(event: &Value, session_id: &str) -> Option<Observed> 
 /// session's execution succeeds, fails or is interrupted. A prompt sent while a turn runs joins the
 /// same execution at its next step (opencode "steers" it), so each prompt of an execution ends with
 /// it, oldest first. A turn's reply is the text of its newest assistant step that had any.
+///
+/// Only `user` and `synthetic` inbox items are turns; `compaction` and `move` are opencode's own
+/// housekeeping (2.1.4, LESSONS L69, D108). A turn whose last step finished (`finish: "stop"`) keeps
+/// its reply when a later prompt in the same execution fails or is interrupted.
 #[derive(Debug, Default)]
 pub struct EventParser {
     session_id: String,
     /// Inbox id → the prompt's text, until it's delivered.
     prompts: HashMap<String, String>,
-    /// The execution's turns, oldest first, each with its assistant steps in order. Steps seen
-    /// before any delivery (the stream joined mid-turn) belong to a turn with no id.
-    turns: Vec<(Option<String>, Vec<String>)>,
+    /// Inbox id → the item's type, until it's delivered.
+    kinds: HashMap<String, String>,
+    /// The execution's turns, oldest first. Steps seen before any delivery (the stream joined
+    /// mid-turn) belong to a turn with no id.
+    turns: Vec<Turn>,
+    /// The execution delivered housekeeping (a compaction or a move), so ending with no turn is
+    /// not a turn of its own.
+    housekeeping: bool,
+    /// Ended turns' usage, until [`EventParser::take_usage`].
+    usage: Vec<(String, TokenUsage)>,
     /// Each step's texts by ordinal.
     texts: HashMap<String, BTreeMap<u64, String>>,
     /// Tool call id → its tool and target, named before the call runs.
@@ -334,9 +346,30 @@ pub struct EventParser {
     started: HashSet<String>,
 }
 
+#[derive(Debug, Default)]
+struct Turn {
+    id: Option<String>,
+    /// Its assistant steps, in order.
+    steps: Vec<String>,
+    /// Its last step ended with `finish: "stop"`: its work is done.
+    finished: bool,
+    usage: TokenUsage,
+}
+
+impl Turn {
+    fn new(id: Option<String>) -> Self {
+        Self { id, ..Default::default() }
+    }
+}
+
 impl EventParser {
     pub fn new(session_id: &str) -> Self {
         Self { session_id: session_id.to_owned(), ..Default::default() }
+    }
+
+    /// The usage of each turn that has ended since the last call, by its inbox id.
+    pub fn take_usage(&mut self) -> Vec<(String, TokenUsage)> {
+        std::mem::take(&mut self.usage)
     }
 
     fn reply(&self, steps: &[String]) -> Option<String> {
@@ -348,17 +381,30 @@ impl EventParser {
 
     /// The execution ended: one event per turn it held, oldest first (or one for no known turn),
     /// each with its own reply. A turn with no id ends after the named ones, because an end with no
-    /// id closes the oldest open turn, which would be a named one.
-    fn end_turns(&mut self, end: impl Fn(Option<String>, Option<String>) -> AgentEvent) -> Vec<AgentEvent> {
+    /// id closes the oldest open turn, which would be a named one. When the execution failed or was
+    /// interrupted (`failed`), a turn whose work had finished still ends done, with its reply.
+    fn end_turns(&mut self, failed: bool, end: impl Fn(Option<String>, Option<String>) -> AgentEvent) -> Vec<AgentEvent> {
         let mut turns = std::mem::take(&mut self.turns);
+        let housekeeping = std::mem::take(&mut self.housekeeping);
         // Only the first can have no id: it holds the steps seen before any delivery.
-        if turns.len() > 1 && turns[0].0.is_none() {
+        if turns.len() > 1 && turns[0].id.is_none() {
             turns.rotate_left(1);
         }
         let out = if turns.is_empty() {
-            vec![end(None, None)]
+            if housekeeping { Vec::new() } else { vec![end(None, None)] }
         } else {
-            turns.into_iter().map(|(turn, steps)| end(turn, self.reply(&steps))).collect()
+            turns
+                .into_iter()
+                .map(|t| {
+                    let reply = self.reply(&t.steps);
+                    if let Some(id) = &t.id
+                        && !t.usage.is_empty()
+                    {
+                        self.usage.push((id.clone(), t.usage.clone()));
+                    }
+                    if failed && t.finished { AgentEvent::TurnEnded { turn: t.id, message: reply } } else { end(t.id, reply) }
+                })
+                .collect()
         };
         self.texts.clear();
         out
@@ -375,28 +421,56 @@ impl EventParser {
         }
         match kind {
             "session.inbox.enqueued" => {
-                if let (Some(id), Some("user")) = (text(&d, "inboxID"), d.pointer("/item/type").and_then(Value::as_str)) {
-                    let prompt = d.pointer("/item/payload/text").and_then(Value::as_str).unwrap_or_default();
-                    self.prompts.insert(id, prompt.to_owned());
+                if let Some(id) = text(&d, "inboxID") {
+                    let kind = d.pointer("/item/type").and_then(Value::as_str).unwrap_or_default();
+                    if kind == "user" {
+                        let prompt = d.pointer("/item/payload/text").and_then(Value::as_str).unwrap_or_default();
+                        self.prompts.insert(id.clone(), prompt.to_owned());
+                    }
+                    self.kinds.insert(id, kind.to_owned());
+                }
+                Vec::new()
+            }
+            "session.inbox.cancelled" => {
+                if let Some(id) = text(&d, "inboxID") {
+                    self.prompts.remove(&id);
+                    self.kinds.remove(&id);
                 }
                 Vec::new()
             }
             "session.inbox.delivered" => {
                 let Some(id) = text(&d, "inboxID") else { return Vec::new() };
+                // An item whose enqueue the stream missed is taken for a prompt, as before 2.1.4.
+                if matches!(self.kinds.remove(&id).as_deref(), Some("compaction" | "move")) {
+                    self.housekeeping = true;
+                    return Vec::new();
+                }
                 let prompt = self.prompts.remove(&id).filter(|p| !p.trim().is_empty());
-                self.turns.push((Some(id.clone()), Vec::new()));
+                self.turns.push(Turn::new(Some(id.clone())));
                 vec![AgentEvent::TurnStarted { turn: Some(id), prompt }]
             }
             "session.step.started" => {
                 if let Some(step) = text(&d, "assistantMessageID") {
                     if self.turns.is_empty() {
-                        self.turns.push((None, Vec::new()));
+                        self.turns.push(Turn::new(None));
                     }
-                    let steps = &mut self.turns.last_mut().expect("a turn").1;
+                    let turn = self.turns.last_mut().expect("a turn");
+                    turn.finished = false;
                     // A step that retries (`session.retry.scheduled`) starts again under the same id.
-                    if steps.last() != Some(&step) {
-                        steps.push(step);
+                    if turn.steps.last() != Some(&step) {
+                        turn.steps.push(step);
                     }
+                }
+                Vec::new()
+            }
+            "session.step.ended" => {
+                if let Some(step) = text(&d, "assistantMessageID")
+                    && let Some(turn) = self.turns.iter_mut().rev().find(|t| t.steps.contains(&step))
+                {
+                    if let Some(usage) = TokenUsage::from_opencode_step(&d) {
+                        turn.usage.add(&usage);
+                    }
+                    turn.finished = turn.steps.last() == Some(&step) && d.get("finish").and_then(Value::as_str) == Some("stop");
                 }
                 Vec::new()
             }
@@ -428,7 +502,7 @@ impl EventParser {
                 let (tool, target) = call.as_ref().and_then(|c| self.tools.remove(c)).unwrap_or_else(|| ("tool".to_owned(), None));
                 vec![AgentEvent::ToolFinished { turn: None, call, tool, target, failed: kind == "session.tool.failed" }]
             }
-            "session.execution.succeeded" => self.end_turns(|turn, message| AgentEvent::TurnEnded { turn, message }),
+            "session.execution.succeeded" => self.end_turns(false, |turn, message| AgentEvent::TurnEnded { turn, message }),
             "session.execution.failed" => {
                 let error = d
                     .pointer("/error/message")
@@ -436,9 +510,9 @@ impl EventParser {
                     .and_then(Value::as_str)
                     .unwrap_or("the turn failed")
                     .to_owned();
-                self.end_turns(|turn, _| AgentEvent::TurnFailed { turn, error: error.clone() })
+                self.end_turns(true, |turn, _| AgentEvent::TurnFailed { turn, error: error.clone() })
             }
-            "session.execution.interrupted" => self.end_turns(|turn, _| AgentEvent::TurnInterrupted { turn }),
+            "session.execution.interrupted" => self.end_turns(true, |turn, _| AgentEvent::TurnInterrupted { turn }),
             "permission.asked" => vec![AgentEvent::ApprovalAsked {
                 turn: None,
                 ask: text(&d, "id"),
@@ -807,6 +881,95 @@ mod tests {
         );
         // An execution the stream saw no delivery for still ends, as a turn of its own.
         assert_eq!(p.push(&ev("session.execution.succeeded", json!({"sessionID":s}))), [AgentEvent::TurnEnded { turn: None, message: None }]);
+    }
+
+    #[test]
+    fn housekeeping_items_are_not_turns() {
+        // Measured on 2.1.4: `POST /api/session/{id}/compact` enqueues a `compaction` item that
+        // runs as an execution of its own, with no step.
+        let s = "ses_1";
+        let mut p = EventParser::new(s);
+        let mut all = Vec::new();
+        for e in [
+            ev("session.inbox.enqueued", json!({"inboxID":"msg_c","sessionID":s,"item":{"type":"compaction","payload":{},"delivery":"steer"}})),
+            ev("session.execution.started", json!({"sessionID":s})),
+            ev("session.inbox.delivered", json!({"sessionID":s,"inboxID":"msg_c"})),
+            ev("session.compaction.started", json!({"sessionID":s,"reason":"manual","inputID":"msg_c"})),
+            ev("session.compaction.ended", json!({"sessionID":s,"reason":"manual","text":"## Objective"})),
+            ev("session.execution.succeeded", json!({"sessionID":s})),
+        ] {
+            all.extend(p.push(&e));
+        }
+        assert_eq!(all, [], "no phantom turn");
+        // A move is housekeeping too; a synthetic item is answered, so it is a turn (with no prompt
+        // of the user's).
+        p.push(&ev("session.inbox.enqueued", json!({"inboxID":"msg_y","sessionID":s,"item":{"type":"synthetic","payload":{"text":"Note from the harness: reply BLUE."},"delivery":"steer"}})));
+        assert_eq!(p.push(&ev("session.inbox.delivered", json!({"sessionID":s,"inboxID":"msg_y"}))), [AgentEvent::TurnStarted { turn: Some("msg_y".into()), prompt: None }]);
+        p.push(&ev("session.inbox.enqueued", json!({"inboxID":"msg_m","sessionID":s,"item":{"type":"move","payload":{},"delivery":"queue"}})));
+        assert_eq!(p.push(&ev("session.inbox.delivered", json!({"sessionID":s,"inboxID":"msg_m"}))), []);
+        assert_eq!(p.push(&ev("session.execution.succeeded", json!({"sessionID":s}))), [AgentEvent::TurnEnded { turn: Some("msg_y".into()), message: None }]);
+    }
+
+    #[test]
+    fn a_cancelled_prompt_is_forgotten() {
+        // 2.1.4: `DELETE /api/session/{id}/inbox/{inboxID}` on a queued prompt.
+        let s = "ses_1";
+        let mut p = EventParser::new(s);
+        p.push(&ev("session.inbox.enqueued", json!({"inboxID":"msg_q","sessionID":s,"item":{"type":"user","payload":{"text":"Then reply DONE."},"delivery":"queue"}})));
+        assert_eq!(p.push(&ev("session.inbox.cancelled", json!({"sessionID":s,"inboxID":"msg_q"}))), []);
+        assert!(p.prompts.is_empty() && p.kinds.is_empty());
+    }
+
+    #[test]
+    fn a_steered_prompt_that_finished_keeps_its_reply_when_a_later_one_is_interrupted() {
+        let s = "ses_1";
+        let mut p = EventParser::new(s);
+        let mut all = Vec::new();
+        for e in [
+            ev("session.inbox.enqueued", json!({"inboxID":"msg_1","sessionID":s,"item":{"type":"user","payload":{"text":"Write a story."},"delivery":"steer"}})),
+            ev("session.inbox.delivered", json!({"sessionID":s,"inboxID":"msg_1"})),
+            ev("session.step.started", json!({"sessionID":s,"assistantMessageID":"msg_a"})),
+            ev("session.text.ended", json!({"sessionID":s,"assistantMessageID":"msg_a","ordinal":0,"text":"Once upon a time."})),
+            ev("session.step.ended", json!({"sessionID":s,"assistantMessageID":"msg_a","finish":"stop","cost":0.0012,"tokens":{"input":130,"output":765,"reasoning":43,"cache":{"read":7680,"write":0}}})),
+            ev("session.inbox.enqueued", json!({"inboxID":"msg_2","sessionID":s,"item":{"type":"user","payload":{"text":"End it with FIN."},"delivery":"steer"}})),
+            ev("session.inbox.delivered", json!({"sessionID":s,"inboxID":"msg_2"})),
+            ev("session.step.started", json!({"sessionID":s,"assistantMessageID":"msg_b"})),
+            ev("session.step.ended", json!({"sessionID":s,"assistantMessageID":"msg_b","finish":"tool-calls","cost":0.0003,"tokens":{"input":820,"output":82,"reasoning":231,"cache":{"read":7808,"write":0}}})),
+            ev("session.step.started", json!({"sessionID":s,"assistantMessageID":"msg_c"})),
+            ev("session.execution.interrupted", json!({"sessionID":s})),
+        ] {
+            all.extend(p.push(&e));
+        }
+        assert_eq!(
+            all[2..],
+            [
+                AgentEvent::TurnEnded { turn: Some("msg_1".into()), message: Some("Once upon a time.".into()) },
+                AgentEvent::TurnInterrupted { turn: Some("msg_2".into()) },
+            ]
+        );
+        // Each turn's usage is its own steps' sum.
+        let usage = p.take_usage();
+        assert_eq!(usage.len(), 2);
+        assert_eq!(usage[0].0, "msg_1");
+        assert_eq!((usage[0].1.input, usage[0].1.cached, usage[0].1.output), (Some(130), Some(7680), Some(765)));
+        assert_eq!((usage[1].0.as_str(), usage[1].1.output, usage[1].1.reasoning), ("msg_2", Some(82), Some(231)));
+        assert!((usage[1].1.cost_usd.unwrap() - 0.0003).abs() < 1e-12);
+        assert!(p.take_usage().is_empty(), "taken once");
+    }
+
+    #[test]
+    fn a_finished_step_followed_by_another_is_not_finished() {
+        // A turn that stopped and then took another step (a retry) is open again.
+        let s = "ses_1";
+        let mut p = EventParser::new(s);
+        p.push(&ev("session.inbox.delivered", json!({"sessionID":s,"inboxID":"msg_1"})));
+        p.push(&ev("session.step.started", json!({"sessionID":s,"assistantMessageID":"msg_a"})));
+        p.push(&ev("session.step.ended", json!({"sessionID":s,"assistantMessageID":"msg_a","finish":"stop"})));
+        p.push(&ev("session.step.started", json!({"sessionID":s,"assistantMessageID":"msg_b"})));
+        assert_eq!(
+            p.push(&ev("session.execution.failed", json!({"sessionID":s,"error":{"message":"rate limited"}}))),
+            [AgentEvent::TurnFailed { turn: Some("msg_1".into()), error: "rate limited".into() }]
+        );
     }
 
     #[test]
