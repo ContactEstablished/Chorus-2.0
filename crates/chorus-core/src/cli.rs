@@ -53,6 +53,8 @@ pub fn fit(found: Option<Version>, verified: Option<Version>) -> VersionFit {
         (None, _) => VersionFit::Unreadable,
         (Some(_), None) => VersionFit::Verified,
         (Some(f), Some(v)) if f == v => VersionFit::Verified,
+        // A newer patch of the same major.minor is routine churn (Claude Code ships almost daily), not news.
+        (Some(f), Some(v)) if f > v && (f.major, f.minor) == (v.major, v.minor) => VersionFit::Verified,
         (Some(f), Some(v)) if f > v => VersionFit::Newer,
         _ => VersionFit::Older,
     }
@@ -110,6 +112,7 @@ mod tests {
         let checked = Some(v(0, 162, 1));
         assert_eq!(fit(Some(v(0, 162, 1)), checked), VersionFit::Verified);
         assert_eq!(fit(Some(v(0, 170, 0)), checked), VersionFit::Newer);
+        assert_eq!(fit(Some(v(0, 162, 9)), checked), VersionFit::Verified);
         assert_eq!(fit(Some(v(0, 9, 99)), checked), VersionFit::Older);
         assert_eq!(fit(None, checked), VersionFit::Unreadable);
         assert_eq!(v(1, 19, 3).to_string(), "1.19.3");

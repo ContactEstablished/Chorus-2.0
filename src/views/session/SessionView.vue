@@ -31,7 +31,7 @@ import { AGENT_LABELS } from '../../raw/labels'
 import { AGENT_CHIPS, ATTENTION, shortPath } from '../../shell/status'
 
 const props = defineProps<{ sessionId: number }>()
-const mode = ref<'friendly' | 'raw'>('raw')
+const mode = ref<'friendly' | 'raw'>('friendly')
 // The details panel's prompt list can scroll the Friendly conversation to a turn.
 const timeline = ref<InstanceType<typeof FriendlyTimeline> | null>(null)
 async function showTurn(turnId: number): Promise<void> {
