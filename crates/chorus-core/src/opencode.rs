@@ -24,6 +24,22 @@ pub const CONFIG_VAR: &str = "OPENCODE_CONFIG_CONTENT";
 /// Chorus can't drive an older one at all.
 pub const OLDEST_MAJOR: u32 = 2;
 
+/// npm 12 runs no install scripts unless told to, and `@opencode/cli` copies its real binary in one,
+/// so a plain `npm install -g` leaves a placeholder (LESSONS L67).
+pub const INSTALL: &str = "npm install -g --allow-scripts=@opencode/cli @opencode/cli";
+
+/// The placeholder npm leaves when the install script didn't run is a few hundred bytes; the real
+/// 2.1.4 binary is about 247 MB.
+const PLACEHOLDER_MAX_BYTES: u64 = 1024 * 1024;
+
+/// Why the program behind the shim is only npm's placeholder, from its size or its `--version`
+/// output; `None` when it looks real (LESSONS L67).
+pub fn unfinished_install(program_bytes: Option<u64>, version_output: Option<&str>) -> Option<String> {
+    let tiny = program_bytes.is_some_and(|n| n < PLACEHOLDER_MAX_BYTES);
+    let says_so = version_output.is_some_and(|o| o.to_ascii_lowercase().contains("postinstall script was not run"));
+    (tiny || says_so).then(|| format!("opencode's install didn't finish (its install script was blocked). Run {INSTALL}."))
+}
+
 /// Why the installed opencode can't be driven, naming the version Chorus checked (`verified`);
 /// `None` for 2.x and later, and for a version that couldn't be read, which is tried and reported
 /// (LESSONS L7).
@@ -32,7 +48,7 @@ pub fn too_old(found: Option<&str>, verified: Option<&str>) -> Option<String> {
     let version = crate::cli::parse_version(found)?;
     (version.major < OLDEST_MAJOR).then(|| {
         format!(
-            "opencode {found} is too old: Chorus drives opencode {OLDEST_MAJOR}.x (checked {}), whose server and terminal UI work differently. Update it with npm install -g @opencode/cli.",
+            "opencode {found} is too old: Chorus drives opencode {OLDEST_MAJOR}.x (checked {}), whose server and terminal UI work differently. Update it with {INSTALL}.",
             verified.unwrap_or("2.x")
         )
     })
@@ -852,13 +868,22 @@ mod tests {
         let refusal = too_old(Some("1.19.3"), Some("2.1.1")).unwrap();
         assert_eq!(
             refusal,
-            "opencode 1.19.3 is too old: Chorus drives opencode 2.x (checked 2.1.1), whose server and terminal UI work differently. Update it with npm install -g @opencode/cli."
+            "opencode 1.19.3 is too old: Chorus drives opencode 2.x (checked 2.1.1), whose server and terminal UI work differently. Update it with npm install -g --allow-scripts=@opencode/cli @opencode/cli."
         );
         assert_eq!(too_old(Some("2.1.1"), Some("2.1.1")), None);
         assert_eq!(too_old(Some("2.4.0"), Some("2.1.1")), None, "newer is tried and reported");
         assert_eq!(too_old(Some("3.0.0"), Some("2.1.1")), None);
         assert_eq!(too_old(None, Some("2.1.1")), None, "an unread version is tried");
         assert_eq!(too_old(Some("garbled"), Some("2.1.1")), None);
+    }
+
+    #[test]
+    fn npms_placeholder_is_named_with_the_command_that_finishes_it() {
+        let told = "opencode's install didn't finish (its install script was blocked). Run npm install -g --allow-scripts=@opencode/cli @opencode/cli.";
+        assert_eq!(unfinished_install(Some(229), None).as_deref(), Some(told));
+        assert_eq!(unfinished_install(None, Some("Error: opencode's postinstall script was not run.")).as_deref(), Some(told));
+        assert_eq!(unfinished_install(Some(246_919_560), Some("2.1.4")), None);
+        assert_eq!(unfinished_install(None, None), None);
     }
 
     #[test]

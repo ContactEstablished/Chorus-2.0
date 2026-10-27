@@ -517,3 +517,17 @@ trusted folder above the repository doesn't count, and an entry for the folder t
 worktrees does nothing. Answering the question in a worktree records the main working tree. Measured
 with fixtures under one trusted folder: a plain subfolder opened without asking; a repository there,
 and its worktree, both asked; once the repository was trusted, its worktrees didn't (D100).
+
+**L67 — npm 12 runs no install scripts unless told to, and `@opencode/cli` needs its one.** The
+package copies its real `opencode.exe` (about 247 MB for 2.1.4) from the platform package in a
+postinstall step, so a plain `npm install -g @opencode/cli` under npm 12.2.0 leaves a placeholder of
+a few hundred bytes that only prints "postinstall script was not run". `npm install -g
+--allow-scripts=@opencode/cli @opencode/cli` completes it. Chorus refuses the placeholder by its size
+or that message and gives the command.
+
+**L68 — npm's global folder isn't always on PATH.** npm installs global shims into its prefix,
+`%APPDATA%\npm` by default, but on this machine (Node from the official installer, npm 12.2.0) that
+folder was on neither the user nor the machine PATH, so `opencode.cmd` was installed and complete
+yet Chorus reported "opencode.cmd not found on PATH". Chorus now looks there after PATH, says so on
+the agent, and adds the folder to that agent's own PATH so its tools resolve the same way. A custom
+npm prefix (`npm config get prefix`) is not searched.

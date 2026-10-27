@@ -140,7 +140,7 @@ const agentChoices = computed<Choice<AgentKind>[]>(() =>
   AGENT_ORDER.map((k) => {
     const a = agents.byKind.get(k)
     const missing = a?.detection && !a.detection.found
-    return { value: k, label: a?.displayName ?? AGENT_LABELS[k], disabled: !!missing, title: missing ? (a?.detection?.problem ?? 'Not found') : undefined }
+    return { value: k, label: a?.displayName ?? AGENT_LABELS[k], disabled: !!missing, title: missing ? (a?.detection?.problem ?? 'Not found') : (a?.detection?.problem ?? undefined) }
   }),
 )
 watch(
@@ -158,7 +158,11 @@ const version = computed(() => {
   if (!d || agent.value === 'shell') return null
   if (!d.found) return { text: d.problem ?? 'not found', warn: true }
   const v = d.version ?? 'version unknown'
-  return d.fit === 'verified' ? { text: v, warn: false } : { text: `${v} · untested`, warn: true, title: `Options were checked against ${info.value?.verifiedVersion ?? '?'}` }
+  // A found agent's problem is a note, such as being found outside PATH.
+  const note = d.problem ?? undefined
+  return d.fit === 'verified'
+    ? { text: v, warn: !!note, title: note }
+    : { text: `${v} · untested`, warn: true, title: [`Options were checked against ${info.value?.verifiedVersion ?? '?'}`, note].filter(Boolean).join('. ') }
 })
 
 // A choice made for one agent may not exist for the next.
