@@ -344,6 +344,11 @@ pub struct EventParser {
     /// Tool call id → its tool and target, named before the call runs.
     tools: HashMap<String, (String, Option<String>)>,
     started: HashSet<String>,
+    /// Subagents' sessions (`session.created` with this session as `parentID`): their asks are the
+    /// user's to answer and their usage is this turn's (LESSONS L70).
+    children: HashSet<String>,
+    /// A form's fields, `(key, title)` in order, until it's answered.
+    forms: HashMap<String, Vec<(String, String)>>,
 }
 
 #[derive(Debug, Default)]
@@ -416,8 +421,27 @@ impl EventParser {
         let d = event.get("data").cloned().unwrap_or(Value::Null);
         let text = |o: &Value, k: &str| o.get(k).and_then(Value::as_str).map(str::to_owned);
         let session = text(&d, "sessionID").or_else(|| d.pointer("/form/sessionID").and_then(Value::as_str).map(str::to_owned));
-        if session.as_deref() != Some(self.session_id.as_str()) {
+        if kind == "session.created" && d.get("parentID").and_then(Value::as_str) == Some(self.session_id.as_str()) {
+            self.children.extend(session);
             return Vec::new();
+        }
+        let Some(session) = session else { return Vec::new() };
+        if session != self.session_id {
+            if !self.children.contains(&session) {
+                return Vec::new();
+            }
+            // A subagent's turns are inside this session's tool call: only its asks and its usage
+            // come through.
+            match kind {
+                "permission.asked" | "permission.replied" | "permission.rejected" | "form.created" | "form.replied" | "form.cancelled" => {}
+                "session.step.ended" => {
+                    if let (Some(usage), Some(turn)) = (TokenUsage::from_opencode_step(&d), self.turns.last_mut()) {
+                        turn.usage.add(&usage);
+                    }
+                    return Vec::new();
+                }
+                _ => return Vec::new(),
+            }
         }
         match kind {
             "session.inbox.enqueued" => {
@@ -526,23 +550,56 @@ impl EventParser {
             "permission.rejected" => vec![AgentEvent::ApprovalAnswered { ask: text(&d, "requestID").or_else(|| text(&d, "id")), allowed: false }],
             "form.created" => {
                 let form = d.get("form").cloned().unwrap_or(Value::Null);
-                let question = form
-                    .pointer("/fields/0/description")
-                    .or_else(|| form.pointer("/fields/0/title"))
-                    .or_else(|| form.get("title"))
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .to_owned();
-                vec![AgentEvent::QuestionAsked { turn: None, ask: text(&form, "id"), question }]
+                let fields: Vec<(String, String)> = form
+                    .get("fields")
+                    .and_then(Value::as_array)
+                    .map(|fs| {
+                        fs.iter()
+                            .filter(|f| f.get("hidden").and_then(Value::as_bool) != Some(true))
+                            .filter_map(|f| {
+                                let said = f.get("description").or_else(|| f.get("title")).and_then(Value::as_str)?;
+                                Some((text(f, "key")?, said.to_owned()))
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                // Several fields (2.1.4's question tool asks many at once) are listed in order.
+                let question = match fields.as_slice() {
+                    [] => text(&form, "title").unwrap_or_default(),
+                    [(_, one)] => one.clone(),
+                    many => many.iter().enumerate().map(|(i, (_, q))| format!("{}. {q}", i + 1)).collect::<Vec<_>>().join("\n"),
+                };
+                let ask = text(&form, "id");
+                if let Some(id) = &ask {
+                    self.forms.insert(id.clone(), fields);
+                }
+                vec![AgentEvent::QuestionAsked { turn: None, ask, question }]
             }
             "form.replied" => {
-                let answer = d.get("answer").and_then(Value::as_object).and_then(|a| a.values().next()).map(|v| match v {
+                let id = text(&d, "id");
+                let fields = id.as_ref().and_then(|i| self.forms.remove(i)).unwrap_or_default();
+                let value = |v: &Value| match v {
                     Value::String(s) => s.clone(),
+                    Value::Array(items) => items.iter().map(|i| i.as_str().map_or_else(|| i.to_string(), str::to_owned)).collect::<Vec<_>>().join(", "),
                     other => other.to_string(),
+                };
+                let answers = d.get("answer").and_then(Value::as_object);
+                let answer = answers.and_then(|a| match fields.as_slice() {
+                    [_, _, ..] => {
+                        let each: Vec<String> = fields.iter().filter_map(|(k, q)| a.get(k).map(|v| format!("{q} {}", value(v)))).collect();
+                        (!each.is_empty()).then(|| each.join("\n"))
+                    }
+                    _ => a.values().next().map(value),
                 });
-                vec![AgentEvent::QuestionAnswered { ask: text(&d, "id"), answer }]
+                vec![AgentEvent::QuestionAnswered { ask: id, answer }]
             }
-            "form.cancelled" => vec![AgentEvent::QuestionAnswered { ask: text(&d, "id"), answer: None }],
+            "form.cancelled" => {
+                let id = text(&d, "id");
+                if let Some(i) = &id {
+                    self.forms.remove(i);
+                }
+                vec![AgentEvent::QuestionAnswered { ask: id, answer: None }]
+            }
             "session.error" => vec![AgentEvent::TurnFailed {
                 turn: None,
                 error: d.pointer("/error/message").or_else(|| d.get("message")).and_then(Value::as_str).unwrap_or("the turn failed").to_owned(),
@@ -970,6 +1027,60 @@ mod tests {
             p.push(&ev("session.execution.failed", json!({"sessionID":s,"error":{"message":"rate limited"}}))),
             [AgentEvent::TurnFailed { turn: Some("msg_1".into()), error: "rate limited".into() }]
         );
+    }
+
+    #[test]
+    fn a_subagents_asks_and_usage_belong_to_the_parents_turn() {
+        // 2.1.4's `subagent` tool runs a child session (its own `sessionID`, `parentID` = ours).
+        let (s, c) = ("ses_p", "ses_c");
+        let mut p = EventParser::new(s);
+        p.push(&ev("session.inbox.delivered", json!({"sessionID":s,"inboxID":"msg_1"})));
+        p.push(&ev("session.step.started", json!({"sessionID":s,"assistantMessageID":"msg_a"})));
+        // Another session's ask is not ours until it is our child.
+        assert_eq!(p.push(&ev("permission.asked", json!({"id":"per_0","sessionID":c,"action":"shell","resources":["ls"]}))), []);
+        p.push(&ev("session.created", json!({"sessionID":c,"parentID":s,"agent":"general"})));
+        assert_eq!(
+            p.push(&ev("permission.asked", json!({"id":"per_1","sessionID":c,"action":"shell","resources":["echo hi"],"save":["echo *"]}))),
+            [AgentEvent::ApprovalAsked { turn: None, ask: Some("per_1".into()), tool: "shell".into(), target: Some("echo hi".into()) }]
+        );
+        assert_eq!(p.push(&ev("permission.replied", json!({"sessionID":c,"requestID":"per_1","reply":"always"}))), [AgentEvent::ApprovalAnswered { ask: Some("per_1".into()), allowed: true }]);
+        // The child's own turn is not a turn of ours.
+        assert_eq!(p.push(&ev("session.inbox.delivered", json!({"sessionID":c,"inboxID":"msg_child"}))), []);
+        p.push(&ev("session.step.ended", json!({"sessionID":c,"assistantMessageID":"msg_x","finish":"stop","cost":0.002,"tokens":{"input":1388,"output":3,"reasoning":0,"cache":{"read":5504,"write":0}}})));
+        assert_eq!(p.push(&ev("session.execution.succeeded", json!({"sessionID":c}))), []);
+        p.push(&ev("session.step.ended", json!({"sessionID":s,"assistantMessageID":"msg_a","finish":"stop","cost":0.001,"tokens":{"input":149,"output":100,"reasoning":40,"cache":{"read":7680,"write":0}}})));
+        assert_eq!(p.push(&ev("session.execution.succeeded", json!({"sessionID":s}))).len(), 1);
+        let usage = p.take_usage();
+        assert_eq!((usage[0].1.input, usage[0].1.output, usage[0].1.cached), (Some(1537), Some(103), Some(13184)));
+        assert!((usage[0].1.cost_usd.unwrap() - 0.003).abs() < 1e-12);
+    }
+
+    #[test]
+    fn a_form_with_several_fields_asks_and_answers_each() {
+        // 2.1.4's question tool, asked for three questions at once (trimmed).
+        let s = "ses_1";
+        let mut p = EventParser::new(s);
+        let form = json!({"form":{"id":"frm_1","sessionID":s,"title":"Questions","metadata":{"kind":"question"},"fields":[
+            {"key":"q0","title":"Favourite colour","description":"What's your favourite colour?","type":"string"},
+            {"key":"q1","title":"Favourite number","description":"What's your favourite number?","type":"string"},
+            {"key":"q2","title":"Favourite drink","description":"What's your favourite drink?","type":"multiselect","options":[{"value":"Tea","label":"Tea"}]}
+        ]}});
+        assert_eq!(
+            p.push(&ev("form.created", form)),
+            [AgentEvent::QuestionAsked {
+                turn: None,
+                ask: Some("frm_1".into()),
+                question: "1. What's your favourite colour?\n2. What's your favourite number?\n3. What's your favourite drink?".into()
+            }]
+        );
+        assert_eq!(
+            p.push(&ev("form.replied", json!({"id":"frm_1","sessionID":s,"answer":{"q0":"Blue","q1":"Seven","q2":["Tea","Coffee"]}}))),
+            [AgentEvent::QuestionAnswered {
+                ask: Some("frm_1".into()),
+                answer: Some("What's your favourite colour? Blue\nWhat's your favourite number? Seven\nWhat's your favourite drink? Tea, Coffee".into())
+            }]
+        );
+        assert!(p.forms.is_empty());
     }
 
     #[test]

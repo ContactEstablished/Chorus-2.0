@@ -28,6 +28,9 @@ const PROVIDERS_WAIT: Duration = Duration::from_secs(10);
 /// How long a dropped event stream waits before reconnecting, and how many times it tries.
 pub const RECONNECT_WAIT: Duration = Duration::from_secs(1);
 pub const RECONNECT_TRIES: u32 = 30;
+/// opencode sends a heartbeat every 15 s (oc2 review), so a stream silent for four of them has
+/// stalled without closing: it is dropped, and the watcher reconnects.
+const STREAM_READ_TIMEOUT: Duration = Duration::from_secs(60);
 /// An event stream that never completes an event is cut off here.
 const MAX_EVENT_BUFFER: usize = 4 * 1024 * 1024;
 
@@ -218,9 +221,15 @@ impl Api {
 
     /// The server's event stream (`GET /api/event`), open until the server ends.
     pub fn events(&self) -> Result<EventStream, String> {
-        // No overall timeout: the stream stays open for the whole run.
+        self.events_with(STREAM_READ_TIMEOUT)
+    }
+
+    fn events_with(&self, read_timeout: Duration) -> Result<EventStream, String> {
+        // No overall timeout: the stream stays open for the whole run. A read timeout catches a
+        // stream that stalls without closing.
         let client = reqwest::Client::builder()
             .connect_timeout(REQUEST_TIMEOUT)
+            .read_timeout(read_timeout)
             .no_proxy()
             .build()
             .map_err(|e| format!("making the HTTP client: {e}"))?;
@@ -260,5 +269,51 @@ impl EventStream {
                 return Some(events);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write as _;
+    use std::net::TcpListener;
+
+    /// A loopback server that answers one request with an event stream: `events`, then it either
+    /// closes or goes silent for `stall`.
+    fn fake_stream(events: &'static str, stall: Duration) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        std::thread::spawn(move || {
+            let (mut conn, _) = listener.accept().unwrap();
+            let mut buf = [0u8; 2048];
+            let _ = std::io::Read::read(&mut conn, &mut buf);
+            let _ = conn.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n");
+            let _ = conn.write_all(events.as_bytes());
+            let _ = conn.flush();
+            std::thread::sleep(stall);
+        });
+        url
+    }
+
+    fn api(url: String) -> Api {
+        Api { url, password: "p".into(), client: reqwest::Client::new() }
+    }
+
+    #[test]
+    fn a_closed_stream_ends_and_a_stalled_one_times_out() {
+        // The app makes its clients inside Tauri's runtime; so does the test.
+        let runtime = tauri::async_runtime::handle();
+        let tauri::async_runtime::RuntimeHandle::Tokio(handle) = &runtime;
+        let _inside = handle.enter();
+        let event = "data: {\"type\":\"server.heartbeat\",\"data\":{}}\n\n";
+        let mut closed = api(fake_stream(event, Duration::ZERO)).events().unwrap();
+        assert_eq!(closed.next().unwrap()[0]["type"], "server.heartbeat");
+        assert!(closed.next().is_none(), "a closed stream ends, so the watcher reconnects");
+
+        let mut stalled = api(fake_stream(event, Duration::from_secs(5))).events_with(Duration::from_millis(500)).unwrap();
+        assert_eq!(stalled.next().unwrap()[0]["type"], "server.heartbeat");
+        let started = std::time::Instant::now();
+        assert!(stalled.next().is_none());
+        assert!(started.elapsed() < Duration::from_secs(3), "the read timeout, not the server, ended it");
     }
 }

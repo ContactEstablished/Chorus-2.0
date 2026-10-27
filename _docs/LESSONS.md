@@ -548,3 +548,22 @@ against a scratch `opencode serve` (isolated `XDG_*` folders, `opencode/deepseek
   `session.inbox.cancelled` and nothing else.
 - The HTTP API drives all of this without the TUI: `POST /api/session/{id}/prompt` with
   `delivery: "steer" | "queue"`.
+
+**L70 — opencode 2.1.4's subagents, forms and "always" approvals.** Measured as in L69, with
+Chorus's Manual permission rules in `OPENCODE_CONFIG_CONTENT`:
+- The `subagent` tool runs a child session: `session.created` with `parentID` set to the parent's
+  id, then the child's own inbox, steps and execution under its own `sessionID`. The parent sees one
+  tool call (`subagent`, its `description` as the target) that succeeds with the child's reply. The
+  child's asks (`permission.asked`, `form.created`) carry the child's `sessionID`, so a parser that
+  filters on the parent's id misses them, and the child's `session.step.ended` usage is not in the
+  parent's steps.
+- The question tool asks several questions as one form: `fields` with keys `q0`, `q1`, …, each with a
+  `title` and `description` (string fields may carry `options`); `form.replied`'s `answer` maps each
+  key to its value, which can be a list for a multiselect.
+- `permission.asked` carries `save` (for example `["echo *"]`); answering `always`
+  (`permission.replied reply: "always"`) let the next matching call run without asking.
+- A provider given only in the configuration with no key is listed with `activation: "enabled"` and
+  no `integrationID`. No configuration field or API sets `activation: "disabled"`, so that case
+  could not be reproduced on 2.1.4.
+- An idle event stream sends a heartbeat every 15 s; Chorus drops a stream silent for 60 s and
+  reconnects, since a stalled connection that never closes would otherwise block it for good.
