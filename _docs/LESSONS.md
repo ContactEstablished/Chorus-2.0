@@ -567,3 +567,9 @@ Chorus's Manual permission rules in `OPENCODE_CONFIG_CONTENT`:
   could not be reproduced on 2.1.4.
 - An idle event stream sends a heartbeat every 15 s; Chorus drops a stream silent for 60 s and
   reconnects, since a stalled connection that never closes would otherwise block it for good.
+
+**L71 — reqwest 0.13's `read_timeout` needs a Tokio runtime when the client is built.** Building
+a client with it on a plain thread (opencode's event watcher) panics "there is no reactor running",
+and the thread dies silently: the session then reads "Chorus has no event from this agent". Enter
+Tauri's runtime (`tauri::async_runtime::handle()`, then `enter()`) before building it. A unit test
+that enters the runtime itself hides this, so test from a plain thread as the app runs it.

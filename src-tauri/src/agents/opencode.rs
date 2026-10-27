@@ -226,7 +226,11 @@ impl Api {
 
     fn events_with(&self, read_timeout: Duration) -> Result<EventStream, String> {
         // No overall timeout: the stream stays open for the whole run. A read timeout catches a
-        // stream that stalls without closing.
+        // stream that stalls without closing; its timer needs Tauri's runtime, and the watcher's
+        // thread isn't in it.
+        let runtime = tauri::async_runtime::handle();
+        let tauri::async_runtime::RuntimeHandle::Tokio(handle) = &runtime;
+        let _inside = handle.enter();
         let client = reqwest::Client::builder()
             .connect_timeout(REQUEST_TIMEOUT)
             .read_timeout(read_timeout)
@@ -301,10 +305,8 @@ mod tests {
 
     #[test]
     fn a_closed_stream_ends_and_a_stalled_one_times_out() {
-        // The app makes its clients inside Tauri's runtime; so does the test.
-        let runtime = tauri::async_runtime::handle();
-        let tauri::async_runtime::RuntimeHandle::Tokio(handle) = &runtime;
-        let _inside = handle.enter();
+        // Run on a plain thread, as the session's watcher does: the stream must not need a
+        // runtime around it (it once panicked "no reactor running" there).
         let event = "data: {\"type\":\"server.heartbeat\",\"data\":{}}\n\n";
         let mut closed = api(fake_stream(event, Duration::ZERO)).events().unwrap();
         assert_eq!(closed.next().unwrap()[0]["type"], "server.heartbeat");
