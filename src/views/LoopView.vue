@@ -22,6 +22,7 @@ import {
 import { useBotsStore } from '../stores/bots'
 import { useViewStore } from '../stores/view'
 import { useNoticesStore } from '../stores/notices'
+import { parseChecks } from './loopChecks'
 
 const bots = useBotsStore()
 const view = useViewStore()
@@ -48,6 +49,9 @@ interface Draft {
 const editing = ref<Draft | null>(null)
 const folder = ref<LoopFolder | null>(null)
 const error = ref<string | null>(null)
+/** Text pasted to fill in the checks, or null while that panel is closed. */
+const pasting = ref<string | null>(null)
+const pasted = computed(() => parseChecks(pasting.value ?? ''))
 
 let timer: ReturnType<typeof setInterval> | null = null
 let unlisten: (() => void) | null = null
@@ -98,6 +102,7 @@ function startNew(): void {
   const first = claudeBots.value[0]?.id ?? usableBots.value[0]?.id ?? 0
   error.value = null
   folder.value = null
+  pasting.value = null
   editing.value = {
     id: null,
     name: '',
@@ -120,6 +125,7 @@ function startNew(): void {
 function editRun(r: LoopRun): void {
   error.value = null
   folder.value = null
+  pasting.value = null
   editing.value = { id: r.id, name: r.name, folder: r.repoRoot, baseBranch: r.baseBranch, config: structuredClone(r.config) }
 }
 
@@ -140,6 +146,18 @@ function addCheck(): void {
 
 function removeCheck(i: number): void {
   editing.value?.config.checks.splice(i, 1)
+}
+
+/** The pasted checks replace the list; nothing is kept until the run is saved. */
+function usePasted(): void {
+  const d = editing.value
+  if (!d || !pasted.value.checks.length) return
+  d.config.checks = pasted.value.checks.map((c) => ({ ...c }))
+  pasting.value = null
+}
+
+function plural(n: number, one: string): string {
+  return `${n} ${one}${n === 1 ? '' : 's'}`
 }
 
 async function save(): Promise<void> {
@@ -321,7 +339,45 @@ async function answer(q: LoopQuestion): Promise<void> {
           <label class="secs"><input v-model.number="c.timeoutSecs" type="number" min="10" max="7200" /> s</label>
           <button type="button" class="quiet" :disabled="editing.config.checks.length <= 1" @click="removeCheck(i)">Remove</button>
         </div>
-        <button type="button" class="quiet add" @click="addCheck">Add a check</button>
+        <div class="check-actions">
+          <button type="button" class="quiet" @click="addCheck">Add a check</button>
+          <button type="button" class="quiet" :aria-expanded="pasting !== null" @click="pasting = pasting === null ? '' : null">Paste checks</button>
+        </div>
+        <div v-if="pasting !== null" class="paste">
+          <label>
+            Paste a table of checks, or one command per line
+            <textarea v-model="pasting" class="mono" rows="7" spellcheck="false" placeholder="| deps | `npm install` | 900 s |" />
+          </label>
+          <p class="hint">
+            A Markdown table works as it is, and so does one copied from a page or a terminal: the name, the command, then the time limit. A line with only a
+            command is named after it, with 600 s.
+          </p>
+          <ul v-if="pasted.checks.length" class="paste-preview">
+            <li v-for="(c, i) in pasted.checks" :key="i">
+              <span>{{ c.name }}</span>
+              <span class="mono">{{ c.command }}</span>
+              <span class="muted">{{ c.timeoutSecs }} s</span>
+            </li>
+          </ul>
+          <p v-for="(n, i) in pasted.notes" :key="`n${i}`" class="hint">{{ n }}</p>
+          <p v-for="(p, i) in pasted.problems" :key="`p${i}`" class="hint warn">{{ p }}</p>
+          <div class="actions">
+            <span class="hint">
+              {{
+                pasted.checks.length
+                  ? `They replace the ${plural(editing.config.checks.length, 'check')} above.`
+                  : pasting.trim()
+                    ? 'No checks found in that text.'
+                    : 'Nothing pasted yet.'
+              }}
+            </span>
+            <span class="grow" />
+            <button type="button" class="quiet" @click="pasting = null">Cancel</button>
+            <button type="button" class="primary" :disabled="!pasted.checks.length" @click="usePasted">
+              Use {{ pasted.checks.length === 1 ? 'this check' : pasted.checks.length ? `these ${plural(pasted.checks.length, 'check')}` : 'these checks' }}
+            </button>
+          </div>
+        </div>
       </fieldset>
 
       <label class="inline">
@@ -526,8 +582,40 @@ h1 {
 .check-row .secs input {
   width: 70px;
 }
-.add {
-  justify-self: start;
+.check-actions {
+  display: flex;
+  gap: 8px;
+}
+.paste {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--surface);
+}
+.paste textarea {
+  resize: vertical;
+  min-height: 120px;
+  font-size: 12.5px;
+}
+.paste-preview {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+  font-size: 12.5px;
+}
+.paste-preview li {
+  display: grid;
+  grid-template-columns: 140px 1fr 70px;
+  gap: 8px;
+}
+.paste-preview li > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .mono {
   font-family: var(--font-mono);

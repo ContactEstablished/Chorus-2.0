@@ -39,7 +39,9 @@ send it this prompt, edited for the run:
 >    machine, accounts or money (it goes out of the run, or becomes a decision now), and how risky
 >    each phase is.
 > 3. Write `.chorus/run/roadmap.md` and `.chorus/run/decisions.md` in the formats below, show them
->    to me, and change them until I say they're right.
+>    to me, and change them until I say they're right. Then give me the run's checks, in the order
+>    they should run, as one Markdown table (Name | Command | Timeout), for Paste checks in
+>    Loop → New run.
 > 4. Then create the branch `loop/p12-p14` from `main`, commit only those two files there, switch
 >    back to `main`, and don't push. Change nothing else.
 
@@ -103,6 +105,8 @@ Loop → New run:
   | secrets | `npm run grep:secrets` | 300 s |
 
   The worktree starts without `node_modules` or a Rust build, so the first round is slow.
+  **Paste checks** (beside Add a check) takes this table as it is, from here or from the kickoff
+  session's answer in Friendly or Raw, and shows what it read before it replaces the list.
 - **Milestones:** every phase (`1`), so each one waits for your review on the run branch.
 
 ## 4. What this run doesn't have yet
