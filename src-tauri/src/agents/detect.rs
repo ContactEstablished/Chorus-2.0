@@ -83,6 +83,7 @@ pub fn detect(kind: AgentKind, parent_env: &[(String, String)], scratch: &Path) 
         Err(e) => return Detection { found: false, program: None, version: None, fit: None, problem: Some(e) },
     };
     let program = Some(launch.program.display().to_string());
+    let note = launch.note.clone();
     if kind == AgentKind::Shell {
         return Detection { found: true, program, version: None, fit: None, problem: None };
     }
@@ -95,14 +96,21 @@ pub fn detect(kind: AgentKind, parent_env: &[(String, String)], scratch: &Path) 
             let fit = Some(fit(version, verified));
             let shown = version.map(|v| v.to_string());
             if kind == AgentKind::Opencode
-                && let Some(refusal) = chorus_core::opencode::too_old(shown.as_deref(), kind.spec().verified)
+                && let Some(refusal) = chorus_core::opencode::unfinished_install(None, Some(&out))
+                    .or_else(|| chorus_core::opencode::too_old(shown.as_deref(), kind.spec().verified))
             {
                 return Detection { found: false, program, version: shown, fit, problem: Some(refusal) };
             }
-            let problem = version.is_none().then(|| format!("couldn't read a version from {:?}", first_line(&out)));
+            let problem = version.is_none().then(|| format!("couldn't read a version from {:?}", first_line(&out))).or(note);
             Detection { found: true, program, version: shown, fit, problem }
         }
-        Err(e) => Detection { found: true, program, version: None, fit: Some(VersionFit::Unreadable), problem: Some(e) },
+        Err(e) => Detection {
+            found: true,
+            program,
+            version: None,
+            fit: Some(VersionFit::Unreadable),
+            problem: Some(note.map_or_else(|| e.clone(), |n| format!("{e}. {n}"))),
+        },
     }
 }
 

@@ -261,7 +261,7 @@ const CODEX: Spec = Spec {
 /// nothing like Claude's Auto.
 const OPENCODE: Spec = Spec {
     kind: AgentKind::Opencode,
-    verified: Some("2.1.1"),
+    verified: Some("2.1.4"),
     carrier: Carrier::ServerConfig,
     has_event_channel: true,
     efforts: &[

@@ -31,6 +31,7 @@ pub mod git_status;
 pub mod hooks;
 pub mod launch;
 pub mod lock;
+pub mod measure;
 pub mod migrate;
 pub mod names;
 pub mod opencode;

@@ -41,6 +41,7 @@ use chorus_core::cli::{VersionFit, fit, parse_version};
 use chorus_core::conpty::{CURSOR_REPORT, Handshake};
 use chorus_core::env::{ChildEnvInput, compose_child_env, valid_secret_var};
 use chorus_core::launch::{self as launch_rules, Preset, Role, Slot};
+use chorus_core::measure::ledger::UsageSource;
 use chorus_core::opencode::{self as oc, Observed};
 use chorus_core::projects::ProjectState;
 use chorus_core::providers::{self as prov, ProviderKind};
@@ -635,6 +636,12 @@ impl SessionManager {
     }
 
     /// A session's newest turns, oldest first, and how complete its records are.
+    /// A session's tokens and cost, as its agent reported them (D107).
+    pub fn usage(&self, id: u32) -> Result<crate::store::usage::SessionUsage, String> {
+        self.row(id)?;
+        crate::store::usage::for_session(&self.store, id)
+    }
+
     pub fn history(&self, id: u32, limit: u32) -> Result<history::SessionHistory, String> {
         self.row(id)?;
         let (total, ended, with_prompt) = history::turn_counts(&self.store, id)?;
@@ -1368,8 +1375,13 @@ impl SessionManager {
         });
         if let Some(model) = &options.model {
             match server.api.check_model(model, keyless) {
-                Ok(Some(check)) => notes.extend(oc::model_note(model, variant.as_deref(), &check)),
-                Ok(None) => notes.push("opencode's model list isn't in the shape Chorus checked, so the model wasn't checked.".into()),
+                Ok((check, skipped)) => {
+                    match check {
+                        Some(check) => notes.extend(oc::model_note(model, variant.as_deref(), &check)),
+                        None => notes.push("opencode's model list isn't in the shape Chorus checked, so the model wasn't checked.".into()),
+                    }
+                    notes.extend(skipped);
+                }
                 Err(e) => notes.push(format!("Chorus couldn't check the model with opencode: {e}")),
             }
         }
@@ -1476,6 +1488,13 @@ impl SessionManager {
             let before = recorder.activity();
             recorder.record(&self.store, "opencode", event, &events, crate::store::now_ms());
             changed |= before != recorder.activity();
+        }
+        // Each ended turn's tokens and cost, once the recorder has its row (D107).
+        for (turn, usage) in parser.take_usage() {
+            match crate::store::usage::set_for_agent_turn(&self.store, run.id, &turn, &usage, UsageSource::OpencodeServer) {
+                Ok(found) => changed |= found,
+                Err(e) => eprintln!("chorus: opencode usage for {turn}: {e}"),
+            }
         }
         if changed {
             self.notify_id(session_id);

@@ -112,6 +112,11 @@ mod tests {
         let t = parse_npm_shim(shim, "C:\\npm\\opencode.cmd").expect("recognised");
         assert_eq!(t.file, "C:\\npm\\node_modules\\opencode-ai\\bin\\opencode.exe");
         assert_eq!(t.kind, ShimKind::Executable);
+        // opencode 2.1.4's, from `@opencode/cli` under npm 12.2.0.
+        let shim = "@ECHO off\r\nGOTO start\r\n:find_dp0\r\nSET dp0=%~dp0\r\nEXIT /b\r\n:start\r\nSETLOCAL\r\nCALL :find_dp0\r\n\"%dp0%\\node_modules\\@opencode\\cli\\bin\\opencode.exe\"   %*\r\n";
+        let t = parse_npm_shim(shim, "C:\\npm\\opencode.cmd").expect("recognised");
+        assert_eq!(t.file, "C:\\npm\\node_modules\\@opencode\\cli\\bin\\opencode.exe");
+        assert_eq!(t.kind, ShimKind::Executable);
     }
 
     #[test]

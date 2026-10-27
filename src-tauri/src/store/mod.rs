@@ -19,6 +19,7 @@ pub mod routing;
 pub mod sessions;
 pub mod settings;
 pub mod tags;
+pub mod usage;
 pub mod worktrees;
 
 use std::path::Path;
@@ -53,6 +54,7 @@ const MIGRATION_FILES: &[(&str, &str)] = &[
     ("0022_claude_observed.sql", include_str!("../../migrations/0022_claude_observed.sql")),
     ("0023_p15_loop.sql", include_str!("../../migrations/0023_p15_loop.sql")),
     ("0024_relay_sessions.sql", include_str!("../../migrations/0024_relay_sessions.sql")),
+    ("0025_turn_usage.sql", include_str!("../../migrations/0025_turn_usage.sql")),
 ];
 
 pub struct Store {

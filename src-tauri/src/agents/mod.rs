@@ -25,12 +25,27 @@ pub struct Launch {
     pub args: Vec<String>,
     /// Imposed, non-secret values (auto-update switches, isolated state folders).
     pub additions: Vec<(&'static str, String)>,
+    /// Something worth saying about how it was found that doesn't stop a launch.
+    pub note: Option<String>,
+}
+
+impl Launch {
+    /// A shim found outside PATH: its folder joins the child's PATH, so the agent's own tools find
+    /// what the shim found, and the user is told.
+    fn found_in(mut self, outside: Option<PathBuf>, path: &str) -> Self {
+        if let Some(dir) = outside {
+            self.additions.push(("PATH", format!("{path};{}", dir.display())));
+            self.note = Some(format!("Found in npm's global folder ({}), which isn't on your PATH. Chorus adds it for this agent.", dir.display()));
+        }
+        self
+    }
 }
 
 /// Resolves `kind` against the parent's `PATH`. `scratch` is a per-session folder for agents whose
 /// state must be isolated (opencode, LESSONS L5).
 pub fn resolve(kind: AgentKind, parent_env: &[(String, String)], scratch: &Path) -> Result<Launch, String> {
     let path = env_value(parent_env, "PATH").unwrap_or_default();
+    let npm = npm_global_dirs(parent_env);
     match kind {
         AgentKind::Shell => {
             let root = env_value(parent_env, "SystemRoot").unwrap_or_else(|| "C:\\Windows".into());
@@ -39,12 +54,14 @@ pub fn resolve(kind: AgentKind, parent_env: &[(String, String)], scratch: &Path)
                 program: Path::new(&root).join("System32\\cmd.exe"),
                 args: vec!["/K".into(), "chcp 65001>nul".into()],
                 additions: vec![],
+                note: None,
             })
         }
         AgentKind::Claude => Ok(Launch {
             program: find_on_path(&path, "claude.exe").ok_or("claude.exe not found on PATH")?,
             args: vec![],
             additions: vec![("DISABLE_AUTOUPDATER", "1".into())],
+            note: None,
         }),
         AgentKind::Grok => Ok(Launch {
             program: find_on_path(&path, "grok.exe").ok_or("grok.exe not found on PATH")?,
@@ -52,22 +69,23 @@ pub fn resolve(kind: AgentKind, parent_env: &[(String, String)], scratch: &Path)
             // Grok from 1.0.5 to 1.0.62 (LESSONS L26).
             args: vec!["--no-auto-update".into()],
             additions: vec![("GROK_DISABLE_AUTOUPDATER", "1".into())],
+            note: None,
         }),
         AgentKind::Codex => {
-            let (program, mut args) = match find_on_path(&path, "codex.exe") {
-                Some(program) => (program, vec![]),
-                None => through_shim(&path, "codex.cmd")?,
+            let (program, mut args, outside) = match find_on_path(&path, "codex.exe") {
+                Some(program) => (program, vec![], None),
+                None => through_shim(&path, &npm, "codex.cmd")?,
             };
             // Codex has no environment switch for its update check (LESSONS L7).
             args.extend(["-c".into(), "check_for_update_on_startup=false".into()]);
-            Ok(Launch { program, args, additions: vec![] })
+            Ok(Launch { program, args, additions: vec![], note: None }.found_in(outside, &path))
         }
         AgentKind::Gemini => {
-            let (program, args) = through_shim(&path, "gemini.cmd")?;
+            let (program, args, outside) = through_shim(&path, &npm, "gemini.cmd")?;
             // Folder trust is checked at launch, once the session's actual folder is known.
             // 0.64.0 has no auto-update switch on the command line or in the environment; its
             // `general.enableAutoUpdate` is a setting in the user's own settings file.
-            Ok(Launch { program, args, additions: vec![] })
+            Ok(Launch { program, args, additions: vec![], note: None }.found_in(outside, &path))
         }
         AgentKind::Aider => Ok(Launch {
             // `uv` installs a launcher executable, not an npm shim (LESSONS: aider on Windows).
@@ -84,11 +102,15 @@ pub fn resolve(kind: AgentKind, parent_env: &[(String, String)], scratch: &Path)
                 "--restore-chat-history".into(),
             ],
             additions: vec![],
+            note: None,
         }),
         AgentKind::Opencode => {
             // The session runs `serve` and `--server` with these (ARCHITECTURE §5, `opencode`). Its
             // conversations live in the session's own data folder, which is how they resume.
-            let (program, args) = through_shim(&path, "opencode.cmd")?;
+            let (program, args, outside) = through_shim(&path, &npm, "opencode.cmd")?;
+            if let Some(unfinished) = chorus_core::opencode::unfinished_install(std::fs::metadata(&program).ok().map(|m| m.len()), None) {
+                return Err(unfinished);
+            }
             let state = opencode::state_home(scratch);
             let data = scratch.join("xdg-data");
             Ok(Launch {
@@ -99,24 +121,43 @@ pub fn resolve(kind: AgentKind, parent_env: &[(String, String)], scratch: &Path)
                     ("XDG_STATE_HOME", state.display().to_string()),
                     ("XDG_DATA_HOME", data.display().to_string()),
                 ],
-            })
+                note: None,
+            }
+            .found_in(outside, &path))
         }
     }
 }
 
-/// The program and leading arguments an npm shim really runs.
-fn through_shim(path: &str, shim_name: &str) -> Result<(PathBuf, Vec<String>), String> {
-    let shim = find_on_path(path, shim_name).ok_or_else(|| format!("{shim_name} not found on PATH"))?;
+/// npm's global folder, where `npm install -g` puts its shims: `%APPDATA%\npm` unless the user
+/// set another prefix. npm doesn't always put it on PATH (LESSONS L68).
+fn npm_global_dirs(parent_env: &[(String, String)]) -> Vec<PathBuf> {
+    env_value(parent_env, "APPDATA").map(|a| PathBuf::from(a).join("npm")).into_iter().collect()
+}
+
+/// The program and leading arguments an npm shim really runs, looked for on PATH and then in
+/// `fallback`; the last value is the folder it was found in when that isn't on PATH.
+fn through_shim(path: &str, fallback: &[PathBuf], shim_name: &str) -> Result<(PathBuf, Vec<String>, Option<PathBuf>), String> {
+    let (shim, outside) = match find_on_path(path, shim_name) {
+        Some(shim) => (shim, None),
+        None => fallback
+            .iter()
+            .map(|d| (d.join(shim_name), Some(d.clone())))
+            .find(|(f, _)| f.is_file())
+            .ok_or_else(|| match fallback.first() {
+                Some(dir) => format!("{shim_name} not found on PATH or in npm's global folder ({})", dir.display()),
+                None => format!("{shim_name} not found on PATH"),
+            })?,
+    };
     let text = std::fs::read_to_string(&shim).map_err(|e| format!("reading {}: {e}", shim.display()))?;
     let target = parse_npm_shim(&text, &shim.display().to_string())
         .ok_or_else(|| format!("{} is not an npm shim shape Chorus recognises", shim.display()))?;
     match target.kind {
-        ShimKind::Executable => Ok((PathBuf::from(target.file), vec![])),
+        ShimKind::Executable => Ok((PathBuf::from(target.file), vec![], outside)),
         ShimKind::NodeScript => {
             // npm's shim prefers a node.exe beside itself, then PATH; do the same.
             let beside = shim.parent().map(|d| d.join("node.exe")).filter(|p| p.is_file());
             let node = beside.or_else(|| find_on_path(path, "node.exe")).ok_or("node.exe not found on PATH")?;
-            Ok((node, vec![target.file]))
+            Ok((node, vec![target.file], outside))
         }
     }
 }
@@ -253,6 +294,53 @@ pub fn gemini_chat_state(id: &str, parent_env: &[(String, String)]) -> GeminiCha
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An `@opencode/cli` shim in `<appdata>\npm`, pointing at a target of `bytes` bytes.
+    fn npm_opencode(appdata: &Path, bytes: usize) -> PathBuf {
+        let npm = appdata.join("npm");
+        let bin = npm.join(r"node_modules\@opencode\cli\bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::write(bin.join("opencode.exe"), vec![0u8; bytes]).unwrap();
+        let shim = "@ECHO off\r\nGOTO start\r\n:find_dp0\r\nSET dp0=%~dp0\r\nEXIT /b\r\n:start\r\nSETLOCAL\r\nCALL :find_dp0\r\n\"%dp0%\\node_modules\\@opencode\\cli\\bin\\opencode.exe\"   %*\r\n";
+        std::fs::write(npm.join("opencode.cmd"), shim).unwrap();
+        npm
+    }
+
+    #[test]
+    fn an_npm_shim_off_path_is_found_in_npms_global_folder_and_said_so() {
+        let dir = std::env::temp_dir().join(format!("chorus-npm-global-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let npm = npm_opencode(&dir, 2 * 1024 * 1024);
+        let env = vec![("PATH".into(), r"C:\Windows".into()), ("APPDATA".into(), dir.display().to_string())];
+        let launch = resolve(AgentKind::Opencode, &env, &dir.join("scratch")).unwrap();
+        assert!(launch.program.ends_with(r"@opencode\cli\bin\opencode.exe"), "{:?}", launch.program);
+        let path = launch.additions.iter().find(|(k, _)| *k == "PATH").map(|(_, v)| v.clone());
+        assert_eq!(path, Some(format!(r"C:\Windows;{}", npm.display())), "the agent's own tools see the folder too");
+        assert!(launch.note.unwrap().contains("isn't on your PATH"));
+
+        // On PATH, nothing is added or said.
+        let on_path = vec![("PATH".into(), npm.display().to_string()), ("APPDATA".into(), dir.display().to_string())];
+        let launch = resolve(AgentKind::Opencode, &on_path, &dir.join("scratch")).unwrap();
+        assert!(launch.additions.iter().all(|(k, _)| *k != "PATH"));
+        assert_eq!(launch.note, None);
+
+        // Neither: the error names both places.
+        let nowhere = vec![("PATH".into(), r"C:\Windows".into()), ("APPDATA".into(), dir.join("other").display().to_string())];
+        let e = resolve(AgentKind::Opencode, &nowhere, &dir).unwrap_err();
+        assert!(e.starts_with("opencode.cmd not found on PATH or in npm's global folder"), "{e}");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn npms_placeholder_opencode_is_refused_with_the_command_that_finishes_it() {
+        let dir = std::env::temp_dir().join(format!("chorus-npm-placeholder-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        npm_opencode(&dir, 229);
+        let env = vec![("PATH".into(), String::new()), ("APPDATA".into(), dir.display().to_string())];
+        let e = resolve(AgentKind::Opencode, &env, &dir.join("scratch")).unwrap_err();
+        assert!(e.contains("--allow-scripts=@opencode/cli"), "{e}");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn codex_native_install_resolves_without_an_npm_shim() {

@@ -204,6 +204,13 @@ pub fn session_set_description(state: Manager<'_>, session_id: u32, description:
     state.set_description(session_id, description.as_deref())
 }
 
+/// A session's tokens and cost over its turns, and its newest turn's (D107).
+#[tauri::command]
+#[specta::specta]
+pub fn session_usage(state: Manager<'_>, session_id: u32) -> Result<crate::store::usage::SessionUsage, String> {
+    state.usage(session_id)
+}
+
 /// A session's newest turns with their prompts, final messages, tool calls and asks.
 #[tauri::command]
 #[specta::specta]

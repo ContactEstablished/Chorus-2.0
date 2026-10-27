@@ -517,3 +517,68 @@ trusted folder above the repository doesn't count, and an entry for the folder t
 worktrees does nothing. Answering the question in a worktree records the main working tree. Measured
 with fixtures under one trusted folder: a plain subfolder opened without asking; a repository there,
 and its worktree, both asked; once the repository was trusted, its worktrees didn't (D100).
+
+**L67 — npm 12 runs no install scripts unless told to, and `@opencode/cli` needs its one.** The
+package copies its real `opencode.exe` (about 247 MB for 2.1.4) from the platform package in a
+postinstall step, so a plain `npm install -g @opencode/cli` under npm 12.2.0 leaves a placeholder of
+a few hundred bytes that only prints "postinstall script was not run". `npm install -g
+--allow-scripts=@opencode/cli @opencode/cli` completes it. Chorus refuses the placeholder by its size
+or that message and gives the command.
+
+**L68 — npm's global folder isn't always on PATH.** npm installs global shims into its prefix,
+`%APPDATA%\npm` by default, but on this machine (Node from the official installer, npm 12.2.0) that
+folder was on neither the user nor the machine PATH, so `opencode.cmd` was installed and complete
+yet Chorus reported "opencode.cmd not found on PATH". Chorus now looks there after PATH, says so on
+the agent, and adds the folder to that agent's own PATH so its tools resolve the same way. A custom
+npm prefix (`npm config get prefix`) is not searched.
+
+**L69 — opencode 2.1.4 reports usage per step, and its inbox carries more than prompts.** Measured
+against a scratch `opencode serve` (isolated `XDG_*` folders, `opencode/deepseek-v4.1-flash-free`):
+- `session.step.ended` carries `finish` (`stop`, `tool-calls`), `cost` in dollars (0 for free
+  models) and `tokens {input, output, reasoning, cache {read, write}}`; `input` excludes cached
+  tokens. `session.usage.updated` carries the session's running total, compactions included.
+  `session.message.updated` (1.x's usage event) no longer exists.
+- Inbox items are `user`, `synthetic`, `compaction` or `move` (`Session.Inbox.Info`). A compaction
+  (`POST /api/session/{id}/compact`, or opencode's own) runs as an execution of its own:
+  `inbox.delivered`, `compaction.started`/`delta`/`ended`, `usage.updated`, `execution.succeeded`,
+  with no step. A synthetic item (`POST /api/session/{id}/synthetic`) is answered like a prompt.
+- A steered prompt is delivered only after the running step ends; that step's `finish: "stop"`
+  means the earlier prompt's work is done.
+- Cancelling a queued prompt (`DELETE /api/session/{id}/inbox/{inboxID}`) emits
+  `session.inbox.cancelled` and nothing else.
+- The HTTP API drives all of this without the TUI: `POST /api/session/{id}/prompt` with
+  `delivery: "steer" | "queue"`.
+
+**L70 — opencode 2.1.4's subagents, forms and "always" approvals.** Measured as in L69, with
+Chorus's Manual permission rules in `OPENCODE_CONFIG_CONTENT`:
+- The `subagent` tool runs a child session: `session.created` with `parentID` set to the parent's
+  id, then the child's own inbox, steps and execution under its own `sessionID`. The parent sees one
+  tool call (`subagent`, its `description` as the target) that succeeds with the child's reply. The
+  child's asks (`permission.asked`, `form.created`) carry the child's `sessionID`, so a parser that
+  filters on the parent's id misses them, and the child's `session.step.ended` usage is not in the
+  parent's steps.
+- The question tool asks several questions as one form: `fields` with keys `q0`, `q1`, …, each with a
+  `title` and `description` (string fields may carry `options`); `form.replied`'s `answer` maps each
+  key to its value, which can be a list for a multiselect.
+- `permission.asked` carries `save` (for example `["echo *"]`); answering `always`
+  (`permission.replied reply: "always"`) let the next matching call run without asking.
+- A provider given only in the configuration with no key is listed with `activation: "enabled"` and
+  no `integrationID`. No configuration field or API sets `activation: "disabled"`, so that case
+  could not be reproduced on 2.1.4.
+- An idle event stream sends a heartbeat every 15 s; Chorus drops a stream silent for 60 s and
+  reconnects, since a stalled connection that never closes would otherwise block it for good.
+
+**L71 — reqwest 0.13's `read_timeout` needs a Tokio runtime when the client is built.** Building
+a client with it on a plain thread (opencode's event watcher) panics "there is no reactor running",
+and the thread dies silently: the session then reads "Chorus has no event from this agent". Enter
+Tauri's runtime (`tauri::async_runtime::handle()`, then `enter()`) before building it. A unit test
+that enters the runtime itself hides this, so test from a plain thread as the app runs it.
+
+**L72 — opencode's `cost` is its own estimate, and it is 0 for OpenRouter's `:nitro` ids.**
+`session.step.ended`'s `cost` comes from opencode's model catalog prices, not from what the
+provider billed. Measured 2026-10-26 on 2.1.4, `deepseek/deepseek-v4.1-flash` through OpenRouter,
+one short turn per tier, against each run's capped key read back after revoke: Balanced $0.0011 vs
+$0.0010 billed, Budget $0.000043 vs $0.000026, Fast $0.0011 vs $0.0024, and Nitro
+(`…-flash:nitro`, not in opencode's catalog) **$0** vs $0.0024. Chorus labels the figure "opencode's
+estimate", leaves a turn with a `:nitro` step without a cost, and keeps the run key's figure as
+what OpenRouter billed.

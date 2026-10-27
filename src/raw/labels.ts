@@ -1,4 +1,4 @@
-import type { Activity, AgentInfo, AgentKind, Effort, Permission, ProviderKind, SessionSummary, VersionFit } from '../ipc'
+import type { Activity, AgentInfo, AgentKind, Effort, Permission, ProviderKind, SessionSummary, TokenUsage, VersionFit } from '../ipc'
 
 export const AGENT_LABELS: Record<AgentKind, string> = {
   shell: 'Shell',
@@ -93,4 +93,25 @@ export function observedText(s: SessionSummary): string | null {
   if (!o) return null
   const effort = s.agent === 'claude' ? (o.variant ? `${o.variant} effort` : null) : (o.variant ?? 'default effort')
   return [o.model, effort, o.agent ? `${o.agent} agent` : null].filter(Boolean).join(' · ')
+}
+
+/** A token count, short: 980, 41.2k, 1.3M. */
+export function tokenCount(n: number): string {
+  if (n < 1000) return String(n)
+  if (n < 1_000_000) return `${(n / 1000).toFixed(1)}k`
+  return `${(n / 1_000_000).toFixed(1)}M`
+}
+
+/** "41.2k in (38.0k cached) · 2.1k out · 231 reasoning", or null when nothing is known (D107). */
+export function usageText(u: TokenUsage | null | undefined): string | null {
+  if (!u) return null
+  const parts: string[] = []
+  if (u.input !== null || u.cached !== null) {
+    // opencode's input excludes what was read from the cache (LESSONS L69).
+    const all = (u.input ?? 0) + (u.cached ?? 0)
+    parts.push(`${tokenCount(all)} in${u.cached ? ` (${tokenCount(u.cached)} cached)` : ''}`)
+  }
+  if (u.output !== null) parts.push(`${tokenCount(u.output)} out`)
+  if (u.reasoning) parts.push(`${tokenCount(u.reasoning)} reasoning`)
+  return parts.length ? parts.join(' · ') : null
 }
