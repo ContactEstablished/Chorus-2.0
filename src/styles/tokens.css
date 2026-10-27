@@ -7,6 +7,7 @@
   --bg-sidebar: #0d131c;
   --surface: #111925;
   --surface-raised: #151e2c;
+  --surface-raised-alt: #1a2434;
   --surface-chip: #182231;
   --border: #1d2a3a;
   --border-strong: #2a3a50;
@@ -70,6 +71,7 @@
   --bg-sidebar: #171a20;
   --surface: #22262e;
   --surface-raised: #262b34;
+  --surface-raised-alt: #2b313b;
   --surface-chip: #2a2f39;
   --border: rgb(255 255 255 / 0.06);
   --border-strong: rgb(255 255 255 / 0.12);

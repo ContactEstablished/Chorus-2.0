@@ -38,6 +38,7 @@ export type {
   LeakReport,
   Observed,
   Permission,
+  PlanStep,
   PermissionChoice,
   Prefs,
   Preset,

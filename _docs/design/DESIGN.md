@@ -36,14 +36,39 @@ with middle elision, keeping the final folder where it fits; hover shows the ful
 repeated agent name after the path. The selected Friendly/Raw option uses the same theme accent
 as the Agent message label, with a subtle accent background and border.
 
-**Friendly composer:** a labelled multiline field saves a draft per session. Enter adds a line;
-only Send or Queue submits it. Send targets the reviewed live run; Queue waits for the next
-confirmed pause. Show saved/saving/error feedback and explain disabled actions. The FIFO list
-shows each instruction, cancellation, and review/resume controls for held items. Recent receipts
-distinguish written-to-terminal, agent-confirmed and uncertain delivery. After restart, drafts
-remain drafts and unsent instructions are held for review. If startup readiness is unknown or Raw
-was edited, offer an explicit empty-and-ready confirmation for manual sending. Never use that
-confirmation to answer an approval or bypass a busy agent.
+**Friendly conversation (D105):** the session reads as a message thread, not a list of equal cards.
+The thread scrolls on its own above a **dock** that holds, in order, any open approval or question
+card, the glance bar and the composer, so the field is always in reach however far back you read.
+Each exchange is one turn: a centred divider (time, duration, Done / Failed / Interrupted, a pulsing
+dot while open); **what you sent** on the right, in the accent, folded past ten lines with "Show the
+full prompt" and badged when it came from the phone, an automation or the loop; **what the agent did**
+on a thin rail beneath it (its notes in order, the latest plan, question and approval records, the
+tool-call list), open while the turn runs and folded to "What it did · 4 notes · 7 tool calls" once
+it has replied; and **its reply** on the left beside the agent's logo, the widest and strongest card.
+Every second reply sits on `--surface-raised-alt`, a shade lighter than `--surface-raised`, so the
+eye catches where one exchange ends and the next begins.
+A prompt a harness injected (a `<task-notification>`, a `<system-reminder>`) shows as one quiet
+centred line with its raw text behind a click, never as your words. Copy and Source appear when a card
+is pointed at or focused. Scrolling up stops the view following new content and shows a **Latest**
+button that counts what arrived meanwhile ("3 new"); "Show earlier turns" at the top reads another
+hundred, keeping your place, up to the back end's five hundred. The details panel's prompt list has a
+**Show** link that scrolls the thread to that turn and flashes it.
+
+**Glance bar:** one line above the composer, "Now · <where the agent is>", with suggestion chips
+("+ Review", "+ Continue") that put the step in the draft, or the blocker when the agent waits on you.
+It opens into the full At a glance panel (Now / Blocker / Up next, the last summary, suggestions with
+Done and Dismiss, narrator cost and the project switch).
+
+**Friendly composer:** one field that grows with its text (two lines to about ten), its controls on
+a single row beneath: Attach images, the draft status, Queue and Send. The placeholder says what a
+message does in the session's current state (below). Enter adds a line; Send, Queue or Ctrl+Enter
+submits it, never anything else. Send targets the reviewed live run; Queue waits for the next
+confirmed pause. Disabled actions explain themselves in their tooltip and a line beneath. The queue
+and recent receipts fold beneath the field: each instruction with cancellation and review/resume
+controls for held items, and receipts that distinguish written-to-terminal, agent-confirmed and
+uncertain delivery. After restart, drafts remain drafts and unsent instructions are held for review.
+Manual Send remains the readiness override (D80); never use it to answer an approval or bypass a busy
+agent.
 
 ## Status vocabulary
 
@@ -76,7 +101,8 @@ next pause…", done "Ask a follow-up in the same context…", failed "Tell the 
 | `--bg-sidebar` | `#0d131c` | | `--text-2` | `#b4c0d0` |
 | `--surface` | `#111925` | | `--text-muted` | `#7d8ba0` |
 | `--surface-raised` | `#151e2c` | | `--accent` | `#1ec8f0` |
-| `--surface-chip` | `#182231` | | `--accent-hover` | `#4dd6f5` |
+| `--surface-raised-alt` | `#1a2434` | | `--accent-hover` | `#4dd6f5` |
+| `--surface-chip` | `#182231` | | | |
 | `--border` | `#1d2a3a` | | `--on-accent` | `#03202a` |
 | `--border-strong` | `#2a3a50` | | `--accent-soft` / `--accent-line` | accent at 12% / 35% |
 | `--status-needs` | `#ffc400` | | `--status-working` | `#4d7cff` |
@@ -93,7 +119,8 @@ next pause…", done "Ask a follow-up in the same context…", failed "Tell the 
 | `--bg` | `#1b1e25` | | `--text` | `#e9ebf1` |
 | `--bg-sidebar` | `#171a20` | | `--text-2` | `#a3aabb` (body text `#c3c8d4`) |
 | `--surface` | `#22262e` | | `--text-muted` | `#6f7789` (dim `#5a6273`) |
-| `--surface-chip` | `#2a2f39` | | `--accent` | `#4f8cff` |
+| `--surface-raised-alt` | `#2b313b` | | `--accent` | `#4f8cff` |
+| `--surface-chip` | `#2a2f39` | | | |
 | `--border` | `rgba(255,255,255,.06)` | | `--accent-hover` | `#8db5ff` |
 | `--status-working` | `#5ccfdc` | | `--status-needs` (question) | `#e9b85b` |
 | `--status-approval` | `#f09a86` | | `--status-ready` | `#86d4a4` |

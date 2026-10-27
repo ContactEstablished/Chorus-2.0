@@ -1,4 +1,8 @@
 <script setup lang="ts">
+/**
+ * The docked composer: one field with its controls on a single row, the queue and receipts folded
+ * beneath it. Drafts, the queue and delivery go through the composer store unchanged (D78, D80).
+ */
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useComposerStore } from '../../stores/composer'
 import { useSessionsStore } from '../../stores/sessions'
@@ -36,6 +40,22 @@ const sendBlocker = computed(() => {
     ? 'Send is unavailable right now. Queue this instruction for a later pause.' : reason
 })
 const labels: Record<string, string> = { queued: 'Queued', held: 'Held for review', cancelled: 'Cancelled', written: 'Delivered · awaiting confirmation', uncertain: 'Delivery uncertain · check Raw', observed: 'Confirmed by agent' }
+// The placeholder says what a message does in the session's current state (DESIGN.md).
+const PLACEHOLDER: Record<string, string> = {
+  'awaiting-approval': 'Or reply to the request in your own words…',
+  'needs-answer': 'Type your answer, or ask a follow-up…',
+  ready: 'Write your own instruction…',
+  working: 'Queue an instruction for the next pause…',
+  failed: 'Tell the agent how to recover…',
+}
+const placeholder = computed(() => {
+  const s = session.value
+  if (!s) return 'Write an instruction…'
+  if (!s.live) return 'Ask a follow-up in the same context…'
+  return PLACEHOLDER[s.activity] ?? 'Write an instruction…'
+})
+const draftStatus = computed(() => entry.value.saving ? 'Saving…' : entry.value.text !== entry.value.saved ? 'Not saved yet' : !entry.value.loaded ? 'Loading draft…' : entry.value.text ? 'Draft saved' : '')
+const sendDisabled = computed(() => !valid.value || (!entry.value.pending && !canSend.value))
 let timer: ReturnType<typeof setTimeout> | undefined
 let disposed = false
 let generation = 0
@@ -48,6 +68,12 @@ async function poll() {
 watch(() => props.sessionId, () => { void poll() }, { immediate: true })
 onBeforeUnmount(() => { disposed = true; generation++; clearTimeout(timer) })
 async function send(queue: boolean) { await store.submit(props.sessionId, queue, !queue) }
+/** Ctrl+Enter is the one keyboard submit; Enter alone adds a line (D23: nothing sends itself). */
+function keydown(event: KeyboardEvent) {
+  if (event.key !== 'Enter' || !(event.ctrlKey || event.metaKey) || event.shiftKey || event.altKey) return
+  event.preventDefault()
+  if (!restartable.value && !sendDisabled.value) void send(false)
+}
 async function attach(files: File[]) {
   if (imagesDisabled.value) return
   const id = props.sessionId
@@ -79,32 +105,31 @@ async function removeImage(id: number) {
 
 <template>
   <section class="composer" aria-label="Friendly prompt composer" tabindex="-1" @paste="paste">
-    <div class="heading"><h2>Message the agent</h2><span role="status">{{ entry.saving ? 'Saving draft…' : entry.text !== entry.saved ? 'Draft not saved' : entry.loaded ? 'Draft saved' : 'Loading draft…' }}</span></div>
     <label :for="`friendly-prompt-${sessionId}`" class="sr-only">Your instruction</label>
-    <textarea :id="`friendly-prompt-${sessionId}`" :value="entry.text" :disabled="!entry.loaded || entry.busy || !!entry.pending" rows="4" placeholder="Write an instruction…" @input="store.edit(sessionId, ($event.target as HTMLTextAreaElement).value)" />
-    <ImageAttachments :session-id="sessionId" :images="entry.images" removable :disabled="imagesDisabled" @remove="removeImage" />
-    <div class="image-controls">
-      <input ref="fileInput" type="file" accept="image/png,image/jpeg,image/webp" multiple hidden aria-label="Choose images" @change="attach(Array.from(($event.target as HTMLInputElement).files ?? []))">
-      <button class="quiet" :disabled="imagesDisabled" @click="fileInput?.click()">{{ uploading ? 'Attaching…' : 'Attach images' }}</button>
-      <span v-if="imageLimitWarning" class="error" role="status">Limit: 8 images or 20 MB total.</span>
-      <span v-if="state?.imageReason" class="hint">{{ state.imageReason }}</span>
+    <div class="field">
+      <textarea :id="`friendly-prompt-${sessionId}`" :value="entry.text" :disabled="!entry.loaded || entry.busy || !!entry.pending" rows="2" :placeholder="placeholder" @input="store.edit(sessionId, ($event.target as HTMLTextAreaElement).value)" @keydown="keydown" />
+      <ImageAttachments :session-id="sessionId" :images="entry.images" removable :disabled="imagesDisabled" @remove="removeImage" />
+      <div class="bar">
+        <input ref="fileInput" type="file" accept="image/png,image/jpeg,image/webp" multiple hidden aria-label="Choose images" @change="attach(Array.from(($event.target as HTMLInputElement).files ?? []))">
+        <button class="quiet tool" :disabled="imagesDisabled" :title="state?.imageReason || 'Attach PNG, JPEG or WebP images, or paste one'" @click="fileInput?.click()">{{ uploading ? 'Attaching…' : 'Attach images' }}</button>
+        <span v-if="imageLimitWarning" class="error" role="status">Limit: 8 images or 20 MB total.</span>
+        <span class="status" role="status">{{ draftStatus }}</span>
+        <span class="spacer" />
+        <button class="tool" :disabled="!valid || !!entry.pending || !state || !!state.queueReason" :title="state?.queueReason || 'Run it at the next confirmed pause'" @click="send(true)">Queue</button>
+        <button v-if="restartable" class="primary tool" :disabled="!valid || entry.images.length > 0" @click="store.restartSend(sessionId)">{{ entry.busy ? 'Restarting…' : 'Restart and send' }}</button>
+        <button v-else class="primary tool" :disabled="sendDisabled" :title="sendBlocker || 'Send now (Ctrl+Enter)'" @click="send(false)">{{ entry.pending ? 'Retry same request' : 'Send' }}</button>
+        <button v-if="entry.error && !entry.pending" class="quiet tool" :disabled="entry.saving || entry.busy" @click="store.reloadDraft(sessionId)">Reload saved draft</button>
+      </div>
     </div>
     <p v-if="uploadError" class="error" role="alert">{{ uploadError }}</p>
     <p v-if="bytes > 16384" class="error">This draft exceeds the 16 KiB limit.</p>
     <p v-if="entry.error" class="error" role="alert">{{ entry.error }}</p>
-    <p v-if="sendBlocker" class="hint">{{ sendBlocker }} <button class="quiet" @click="emit('raw')">Open Raw</button></p>
-    <div class="buttons">
-      <button v-if="restartable" class="primary" :disabled="!valid || entry.images.length > 0" @click="store.restartSend(sessionId)">{{ entry.busy ? 'Restarting…' : 'Restart and send' }}</button>
-      <button v-else class="primary" :disabled="!valid || (!entry.pending && !canSend)" @click="send(false)">{{ entry.pending ? 'Retry same request' : 'Send' }}</button>
-      <button :disabled="!valid || !!entry.pending || !state || !!state.queueReason" @click="send(true)">Queue</button>
-      <button v-if="entry.error && !entry.pending" class="quiet" :disabled="entry.saving || entry.busy" @click="store.reloadDraft(sessionId)">Reload saved draft</button>
-    </div>
+    <p v-if="sendBlocker" class="hint">{{ sendBlocker }} <button class="quiet link" @click="emit('raw')">Open Raw</button></p>
     <p v-if="restartable && entry.images.length" class="hint">Images can't go with Restart and send. Restart the session, then Send.</p>
     <p v-else-if="restartable" class="hint">The session is stopped. Restart and send restarts it in the same conversation, with this as its next message.</p>
-    <p v-else-if="state?.queueReason" class="hint">{{ state.queueReason }}</p>
-    <div v-if="waiting.length" class="queue">
-      <h3>Instruction queue <span>{{ waiting.length }} / 32</span></h3>
-      <p class="hint">Runs in order at a confirmed pause. Questions and approvals pause the queue. After a restart, review held instructions before resuming.</p>
+    <p v-else-if="state?.queueReason && state.queueReason !== sendBlocker" class="hint">{{ state.queueReason }}</p>
+    <details v-if="waiting.length" class="fold queue" open>
+      <summary>Queue <span class="n">{{ waiting.length }} / 32</span><span class="sum">runs in order at a confirmed pause</span></summary>
       <p v-if="state?.dispatchReason" class="hint" role="status">{{ state.dispatchReason }}</p>
       <ol>
         <li v-for="(item, index) in waiting" :key="item.id">
@@ -112,14 +137,15 @@ async function removeImage(id: number) {
           <QueuedImages :session-id="sessionId" :images="item.images" />
           <p v-if="item.reason" class="hint">{{ item.reason }}</p>
           <div class="buttons">
-            <button v-if="index === 0" :disabled="entry.busy || !canSendNext" @click="store.change(sessionId, item.id, 'send', true)">Send next now</button>
-            <button v-if="item.status === 'held'" :disabled="entry.busy || !state?.runId || !!state?.queueReason" @click="store.change(sessionId, item.id, 'resume')">Resume in current run</button>
-            <button class="quiet" :disabled="entry.busy" @click="store.change(sessionId, item.id, 'cancel')">Cancel</button>
+            <button v-if="index === 0" class="tool" :disabled="entry.busy || !canSendNext" @click="store.change(sessionId, item.id, 'send', true)">Send next now</button>
+            <button v-if="item.status === 'held'" class="tool" :disabled="entry.busy || !state?.runId || !!state?.queueReason" @click="store.change(sessionId, item.id, 'resume')">Resume in current run</button>
+            <button class="quiet tool" :disabled="entry.busy" @click="store.change(sessionId, item.id, 'cancel')">Cancel</button>
           </div>
         </li>
       </ol>
-    </div>
-    <details v-if="recent.length" class="receipts">
+      <p class="hint">Questions and approvals pause the queue. After a restart, review held instructions before resuming.</p>
+    </details>
+    <details v-if="recent.length" class="fold receipts">
       <summary>Recent delivery status</summary>
       <ul><li v-for="item in recent" :key="item.id"><strong>{{ labels[item.status] ?? item.status }}</strong><p class="instruction">{{ item.text }}</p><QueuedImages :session-id="sessionId" :images="item.images" /></li></ul>
       <p class="hint">Delivered means written to the terminal. Confirmation comes from the agent. Uncertain deliveries are never retried automatically.</p>
@@ -128,17 +154,27 @@ async function removeImage(id: number) {
 </template>
 
 <style scoped>
-.composer { margin: 24px auto; padding: 20px; border: 1px solid var(--border-strong); border-radius: 14px; background: var(--surface-raised); }
-.heading { display: flex; gap: 12px; justify-content: space-between; align-items: baseline; }
-h2 { font-size: 16px; margin: 0 0 12px; } h3 { font-size: 14px; margin: 18px 0 8px; }
-.heading span, h3 span, .hint { color: var(--text-muted); font-size: 12px; line-height: 1.6; }
-textarea { box-sizing: border-box; width: 100%; min-height: 110px; resize: vertical; padding: 12px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--surface); color: var(--text); font: inherit; font-size: 14px; line-height: 1.6; }
-textarea:focus { outline: 2px solid var(--accent); outline-offset: 2px; }
-.buttons { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
-.image-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
-.queue, .receipts { border-top: 1px solid var(--border); margin-top: 18px; padding-top: 12px; }
-ol, ul { padding-left: 22px; } li { margin: 14px 0; font-size: 12px; }
-.instruction { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 160px; overflow: auto; font-size: 13px; line-height: 1.6; margin: 6px 0; }
-.error { color: var(--status-failed); font-size: 13px; } summary { cursor: pointer; font-size: 13px; }
+.composer { display: grid; gap: 6px; }
+.field { padding: 8px 8px 8px 12px; border: 1px solid var(--border-strong); border-radius: 14px; background: var(--surface-raised); transition: border-color 0.15s; }
+.field:focus-within { border-color: var(--accent-line); box-shadow: 0 0 0 3px var(--accent-soft); }
+textarea { display: block; width: 100%; min-height: 46px; max-height: 240px; field-sizing: content; resize: none; padding: 6px 4px; border: 0; background: transparent; color: var(--text); font: inherit; font-size: 14px; line-height: 1.6; }
+textarea:focus { outline: none; }
+textarea::placeholder { color: var(--text-muted); }
+.bar { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.tool { padding: 5px 12px; font-size: 12.5px; }
+.status { font-size: 11.5px; color: var(--text-muted); }
+.spacer { flex: 1; }
+.hint { margin: 0 4px; color: var(--text-muted); font-size: 12px; line-height: 1.5; }
+.link { padding: 0 4px; font-size: 12px; color: var(--accent); }
+.error { margin: 0 4px; color: var(--status-failed); font-size: 12.5px; }
+.fold { margin: 0 4px; font-size: 12.5px; }
+.fold summary { cursor: pointer; color: var(--text-2); padding: 4px 0; }
+.fold .n { margin-left: 6px; color: var(--text-muted); }
+.fold .sum { margin-left: 8px; color: var(--text-muted); font-weight: 400; }
+.queue summary { font-weight: 600; }
+ol, ul { margin: 6px 0; padding-left: 20px; }
+li { margin: 10px 0; font-size: 12px; }
+.instruction { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 140px; overflow: auto; font-size: 13px; line-height: 1.55; margin: 4px 0; }
+.buttons { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 </style>
