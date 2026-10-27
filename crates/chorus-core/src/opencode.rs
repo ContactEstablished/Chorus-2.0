@@ -192,6 +192,19 @@ fn integration<'a>(integrations: &'a Value, id: &str) -> Option<&'a Value> {
     integrations.as_array()?.iter().find(|i| i.get("id").and_then(Value::as_str) == Some(id))
 }
 
+/// Why the key check was skipped, from `GET /api/integration`'s answer: `None` when the answer is
+/// the list Chorus reads. The check then makes no claim about keys (oc2 review 12.2), and the
+/// session says so instead of saying nothing.
+pub fn key_check_skipped(answer: &Result<(u16, String), String>) -> Option<String> {
+    let why = match answer {
+        Err(e) => e.clone(),
+        Ok((200, body)) if data(body).is_some_and(|d| d.is_array()) => return None,
+        Ok((200, _)) => "its answer isn't in the shape Chorus checked".to_owned(),
+        Ok((status, _)) => format!("opencode answered {status}"),
+    };
+    Some(format!("Chorus couldn't check opencode's keys ({why}), so a missing key shows only when the first turn fails."))
+}
+
 /// Whether an integration has a key or a login: one connection is enough, and a key in the
 /// server's environment counts as one (`{"type": "env", "name": "OPENROUTER_API_KEY"}`).
 fn connected(integration: &Value) -> Option<bool> {
@@ -875,6 +888,15 @@ mod tests {
         assert_eq!(too_old(Some("3.0.0"), Some("2.1.1")), None);
         assert_eq!(too_old(None, Some("2.1.1")), None, "an unread version is tried");
         assert_eq!(too_old(Some("garbled"), Some("2.1.1")), None);
+    }
+
+    #[test]
+    fn a_skipped_key_check_is_said() {
+        assert_eq!(key_check_skipped(&Ok((200, r#"{"data":[]}"#.to_owned()))), None);
+        let shape = key_check_skipped(&Ok((200, r#"{"data":{}}"#.to_owned()))).unwrap();
+        assert_eq!(shape, "Chorus couldn't check opencode's keys (its answer isn't in the shape Chorus checked), so a missing key shows only when the first turn fails.");
+        assert!(key_check_skipped(&Ok((404, String::new()))).unwrap().contains("(opencode answered 404)"));
+        assert!(key_check_skipped(&Err("timed out".into())).unwrap().contains("(timed out)"));
     }
 
     #[test]

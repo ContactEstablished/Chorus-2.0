@@ -76,7 +76,7 @@ async function retag(tags: string[]): Promise<void> {
           </dd>
         </template>
         <dt>Runs on</dt>
-        <dd>{{ s.providerName ?? 'its own sign-in' }}</dd>
+        <dd>{{ s.providerName ?? (s.agent === 'opencode' ? "opencode's free models only (no provider)" : 'its own sign-in') }}</dd>
         <template v-if="s.routing">
           <dt>Routing</dt>
           <dd>{{ s.routing }}</dd>

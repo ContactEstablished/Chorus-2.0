@@ -22,6 +22,10 @@ const emit = defineEmits<{ 'update:modelValue': [choice: RoutingLaunchChoice | n
 
 const view = ref<TiersView | null>(null)
 const error = ref<string | null>(null)
+// A failed Refresh, kept while the tiers reload (they can still load from the last snapshot).
+const refreshError = ref<string | null>(null)
+// The saved snapshot age limit, for the "older than" wording.
+const maxAge = ref<number | null>(null)
 const busy = ref(false)
 const refreshed = ref<RefreshOutcome | null>(null)
 const open = ref(false)
@@ -53,18 +57,29 @@ watch(
   () => {
     clearTimeout(timer)
     refreshed.value = null
+    refreshError.value = null
     timer = setTimeout(load, 300)
   },
 )
-onMounted(load)
+onMounted(() => {
+  void load()
+  commands
+    .routingSettings()
+    .then((r) => {
+      if (r.status === 'ok') maxAge.value = r.data.settings.snapshotMaxAgeMinutes ?? r.data.defaults.snapshotMaxAgeMinutes
+    })
+    .catch(() => {})
+})
+const ageLimit = computed(() => (maxAge.value === null ? 'its age limit' : `${maxAge.value} min`))
 
 async function refresh(): Promise<void> {
   busy.value = true
   error.value = null
+  refreshError.value = null
   const r = await commands.routingRefresh(props.providerId, props.model.trim(), props.effort).catch((e) => ({ status: 'error' as const, error: String(e) }))
   busy.value = false
   if (r.status === 'error') {
-    error.value = r.error
+    refreshError.value = `Refresh failed: ${r.error}`
     void load()
     return
   }
@@ -129,7 +144,7 @@ const rows = computed<Row[]>(() => {
       label,
       provider: primary ? `${primary.providerName}` : !r ? 'not ranked yet' : 'no eligible endpoint',
       speed: primary ? tps(primary.tpsP50) : '',
-      title: r?.stale && sel ? `${title}\n\nOlder than 60 min: Refresh before launching with it.` : title,
+      title: r?.stale && sel ? `${title}\n\nOlder than ${ageLimit.value}: Refresh before launching with it.` : title,
       disabled: !!blocked.value || !sel || !!r?.stale,
     })
   }
@@ -176,7 +191,7 @@ const spentText = computed(() => {
   <section class="routing">
     <div class="head">
       <span class="label">Routing</span>
-      <span v-if="updated" class="small" :class="{ warn: result?.stale }">{{ updated }}{{ result?.stale ? ' · older than 60 min' : '' }}</span>
+      <span v-if="updated" class="small" :class="{ warn: result?.stale }">{{ updated }}{{ result?.stale ? ` · older than ${ageLimit}` : '' }}</span>
       <span class="spacer" />
       <button
         type="button"
@@ -188,6 +203,7 @@ const spentText = computed(() => {
         {{ busy ? 'Refreshing…' : 'Refresh' }}
       </button>
     </div>
+    <p v-if="refreshError" class="small bad">{{ refreshError }}</p>
     <p v-if="error" class="small bad">{{ error }}</p>
     <p v-else-if="view?.problem && !result" class="small warn">{{ view.problem }}</p>
     <p v-else-if="busy" class="small">Fetching endpoints, checking the account, then testing prompt caching (at most $0.05)…</p>

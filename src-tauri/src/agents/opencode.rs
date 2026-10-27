@@ -180,7 +180,8 @@ impl Api {
 
     /// What the server knows of `model`; `None` when its answers aren't the shape Chorus checked.
     /// `keyless` is the route's provider needing no key (Ollama), which opencode lists as disabled.
-    pub fn check_model(&self, model: &str, keyless: bool) -> Result<Option<ModelCheck>, String> {
+    /// The second value says why keys weren't checked, when they weren't.
+    pub fn check_model(&self, model: &str, keyless: bool) -> Result<(Option<ModelCheck>, Option<String>), String> {
         let deadline = std::time::Instant::now() + PROVIDERS_WAIT;
         // A keyless route's provider is Chorus's own block, so it will be listed: wait for it, since
         // the built-in providers can be listed first. Any other may never be (no key), so the first
@@ -206,11 +207,13 @@ impl Api {
         }
         // Which providers have a key or login. Without this answer the check makes no claim about
         // keys, and still checks the provider, model and effort.
-        let integrations = match self.get("/api/integration") {
+        let answer = self.get("/api/integration");
+        let skipped = if keyless { None } else { opencode::key_check_skipped(&answer) };
+        let integrations = match answer {
             Ok((200, body)) => body,
             _ => String::new(),
         };
-        Ok(opencode::check_model(&providers, &models, &integrations, model, keyless))
+        Ok((opencode::check_model(&providers, &models, &integrations, model, keyless), skipped))
     }
 
     /// The server's event stream (`GET /api/event`), open until the server ends.

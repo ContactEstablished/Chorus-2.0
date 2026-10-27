@@ -1368,8 +1368,13 @@ impl SessionManager {
         });
         if let Some(model) = &options.model {
             match server.api.check_model(model, keyless) {
-                Ok(Some(check)) => notes.extend(oc::model_note(model, variant.as_deref(), &check)),
-                Ok(None) => notes.push("opencode's model list isn't in the shape Chorus checked, so the model wasn't checked.".into()),
+                Ok((check, skipped)) => {
+                    match check {
+                        Some(check) => notes.extend(oc::model_note(model, variant.as_deref(), &check)),
+                        None => notes.push("opencode's model list isn't in the shape Chorus checked, so the model wasn't checked.".into()),
+                    }
+                    notes.extend(skipped);
+                }
                 Err(e) => notes.push(format!("Chorus couldn't check the model with opencode: {e}")),
             }
         }

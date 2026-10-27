@@ -60,7 +60,8 @@ const PROGRAMS: Record<AgentKind, string> = { claude: 'claude', codex: 'codex', 
 const SIGN_IN: Record<AgentKind, string> = {
   claude: 'your Claude subscription',
   codex: 'your ChatGPT sign-in',
-  opencode: "opencode's own configuration",
+  // A session's opencode has its own data folder, so the user's own opencode login isn't there.
+  opencode: "opencode's free models only (no provider)",
   grok: "Grok's own sign-in",
   gemini: 'your Google sign-in or a Gemini key',
   aider: "a key: Aider runs on an API key only",
