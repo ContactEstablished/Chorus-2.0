@@ -4,7 +4,7 @@
  * live Raw terminal, and a panel with what it's waiting for, its prompts and its facts. Friendly
  * mode is P6; Raw is the agent's own terminal.
  */
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import Icon from '../../components/Icon.vue'
 import codexLogo from '../../assets/agents/codex.png'
 import { compactPath } from '../../shell/compactPath'
@@ -32,6 +32,13 @@ import { AGENT_CHIPS, ATTENTION, shortPath } from '../../shell/status'
 
 const props = defineProps<{ sessionId: number }>()
 const mode = ref<'friendly' | 'raw'>('raw')
+// The details panel's prompt list can scroll the Friendly conversation to a turn.
+const timeline = ref<InstanceType<typeof FriendlyTimeline> | null>(null)
+async function showTurn(turnId: number): Promise<void> {
+  mode.value = 'friendly'
+  await nextTick()
+  await timeline.value?.scrollToTurn(turnId)
+}
 
 const sessions = useSessionsStore()
 const projects = useProjectsStore()
@@ -271,7 +278,7 @@ async function send(bytes: string): Promise<void> {
     <p v-if="s.note" class="warn run-note">{{ s.note }}</p>
 
     <div class="body" :class="{ 'details-hidden': !layout.detailsOpen }">
-      <FriendlyTimeline v-if="mode === 'friendly'" :session="s" @raw="mode = 'raw'" />
+      <FriendlyTimeline v-if="mode === 'friendly'" ref="timeline" :session="s" @raw="mode = 'raw'" />
       <div v-else class="raw">
         <div class="rawbar">
           <span class="att" :class="{ on: attached && s.live }">
@@ -311,7 +318,7 @@ async function send(bytes: string): Promise<void> {
           <p class="rt"><span class="dot" />{{ readiness.title }}</p>
           <p class="rx">{{ readiness.text }}</p>
         </div>
-        <PromptHistory :session="s" />
+        <PromptHistory :session="s" @jump="showTurn" />
         <SessionFacts :session="s" />
         <FleetRoster />
       </aside>
@@ -507,6 +514,7 @@ async function send(bytes: string): Promise<void> {
   min-height: 0;
   display: grid;
   grid-template-columns: minmax(0, 1fr) 320px;
+  grid-template-rows: minmax(0, 1fr);
 }
 .body.details-hidden { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
 .details-toggle { display: grid; place-items: center; flex: none; width: 32px; height: 32px; padding: 0; }

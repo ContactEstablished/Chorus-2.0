@@ -4,7 +4,8 @@ import { openUrl } from '@tauri-apps/plugin-opener'
 import { renderMessage, webUrl } from './messageMarkdown'
 import { useNoticesStore } from '../stores/notices'
 
-const props = defineProps<{ text: string }>()
+/** `plain` drops the label and Copy/Source toolbar: for a note inside a larger card. */
+const props = defineProps<{ text: string; plain?: boolean }>()
 const html = computed(() => renderMessage(props.text))
 const notices = useNoticesStore()
 const source = ref(false)
@@ -55,7 +56,7 @@ function followLink(event: MouseEvent): void {
 
 <template>
   <div class="message-reader">
-    <header class="message-toolbar">
+    <header v-if="!plain" class="message-toolbar">
       <div class="message-label"><slot /></div>
       <div class="message-actions">
         <button class="quiet" title="Copy original message" @click="copy(text, 'Message')">Copy</button>

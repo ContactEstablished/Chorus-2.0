@@ -6,8 +6,11 @@
 import { ref, watch } from 'vue'
 import Icon from '../../components/Icon.vue'
 import { commands, unwrap, type SessionHistory, type SessionSummary, type TurnEntry } from '../../ipc'
+import { systemNotice } from './conversation'
 
 const props = defineProps<{ session: SessionSummary }>()
+/** `jump`: show this turn in the Friendly conversation. */
+const emit = defineEmits<{ jump: [turnId: number] }>()
 const history = ref<SessionHistory | null>(null)
 const error = ref<string | null>(null)
 const open = ref<number | null>(null)
@@ -59,7 +62,7 @@ const endOf = (t: TurnEntry) => (t.endReason ? (END[t.endReason] ?? t.endReason)
       <li v-for="t in history.turns" :key="t.id" class="turn" :class="{ open: open === t.id }">
         <div class="line">
           <button class="prompt" :title="open === t.id ? 'Hide the turn' : 'Show the turn'" @click="open = open === t.id ? null : t.id">
-            {{ t.prompt ?? '(prompt not seen)' }}
+            {{ systemNotice(t.prompt)?.title ?? t.prompt ?? '(prompt not seen)' }}
           </button>
           <button
             v-if="t.prompt"
@@ -74,6 +77,7 @@ const endOf = (t: TurnEntry) => (t.endReason ? (END[t.endReason] ?? t.endReason)
         <p class="meta">
           {{ time(t.startedAtSecs) }} · <span :class="['end', t.endReason ?? 'open']">{{ endOf(t) }}</span>
           <template v-if="t.tools.length"> · {{ t.tools.length }} tool call{{ t.tools.length === 1 ? '' : 's' }}</template>
+          · <button class="go" title="Scroll the Friendly conversation to this turn" @click="emit('jump', t.id)">Show</button>
         </p>
         <div v-if="open === t.id" class="detail">
           <ul v-if="t.tools.length || t.asks.length">
@@ -172,6 +176,17 @@ h3 {
   margin: 4px 0 0;
   font-size: 11.5px;
   color: var(--text-muted);
+}
+.go {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-size: 11.5px;
+  color: var(--accent);
+}
+.go:hover:not(:disabled) {
+  color: var(--accent-hover);
+  text-decoration: underline;
 }
 .end.done {
   color: var(--status-ready);
