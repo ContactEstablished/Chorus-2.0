@@ -44,6 +44,9 @@ pub struct SessionUsage {
     /// Turns with figures.
     pub turns: u32,
     pub total: TokenUsage,
+    /// Turns with figures but no cost (a model the agent can't price), so `total`'s cost leaves
+    /// them out.
+    pub cost_missing: u32,
     pub last: Option<TokenUsage>,
     /// Where they came from, when any did.
     pub source: Option<String>,
@@ -71,6 +74,7 @@ pub fn for_session(store: &Store, session_id: u32) -> Result<SessionUsage, Strin
         for item in rows {
             let (usage, source) = item?;
             out.turns += 1;
+            out.cost_missing += u32::from(usage.cost_usd.is_none());
             out.total.add(&usage);
             out.source = Some(source);
             out.last = Some(usage);
@@ -120,6 +124,7 @@ mod tests {
         assert_eq!(s.turns, 2);
         assert_eq!((s.total.input, s.total.cached, s.total.output), (Some(150), Some(4000), Some(25)));
         assert_eq!(s.total.cost_usd, Some(0.001));
+        assert_eq!(s.cost_missing, 1, "the second turn has no cost");
         assert_eq!(s.last, Some(b));
         assert_eq!(s.source.as_deref(), Some("opencode-server"));
     }

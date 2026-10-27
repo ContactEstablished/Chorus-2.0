@@ -51,7 +51,9 @@ const lastTurnText = computed(() => (usage.value && usage.value.turns > 1 ? `Las
 const costText = computed(() => {
   const u = usage.value
   if (!u) return null
-  return u.total.costUsd === null ? 'unknown' : `${money(u.total.costUsd)} (reported by ${AGENT_LABELS[s.value.agent]})`
+  if (u.total.costUsd === null) return 'unknown'
+  const missing = u.costMissing ? `, leaving out ${u.costMissing} turn${u.costMissing === 1 ? '' : 's'} it couldn't price` : ''
+  return `${money(u.total.costUsd)} (${AGENT_LABELS[s.value.agent]}'s estimate${missing})`
 })
 
 async function move(value: string): Promise<void> {
@@ -110,7 +112,7 @@ async function retag(tags: string[]): Promise<void> {
           <dt>Tokens</dt>
           <dd :title="lastTurnText">{{ tokensText }}</dd>
           <dt>Cost</dt>
-          <dd :title="costText === 'unknown' ? 'The agent reported no cost for these turns.' : 'The agent’s own figure. The run key’s cost, when there is one, is OpenRouter’s.'">{{ costText }}</dd>
+          <dd :title="costText === 'unknown' ? 'The agent couldn’t price these turns (for example a :nitro model). The run key’s cost, when there is one, is what OpenRouter billed.' : 'The agent’s estimate from its own prices. The run key’s cost, when there is one, is what OpenRouter billed.'">{{ costText }}</dd>
         </template>
         <dt>CLI</dt>
         <dd :class="{ warn: s.versionFit === 'newer' || s.versionFit === 'older' || s.versionFit === 'unreadable' }">

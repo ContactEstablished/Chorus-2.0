@@ -1827,6 +1827,11 @@ export type SessionUsage = {
 	/**  Turns with figures. */
 	turns: number,
 	total: TokenUsage,
+	/**
+	 *  Turns with figures but no cost (a model the agent can't price), so `total`'s cost leaves
+	 *  them out.
+	 */
+	costMissing: number,
 	last: TokenUsage | null,
 	/**  Where they came from, when any did. */
 	source: string | null,

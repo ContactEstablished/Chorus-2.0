@@ -349,6 +349,9 @@ pub struct EventParser {
     children: HashSet<String>,
     /// A form's fields, `(key, title)` in order, until it's answered.
     forms: HashMap<String, Vec<(String, String)>>,
+    /// Steps on a model opencode can't price: OpenRouter's `:nitro` ids aren't in its catalog, and it
+    /// reports their cost as 0 (measured $0.0024 on 2.1.4, LESSONS L72).
+    unpriced: HashSet<String>,
 }
 
 #[derive(Debug, Default)]
@@ -359,6 +362,8 @@ struct Turn {
     /// Its last step ended with `finish: "stop"`: its work is done.
     finished: bool,
     usage: TokenUsage,
+    /// A step ran on a model opencode can't price, so the turn's cost is unknown.
+    unpriced: bool,
 }
 
 impl Turn {
@@ -372,7 +377,17 @@ impl EventParser {
         Self { session_id: session_id.to_owned(), ..Default::default() }
     }
 
-    /// The usage of each turn that has ended since the last call, by its inbox id.
+    fn note_unpriced(&mut self, d: &Value) {
+        if let Some(step) = d.get("assistantMessageID").and_then(Value::as_str)
+            && d.pointer("/model/id").and_then(Value::as_str).is_some_and(|m| m.ends_with(":nitro"))
+        {
+            self.unpriced.insert(step.to_owned());
+        }
+    }
+
+    /// The usage of each turn that has ended since the last call, by its inbox id. A turn's cost is
+    /// opencode's estimate from its own catalog prices, unknown when a step ran on a model it
+    /// can't price.
     pub fn take_usage(&mut self) -> Vec<(String, TokenUsage)> {
         std::mem::take(&mut self.usage)
     }
@@ -405,7 +420,11 @@ impl EventParser {
                     if let Some(id) = &t.id
                         && !t.usage.is_empty()
                     {
-                        self.usage.push((id.clone(), t.usage.clone()));
+                        let mut usage = t.usage.clone();
+                        if t.unpriced {
+                            usage.cost_usd = None;
+                        }
+                        self.usage.push((id.clone(), usage));
                     }
                     if failed && t.finished { AgentEvent::TurnEnded { turn: t.id, message: reply } } else { end(t.id, reply) }
                 })
@@ -434,9 +453,15 @@ impl EventParser {
             // come through.
             match kind {
                 "permission.asked" | "permission.replied" | "permission.rejected" | "form.created" | "form.replied" | "form.cancelled" => {}
+                "session.step.started" => {
+                    self.note_unpriced(&d);
+                    return Vec::new();
+                }
                 "session.step.ended" => {
+                    let unpriced = text(&d, "assistantMessageID").is_some_and(|step| self.unpriced.remove(&step));
                     if let (Some(usage), Some(turn)) = (TokenUsage::from_opencode_step(&d), self.turns.last_mut()) {
                         turn.usage.add(&usage);
+                        turn.unpriced |= unpriced;
                     }
                     return Vec::new();
                 }
@@ -474,6 +499,7 @@ impl EventParser {
                 vec![AgentEvent::TurnStarted { turn: Some(id), prompt }]
             }
             "session.step.started" => {
+                self.note_unpriced(&d);
                 if let Some(step) = text(&d, "assistantMessageID") {
                     if self.turns.is_empty() {
                         self.turns.push(Turn::new(None));
@@ -494,6 +520,7 @@ impl EventParser {
                     if let Some(usage) = TokenUsage::from_opencode_step(&d) {
                         turn.usage.add(&usage);
                     }
+                    turn.unpriced |= self.unpriced.remove(&step);
                     turn.finished = turn.steps.last() == Some(&step) && d.get("finish").and_then(Value::as_str) == Some("stop");
                 }
                 Vec::new()
@@ -1053,6 +1080,26 @@ mod tests {
         let usage = p.take_usage();
         assert_eq!((usage[0].1.input, usage[0].1.output, usage[0].1.cached), (Some(1537), Some(103), Some(13184)));
         assert!((usage[0].1.cost_usd.unwrap() - 0.003).abs() < 1e-12);
+    }
+
+    #[test]
+    fn a_nitro_turns_cost_is_unknown_not_zero() {
+        // 2.1.4 on `openrouter/deepseek/deepseek-v4.1-flash:nitro` reported `cost: 0`; OpenRouter
+        // billed the run's key $0.0024.
+        let s = "ses_1";
+        let mut p = EventParser::new(s);
+        p.push(&ev("session.inbox.delivered", json!({"sessionID":s,"inboxID":"msg_1"})));
+        p.push(&ev("session.step.started", json!({"sessionID":s,"assistantMessageID":"msg_a","model":{"id":"deepseek/deepseek-v4.1-flash:nitro","providerID":"openrouter"}})));
+        p.push(&ev("session.step.ended", json!({"sessionID":s,"assistantMessageID":"msg_a","finish":"stop","cost":0,"tokens":{"input":7618,"output":3,"reasoning":0,"cache":{"read":256,"write":0}}})));
+        p.push(&ev("session.execution.succeeded", json!({"sessionID":s})));
+        let usage = p.take_usage();
+        assert_eq!((usage[0].1.input, usage[0].1.output, usage[0].1.cost_usd), (Some(7618), Some(3), None));
+        // A priced model keeps opencode's figure.
+        p.push(&ev("session.inbox.delivered", json!({"sessionID":s,"inboxID":"msg_2"})));
+        p.push(&ev("session.step.started", json!({"sessionID":s,"assistantMessageID":"msg_b","model":{"id":"deepseek/deepseek-v4.1-flash","providerID":"openrouter"}})));
+        p.push(&ev("session.step.ended", json!({"sessionID":s,"assistantMessageID":"msg_b","finish":"stop","cost":0.0011,"tokens":{"input":10,"output":3,"reasoning":0,"cache":{"read":0,"write":0}}})));
+        p.push(&ev("session.execution.succeeded", json!({"sessionID":s})));
+        assert_eq!(p.take_usage()[0].1.cost_usd, Some(0.0011));
     }
 
     #[test]

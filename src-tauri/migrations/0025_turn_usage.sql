@@ -9,7 +9,8 @@ CREATE TABLE turn_usage (
   output      INTEGER,
   reasoning   INTEGER,
   cost_usd    REAL,
-  -- 'reported': the agent's own figure. P11 adds 'estimate' and 'measured'.
+  -- 'reported': the agent's own figure (opencode's is an estimate from its catalog prices, L72).
+  -- P11 adds 'estimate' (Chorus's) and 'measured'.
   cost_kind   TEXT CHECK (cost_kind IN ('reported', 'estimate', 'measured')),
   -- Where the figures came from, as `measure::ledger::UsageSource` names it.
   source      TEXT NOT NULL,

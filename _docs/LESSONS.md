@@ -573,3 +573,12 @@ a client with it on a plain thread (opencode's event watcher) panics "there is n
 and the thread dies silently: the session then reads "Chorus has no event from this agent". Enter
 Tauri's runtime (`tauri::async_runtime::handle()`, then `enter()`) before building it. A unit test
 that enters the runtime itself hides this, so test from a plain thread as the app runs it.
+
+**L72 — opencode's `cost` is its own estimate, and it is 0 for OpenRouter's `:nitro` ids.**
+`session.step.ended`'s `cost` comes from opencode's model catalog prices, not from what the
+provider billed. Measured 2026-10-26 on 2.1.4, `deepseek/deepseek-v4.1-flash` through OpenRouter,
+one short turn per tier, against each run's capped key read back after revoke: Balanced $0.0011 vs
+$0.0010 billed, Budget $0.000043 vs $0.000026, Fast $0.0011 vs $0.0024, and Nitro
+(`…-flash:nitro`, not in opencode's catalog) **$0** vs $0.0024. Chorus labels the figure "opencode's
+estimate", leaves a turn with a `:nitro` step without a cost, and keeps the run key's figure as
+what OpenRouter billed.
