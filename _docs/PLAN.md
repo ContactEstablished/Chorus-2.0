@@ -91,7 +91,7 @@ does not close those phases.
 | P8 | Bots, Automations, Notes, Documents | Built 2026-10-24 and ready for review: Bots from profiles, Notes and per-run instructions (Claude; Codex through its app-server, kept with Friendly waiting for them, D89), Documents for Claude Code and Codex, Automations for Claude Code that close a finished run's agent (D84) and skip while any of their sessions is busy (D85) ([review](HANDOFF-P8-REVIEW.md); decisions D84–D96 and what was verified in [one list](HANDOFF-P6-P8-DECISIONS.md)) |
 | P9 | Voice | Removed; separate dictation app (D22); Chorus retains compatibility (D23) |
 | P10 | Council | Priority work (D102). Built once inside P15, for the loop (D97) |
-| P12 | Routing inspector | Priority work (D102). Launch routing built in P4; Settings → Routing, observer status and history remain |
+| P12 | Routing inspector | Built. Launch routing in P4 (D57); Settings → Routing with its settings, observer status and history in the P12 run (T1–T13). Budget, Balanced, Fast and Nitro launches, Restart and the Anthropic/OpenAI refusal seen working on opencode 2.1.4, 2026-10-26 ([review](HANDOFF-OPENCODE-COMPLETE.md)) |
 | P13 | Phone relay | Built once inside P15, for the loop, from [its design](HANDOFF-P13-telegram.md) (D97); P6 has since built the reply channels P13b needed |
 | P14 | More agents and ship | **On hold until further notice (D102); at the end, before P11.** Partly built: Gemini, Aider, Ollama, CI, installer polish and Q28–Q30 fixes; complete real turns, DeepSeek spike/adapter, signing, updates and eventual name migration remain for a future Chorus 2 real-world test |
 | P11 | Measurement, made visible | **On hold until further notice (D102); last priority.** Tokens, costs, attention and Usage UI remain for a future Chorus 2 real-world test; forecasts remain gated on data completeness |
@@ -400,8 +400,9 @@ P3's turn data meets its completeness bar.
 
 ### P12 — Routing tiers
 The tiers, Refresh, the account checks, the cache test and endpoint observation came to New session in
-P4 (D57). Still to come: the routing inspector (Settings → Routing: its settings, observer status and
-history).
+P4 (D57); the routing inspector (Settings → Routing: its settings, observer status and history) in the
+P12 run. Each tier was seen launching opencode 2.1.4 on OpenRouter on 2026-10-26, with opencode's
+tokens and its cost estimate per turn (D107) beside the run key's billed cost.
 
 ### P13 — Phone relay (Telegram)
 Prompt sessions, answer questions and approvals, and get digests from your phone, through the same

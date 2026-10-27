@@ -30,12 +30,15 @@ server that lives exactly as long as the run, and an idle one held for 10 minute
 `GET /api/session/active` and the session's outcome, close a turn that ended, and list pending
 approvals and forms (about 50 lines in core plus one call), tested by unit tests only, since a drop
 can't be provoked. *Default: (a), and (b) if a real drop is ever seen.* Blocks: nothing.
+*2026-10-26:* still (a). 2.1.4 can't replay either; a stream silent for 60 s (four missed heartbeats)
+is now dropped and reconnected, so a stall no longer blocks for good (L70). No real drop was seen.
 
 **Q23 — Should a resumed opencode run override an effort picked in its TUI?** (D60.) As built, a model or
 effort picked in the TUI lasts until the next Restart or relaunch, which goes back to the session's
 options, and the session's facts show the difference while it lasts. The alternative is to keep the
 TUI's choice and only show the difference, which makes the session's options a starting point rather
 than a setting. *Default: as built, which is what 1.x did.* Blocks: D60 becoming Decided.
+*Answered 2026-10-26:* as built; Matthew marked D60 Decided when closing out opencode support.
 
 **Q24 — Settings → Agents says versions "are tried and reported, never refused"**, and now shows an
 opencode 1.x refused (D61). 1.x was checked and is known not to work, so the sentence still holds, but it
