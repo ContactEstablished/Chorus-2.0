@@ -10,6 +10,8 @@ import NarratorPanel from './NarratorPanel.vue'
 import ReplyCard from './ReplyCard.vue'
 import MessageContent from '../../components/MessageContent.vue'
 import FriendlyComposer from './FriendlyComposer.vue'
+import GrillCard from './GrillCard.vue'
+import { parseGrill } from './grill'
 import Icon from '../../components/Icon.vue'
 import { AGENT_LOGOS } from '../../components/agentLogos'
 import { AGENT_LABELS } from '../../raw/labels'
@@ -34,6 +36,9 @@ function toggle(id: number): void {
   if (expanded.value.has(id)) expanded.value.delete(id)
   else expanded.value.add(id)
 }
+/** A grill round in the newest reply: its questions, each with the agent's recommended answer. */
+const latestTurn = computed(() => history.value?.turns.at(-1))
+const grill = computed(() => (latestTurn.value?.endReason ? parseGrill(latestTurn.value.finalMessage) : []))
 const notice = (turn: TurnEntry) => systemNotice(turn.prompt)
 
 // The view sticks to the newest content until the reader scrolls up; then a button offers the way
@@ -213,6 +218,7 @@ onBeforeUnmount(() => { disposed = true; generation++; clearTimeout(timer); resi
         <div v-if="pending.length" class="pending">
           <ReplyCard v-for="p in pending" :key="`${p.runId}-${p.askId}`" :session-id="session.id" :pending="p" @refresh="load" @raw="emit('raw')" />
         </div>
+        <GrillCard v-if="grill.length" :key="`${session.id}-${latestTurn?.id}`" :session-id="session.id" :questions="grill" />
         <NarratorPanel :session="session" :narrator="narrator" :error="narratorError" @refresh="load" />
         <FriendlyComposer :session-id="session.id" @raw="emit('raw')" />
       </div>

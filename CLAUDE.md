@@ -63,3 +63,8 @@ Ask before adding any dependency not listed in `_docs/ARCHITECTURE.md` §10.
 - Line endings are LF (see `.gitattributes`). Don't introduce CRLF into source files.
 - Assume the repo is public: don't commit test evidence, screenshots containing local paths, or
   machine-specific notes.
+
+## Replies the user will copy
+- Put anything meant to be pasted elsewhere in a fenced code block, alone in its paragraph, so Friendly
+  shows a Copy code button: full URLs, and Markdown (prompts, docs, notes) in a ```markdown fence.
+- Prose that merely mentions a URL can stay inline. Other languages only when asked.

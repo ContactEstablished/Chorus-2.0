@@ -5,13 +5,13 @@ import { useNoticesStore } from './notices'
 
 export const ZOOM_MIN = 0.8
 export const ZOOM_MAX = 1.6
-export const ZOOM_STEP = 0.1
+export const ZOOM_STEP = 0.05
 
 const DEFAULTS: Prefs = { theme: 'glacier', zoom: 1, groupBy: 'status', sessionStrip: true, splash: true }
 
 /** One zoom step from `zoom`, rounded to the step and kept in range (as the back end does). */
 export function stepZoom(zoom: number, steps: number): number {
-  const z = Math.round((zoom + steps * ZOOM_STEP) * 10) / 10
+  const z = Math.round((zoom + steps * ZOOM_STEP) * 20) / 20
   return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z))
 }
 
