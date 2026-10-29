@@ -1,16 +1,16 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
   <!-- App icon source: the seven-bar Chorus mark (DESIGN.md "Logo") on the Glacier background.
-       The grey steps are lighter than the in-app ones so the mark still reads at 16 px.
+       The grey steps are much lighter than the in-app ones so the mark still reads at 16 px; the centre bar is the startup-animation blue, pushed a touch more saturated.
        Regenerate the icon set with `npx tauri icon src-tauri/icons/chorus-mark.svg -o src-tauri/icons`. -->
   <rect width="1024" height="1024" rx="224" fill="#0a0f16"/>
   <!-- The 84x76 mark scaled 8.6x and centred: 722 x 654. -->
   <g transform="translate(150.8 185.2) scale(8.6)">
-    <rect x="0"  y="24" width="6" height="28" rx="3" fill="#4a5563"/>
-    <rect x="13" y="16" width="6" height="44" rx="3" fill="#64707e"/>
-    <rect x="26" y="7"  width="6" height="62" rx="3" fill="#8592a1"/>
-    <rect x="39" y="0"  width="6" height="76" rx="3" fill="#1ec8f0"/>
-    <rect x="52" y="7"  width="6" height="62" rx="3" fill="#8592a1"/>
-    <rect x="65" y="16" width="6" height="44" rx="3" fill="#64707e"/>
-    <rect x="78" y="24" width="6" height="28" rx="3" fill="#4a5563"/>
+    <rect x="0"  y="24" width="6" height="28" rx="3" fill="#9fb0c2"/>
+    <rect x="13" y="16" width="6" height="44" rx="3" fill="#c0cedc"/>
+    <rect x="26" y="7"  width="6" height="62" rx="3" fill="#e1eaf3"/>
+    <rect x="39" y="0"  width="6" height="76" rx="3" fill="#14c4ff"/>
+    <rect x="52" y="7"  width="6" height="62" rx="3" fill="#e1eaf3"/>
+    <rect x="65" y="16" width="6" height="44" rx="3" fill="#c0cedc"/>
+    <rect x="78" y="24" width="6" height="28" rx="3" fill="#9fb0c2"/>
   </g>
 </svg>

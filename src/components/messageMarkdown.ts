@@ -82,6 +82,22 @@ markdown.core.ruler.after('inline', 'friendly_blocks', (state) => {
     }
   }
 })
+// A paragraph that is only a full web URL (bare, or in backticks) becomes a code card with Copy code,
+// so a link meant to be pasted somewhere is never selected by hand. URLs inside a sentence stay inline.
+const BARE_URL = /^https?:\/\/\S+$/i
+markdown.core.ruler.after('friendly_blocks', 'friendly_url_cards', (state) => {
+  const tokens = state.tokens
+  for (let i = 0; i + 2 < tokens.length; i++) {
+    const inline = tokens[i + 1]!
+    if (tokens[i]!.type !== 'paragraph_open' || inline.type !== 'inline' || tokens[i + 2]!.type !== 'paragraph_close') continue
+    const only = inline.children?.length === 1 ? inline.children[0]! : null
+    if (!only || (only.type !== 'code_inline' && only.type !== 'text') || !BARE_URL.test(only.content.trim())) continue
+    const card = new state.Token('fence', 'code', 0)
+    card.content = `${only.content.trim()}\n`
+    card.info = ''
+    tokens.splice(i, 3, card)
+  }
+})
 markdown.renderer.rules.blockquote_open = (tokens, idx, options, _env, renderer) => {
   const title = tokens[idx]!.meta?.callout as string | undefined
   return renderer.renderToken(tokens, idx, options) + (title ? `<div class="callout-title">${escape(title)}</div>` : '')

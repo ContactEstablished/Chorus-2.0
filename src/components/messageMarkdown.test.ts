@@ -60,4 +60,22 @@ describe('Friendly message presentation', () => {
     expect(renderMessage('![Insecure](http://example.com/a.png)')).toContain('Image preview unavailable')
     expect(renderMessage('![x](data:image/svg+xml,evil)')).not.toContain('data-image-url')
   })
+
+  it('puts a URL that stands alone in a copyable code card', () => {
+    const url = 'http://localhost:18080/enrollments/plan-detail?postalcode=98065&refnum=abc'
+    for (const text of ['`' + url + '`', url]) {
+      const html = renderMessage(`Here it is:
+
+${text}
+
+Done.`)
+      expect(html).toContain('class="code-card"')
+      expect(html).toContain('data-message-action="copy-code"')
+      expect(html).toContain('postalcode=98065&amp;refnum=abc')
+    }
+  })
+
+  it('leaves a URL inside a sentence inline', () => {
+    expect(renderMessage('Open `http://localhost:1/x` now')).not.toContain('code-card')
+  })
 })

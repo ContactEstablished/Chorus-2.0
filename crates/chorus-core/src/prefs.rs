@@ -24,7 +24,7 @@ pub enum GroupBy {
 
 pub const MIN_ZOOM: f64 = 0.8;
 pub const MAX_ZOOM: f64 = 1.6;
-pub const ZOOM_STEP: f64 = 0.1;
+pub const ZOOM_STEP: f64 = 0.05;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
@@ -87,8 +87,8 @@ mod tests {
         assert_eq!((p.theme, p.zoom, p.group_by), (Theme::Dusk, MAX_ZOOM, GroupBy::Status));
         let p = Prefs::from_stored(Some(r#"{"theme":"neon","groupBy":"project","sessionStrip":false}"#));
         assert_eq!((p.theme, p.group_by, p.session_strip), (Theme::Glacier, GroupBy::Project, false), "a bad theme loses only itself");
-        assert_eq!(clean_zoom(1.04), 1.0);
-        assert_eq!(clean_zoom(1.26), 1.3);
+        assert_eq!(clean_zoom(1.02), 1.0);
+        assert_eq!(clean_zoom(1.28), 1.3);
         assert_eq!(clean_zoom(f64::NAN), 1.0);
     }
 }
