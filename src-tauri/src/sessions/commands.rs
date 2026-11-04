@@ -45,6 +45,40 @@ pub async fn session_open_folder(app: tauri::AppHandle, state: Manager<'_>, sess
     }).await
 }
 
+/// Opens a path an agent wrote in its message: a folder in Explorer, a file in its default program.
+/// The path must resolve (symlinks and `..` included) to somewhere inside the session's folder, so a
+/// message cannot make Chorus open an arbitrary file. Files that run code are shown in Explorer
+/// instead of launched. Returns `true` when opened, `false` when shown in Explorer for that reason.
+#[tauri::command]
+#[specta::specta]
+pub async fn session_open_path(app: tauri::AppHandle, state: Manager<'_>, session_id: u32, path: String) -> Result<bool, String> {
+    use chorus_core::folders;
+    use tauri_plugin_opener::OpenerExt;
+    if path.len() > 1024 {
+        return Err("That path is too long to open.".into());
+    }
+    blocking(&state, move |m| {
+        let cwd = m.row(session_id)?.cwd;
+        let resolved = folders::resolve_in(&path, &cwd).ok_or("That doesn't look like a path Chorus can open.")?;
+        let real = std::fs::canonicalize(&resolved).map_err(|_| format!("Nothing exists at {resolved}."))?;
+        let root = std::fs::canonicalize(&cwd).map_err(|_| "The session folder no longer exists or is unavailable.".to_string())?;
+        let (real, root) = (real.to_string_lossy().into_owned(), root.to_string_lossy().into_owned());
+        if !folders::inside(&real, &root) {
+            return Err("Chorus only opens paths inside this session's folder.".into());
+        }
+        if std::path::Path::new(&real).is_dir() {
+            app.opener().open_path(real, None::<&str>).map_err(|e| format!("opening the folder: {e}"))?;
+            Ok(true)
+        } else if folders::runs_code(&real) {
+            app.opener().reveal_item_in_dir(real).map_err(|e| format!("showing the file: {e}"))?;
+            Ok(false)
+        } else {
+            app.opener().open_path(real, None::<&str>).map_err(|e| format!("opening the file: {e}"))?;
+            Ok(true)
+        }
+    }).await
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn session_create(state: Manager<'_>, request: CreateSession) -> Result<SessionSummary, String> {

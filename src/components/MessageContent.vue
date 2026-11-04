@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { openUrl } from '@tauri-apps/plugin-opener'
+import { commands } from '../ipc'
 import { renderMessage, webUrl } from './messageMarkdown'
 import { useNoticesStore } from '../stores/notices'
 import LinkedImages from './LinkedImages.vue'
 
 /** `plain` drops the label and Copy/Source toolbar: for a note inside a larger card. */
-const props = defineProps<{ text: string; plain?: boolean }>()
+const props = defineProps<{ text: string; plain?: boolean; sessionId?: number }>()
 const html = computed(() => renderMessage(props.text))
 const notices = useNoticesStore()
 const source = ref(false)
@@ -16,8 +17,25 @@ async function copy(text: string, label: string): Promise<void> {
   catch (e) { notices.error(`Could not copy ${label.toLowerCase()}.`, e) }
 }
 
+async function openPath(path: string): Promise<void> {
+  if (props.sessionId === undefined) return
+  const result = await commands.sessionOpenPath(props.sessionId, path)
+  if (result.status === 'error') notices.error(result.error)
+  else if (!result.data) notices.success('That file can run code, so it is shown in Explorer instead of being opened.')
+}
+
+function pathKey(event: KeyboardEvent): void {
+  if (event.key !== 'Enter' && event.key !== ' ') return
+  const el = event.target instanceof Element ? event.target.closest<HTMLElement>('code[data-path]') : null
+  if (!el?.dataset.path) return
+  event.preventDefault()
+  void openPath(el.dataset.path)
+}
+
 function messageAction(event: MouseEvent): void {
   const target = event.target instanceof Element ? event.target : null
+  const pathEl = target?.closest<HTMLElement>('code[data-path]')
+  if (pathEl?.dataset.path) { event.preventDefault(); void openPath(pathEl.dataset.path); return }
   const button = target?.closest<HTMLButtonElement>('button[data-message-action]')
   if (!button) { followLink(event); return }
   event.preventDefault()
@@ -66,7 +84,7 @@ function followLink(event: MouseEvent): void {
     </header>
     <pre v-if="source" class="message-source">{{ text }}</pre>
     <!-- Only the restricted Markdown renderer produces this HTML; source HTML is escaped. -->
-    <div v-else class="message-content" @click="messageAction" @auxclick="followLink" v-html="html" />
+    <div v-else class="message-content" @click="messageAction" @auxclick="followLink" @keydown="pathKey" v-html="html" />
     <LinkedImages v-if="!source" :text="text" />
   </div>
 </template>
@@ -135,6 +153,9 @@ function followLink(event: MouseEvent): void {
   color: var(--tag-lavender);
   box-decoration-break: clone;
 }
+.message-content :deep(code.path-link) { cursor: pointer; text-decoration: underline; text-decoration-color: var(--accent-line); text-underline-offset: 3px; }
+.message-content :deep(code.path-link:hover) { color: var(--accent-hover); border-color: var(--accent-line); }
+.message-content :deep(code.path-link:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
 .message-content :deep(pre) {
   margin: 1.1em 0;
   padding: 16px 18px;

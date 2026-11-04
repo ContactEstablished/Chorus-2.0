@@ -95,9 +95,31 @@ pub fn response(request: &HookRequest, action: &SessionAction) -> Result<Value, 
     }
 }
 
+/// Answers sent after the hold ended (D112): Claude Code's own question has been dismissed with Esc,
+/// so the answers go to the agent as an ordinary message, each under its question.
+pub fn late_answers_prompt(questions: &[Question], answers: &[String]) -> Result<String, String> {
+    if answers.len() != questions.len() { return Err("Answer every question in this request.".into()); }
+    let mut out = String::from("Here are my answers to your questions (sent from Chorus after the question timed out):\n");
+    for (i, (q, answer)) in questions.iter().zip(answers).enumerate() {
+        let answer = clean_prompt(answer)?;
+        if answer.trim().is_empty() { return Err("Answer every question in this request.".into()); }
+        out.push_str(&format!("\n{}. {}\n{}\n", i + 1, q.question.trim(), answer.trim()));
+    }
+    clean_prompt(out.trim_end())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn late_answers_list_each_question_with_its_answer() {
+        let q = |text: &str| Question { question: text.into(), options: vec![], multi_select: false };
+        let questions = [q("Move them?"), q("Backups?")];
+        let text = late_answers_prompt(&questions, &["Leave them".into(), " DB only ".into()]).unwrap();
+        assert!(text.ends_with("1. Move them?\nLeave them\n\n2. Backups?\nDB only"), "{text}");
+        assert!(late_answers_prompt(&questions, &["a".into()]).is_err());
+        assert!(late_answers_prompt(&questions, &["a".into(), "  ".into()]).is_err());
+    }
     #[test]
     fn questions_preserve_original_input_and_require_all_answers() {
         let input = json!({"questions":[{"question":"File?","options":[],"multiSelect":false},{"question":"Colour?"}],"metadata":{"x":1}});

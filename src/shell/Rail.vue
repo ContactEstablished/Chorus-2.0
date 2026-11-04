@@ -56,7 +56,7 @@ function isOn(name: ViewName): boolean {
 }
 
 function go(name: ViewName): void {
-  if (name === 'overview') view.openProject(null)
+  if (name === 'overview') view.openOverview()
   else view.go(name)
 }
 
@@ -217,7 +217,7 @@ function onMenuKey(e: KeyboardEvent): void {
       >
         <button
           class="item project"
-          :class="{ on: view.name === 'overview' && view.projectFilter === p.id }"
+          :class="{ on: (view.name === 'overview' || view.name === 'grid') && view.projectFilter === p.id }"
           :title="p.folder ? `${p.name} — ${p.folder}` : p.name"
           :aria-label="p.state === 'hidden' ? `${p.name} (hidden)` : p.name"
           @click="view.openProject(p.id)"

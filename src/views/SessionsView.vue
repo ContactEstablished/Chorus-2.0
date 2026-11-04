@@ -1,20 +1,16 @@
 <script setup lang="ts">
 /**
- * Sessions: every open session, searchable, as a list or as the Wall of live Raw terminals (D26).
- * On the Wall each terminal is the real one: typing goes to the agent, and the PTY takes the tile's
- * size until a bigger view attaches (as Chorus 1's grid did). In the list, Select picks sessions,
- * or all the search shows, to close together (D104).
+ * Sessions: every open session, searchable, as a list. Live terminals side by side are Grid View's
+ * job (D113). Select picks sessions, or all the search shows, to close together (D104).
  */
 import { computed, ref, watch } from 'vue'
 import Icon from '../components/Icon.vue'
-import SessionTerminal from '../raw/SessionTerminal.vue'
 import CloseSessionsDialog from './CloseSessionsDialog.vue'
 import type { SessionSummary } from '../ipc'
 import { useSessionsStore } from '../stores/sessions'
 import { useProjectsStore } from '../stores/projects'
 import { useViewStore } from '../stores/view'
 import { useAppStore } from '../stores/app'
-import { useNoticesStore } from '../stores/notices'
 import { AGENT_LABELS } from '../raw/labels'
 import { ATTENTION, ago, byUrgency, lastActive, shortPath } from '../shell/status'
 import AgentLogo from '../components/AgentLogo.vue'
@@ -25,7 +21,6 @@ const sessions = useSessionsStore()
 const projects = useProjectsStore()
 const view = useViewStore()
 const app = useAppStore()
-const notices = useNoticesStore()
 const now = useNow()
 
 const query = ref('')
@@ -71,10 +66,6 @@ watch(shown, (list) => {
   const ids = new Set(list.filter(pickable).map((s) => s.id))
   if ([...picked.value].some((id) => !ids.has(id))) picked.value = new Set([...picked.value].filter((id) => ids.has(id)))
 })
-watch(
-  () => view.sessionsLayout,
-  () => stopSelecting(),
-)
 
 function stopSelecting(): void {
   selecting.value = false
@@ -96,7 +87,7 @@ function onDialogClose(ran: boolean): void {
 </script>
 
 <template>
-  <section class="sessions" :class="{ wall: view.sessionsLayout === 'wall' }">
+  <section class="sessions">
     <header class="head">
       <h1>Sessions</h1>
       <div class="tools">
@@ -104,13 +95,13 @@ function onDialogClose(ran: boolean): void {
           <Icon name="search" :size="15" />
           <input v-model="query" type="search" placeholder="Search name, folder, project, tag, agent…" aria-label="Search sessions" spellcheck="false" />
         </label>
-        <select v-if="view.sessionsLayout === 'list'" v-model="order" aria-label="Order">
+        <select v-model="order" aria-label="Order">
           <option value="urgency">Most urgent</option>
           <option value="recent">Most recent</option>
           <option value="name">Name</option>
         </select>
         <button
-          v-if="view.sessionsLayout === 'list' && sessions.list.length"
+          v-if="sessions.list.length"
           class="select-toggle"
           :class="{ on: selecting }"
           :aria-pressed="selecting"
@@ -119,14 +110,9 @@ function onDialogClose(ran: boolean): void {
         >
           <Icon name="check" :size="15" /> Select
         </button>
-        <div class="segmented" role="radiogroup" aria-label="Layout">
-          <button role="radio" :aria-checked="view.sessionsLayout === 'list'" :class="{ on: view.sessionsLayout === 'list' }" title="List" @click="view.sessionsLayout = 'list'">
-            <Icon name="sessions" :size="15" /> List
-          </button>
-          <button role="radio" :aria-checked="view.sessionsLayout === 'wall'" :class="{ on: view.sessionsLayout === 'wall' }" title="Wall of live terminals" @click="view.sessionsLayout = 'wall'">
-            <Icon name="wall" :size="15" /> Wall
-          </button>
-        </div>
+        <button class="select-toggle" title="Every session's live terminal, side by side" @click="view.openGrid(null)">
+          <Icon name="wall" :size="15" /> Grid View
+        </button>
       </div>
     </header>
 
@@ -135,7 +121,7 @@ function onDialogClose(ran: boolean): void {
     </p>
     <p v-else-if="!shown.length" class="none">Nothing matches “{{ query }}”.</p>
 
-    <div v-if="selecting && view.sessionsLayout === 'list' && sessions.list.length" class="pickbar" role="toolbar" aria-label="Selected sessions">
+    <div v-if="selecting && sessions.list.length" class="pickbar" role="toolbar" aria-label="Selected sessions">
       <label class="all">
         <input type="checkbox" :checked="allState === 'all'" :indeterminate="allState === 'some'" :disabled="!canPick" @change="toggleAll" />
         Select all {{ canPick }}{{ query.trim() ? ' matching' : '' }}
@@ -149,7 +135,7 @@ function onDialogClose(ran: boolean): void {
       <button class="quiet" @click="stopSelecting">Cancel</button>
     </div>
 
-    <ul v-if="view.sessionsLayout === 'list'" class="list">
+    <ul class="list">
       <li v-for="s in shown" :key="s.id">
         <button
           class="row"
@@ -177,22 +163,6 @@ function onDialogClose(ran: boolean): void {
       </li>
     </ul>
 
-    <div v-else class="tiles">
-      <article v-for="s in shown" :key="s.id" class="tile" :class="`st-${s.attention}`">
-        <header class="tile-head">
-          <span class="dot" :class="{ pulse: s.attention === 'working' && !s.noSignal }" />
-          <AgentLogo :agent="s.agent" />
-          <span class="tname" :title="s.cwd">{{ s.name }}</span>
-          <span v-if="project(s)" class="project-tag" :style="{ '--tag': project(s)!.colour }">{{ project(s)!.name }}</span>
-          <span class="tstate">{{ ATTENTION[s.attention].label }}</span>
-          <button class="quiet open" title="Open the session" @click="view.openSession(s.id)">Open</button>
-        </header>
-        <div class="term">
-          <SessionTerminal :session-id="s.id" :live="s.live" :autofocus="false" @error="(m) => notices.error(m)" />
-        </div>
-      </article>
-    </div>
-
     <CloseSessionsDialog v-if="confirming" :targets="confirming" @close="onDialogClose" />
   </section>
 </template>
@@ -200,12 +170,6 @@ function onDialogClose(ran: boolean): void {
 <style scoped>
 .sessions {
   padding: 28px 40px 40px;
-}
-.sessions.wall {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  padding-bottom: 16px;
 }
 .head {
   display: flex;
@@ -242,29 +206,6 @@ h1 {
   padding: 7px 0;
   flex: 1;
   outline: none;
-}
-.segmented {
-  display: inline-flex;
-  padding: 3px;
-  gap: 2px;
-  border-radius: 10px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-}
-.segmented button {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  border: 0;
-  background: transparent;
-  padding: 5px 12px;
-  color: var(--text-2);
-  font-size: 13px;
-}
-.segmented button.on {
-  background: var(--surface-chip);
-  color: var(--text);
-  font-weight: 600;
 }
 .select-toggle {
   display: inline-flex;
@@ -423,67 +364,6 @@ h1 {
 }
 .go {
   color: var(--text-muted);
-}
-.tiles {
-  flex: 1;
-  min-height: 0;
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(380px, 100%), 1fr));
-  grid-auto-rows: minmax(280px, 1fr);
-  gap: 12px;
-  overflow: auto;
-}
-.tile {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  border: 1px solid var(--border);
-  border-top: 2px solid var(--st);
-  border-radius: 12px;
-  overflow: hidden;
-  background: var(--bg);
-}
-.tile.st-done,
-.tile.st-running {
-  border-top-color: var(--border-strong);
-}
-.tile:focus-within {
-  border-color: var(--accent-line);
-}
-.tile-head {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  padding: 7px 8px 7px 12px;
-  background: var(--surface);
-  border-bottom: 1px solid var(--border);
-  font-size: 13px;
-  min-width: 0;
-}
-.tname {
-  font-weight: 600;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  min-width: 0;
-  flex: 1;
-}
-.tstate {
-  color: var(--st);
-  white-space: nowrap;
-  font-size: 12px;
-}
-.tile.st-done .tstate,
-.tile.st-running .tstate {
-  color: var(--text-muted);
-}
-.open {
-  padding: 3px 9px;
-  font-size: 12.5px;
-}
-.term {
-  flex: 1;
-  min-height: 0;
 }
 @media (max-width: 860px) {
   .sessions {

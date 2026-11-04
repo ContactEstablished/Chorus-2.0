@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { renderMessage, webUrl } from './messageMarkdown'
+import { localPath, renderMessage, webUrl } from './messageMarkdown'
 
 describe('Friendly message presentation', () => {
   it('renders the weather-stack reply as emphasis, a table, code and a web link', () => {
@@ -77,5 +77,20 @@ Done.`)
 
   it('leaves a URL inside a sentence inline', () => {
     expect(renderMessage('Open `http://localhost:1/x` now')).not.toContain('code-card')
+  })
+
+  it('turns inline-code file and folder paths into openable paths', () => {
+    const html = renderMessage('Written to `' + String.raw`C:\Projects\App\_docs\Summary one.md` + '` and `_docs/Evidence/20261103/`.')
+    expect(html).toContain(String.raw`data-path="C:\Projects\App\_docs\Summary one.md"`)
+    expect(html).toContain('data-path="_docs/Evidence/20261103/"')
+  })
+
+  it('leaves ordinary code, URLs and fenced code alone', () => {
+    expect(localPath('npm run dev')).toBeNull()
+    expect(localPath('and/or')).toBeNull()
+    expect(localPath('https://example.com/a.md')).toBeNull()
+    expect(localPath(String.raw`\\server\share\a.txt`)).toBeNull()
+    expect(localPath('src/main.ts:42:7')).toBe('src/main.ts')
+    expect(renderMessage('```\n' + String.raw`C:\a\b.md` + '\n```')).not.toContain('data-path')
   })
 })

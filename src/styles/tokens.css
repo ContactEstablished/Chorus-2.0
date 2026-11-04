@@ -115,6 +115,9 @@ html,
 body {
   margin: 0;
   height: 100%;
+  /* The app fills the window and each pane scrolls itself; the page never does (webview zoom can
+     overflow it by a fraction, which showed a scrollbar over dead space). */
+  overflow: hidden;
   background: var(--bg);
   color: var(--text);
   font-family: var(--font-ui);

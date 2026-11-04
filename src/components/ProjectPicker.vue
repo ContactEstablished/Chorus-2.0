@@ -2,14 +2,14 @@
 /**
  * A session's project, picked by typing (D52): matching projects as you type, "By folder" (the
  * project whose folder holds the session's, if any), or a new project made on the spot with the
- * session's folder. Esc closes the list before it closes anything else.
+ * session's folder. Where a project is required, only existing projects are offered. Esc closes the list before it closes anything else.
  */
 import { computed, ref } from 'vue'
 import type { Project } from '../ipc'
 import { useProjectsStore } from '../stores/projects'
 import { suggest } from './choice'
 
-const props = defineProps<{ modelValue: number | null; auto: Project | null; newFolder: string | null }>()
+const props = defineProps<{ modelValue: number | null; auto?: Project | null; newFolder?: string | null; required?: boolean }>()
 const emit = defineEmits<{ 'update:modelValue': [id: number | null] }>()
 const projects = useProjectsStore()
 
@@ -29,9 +29,9 @@ const offers = computed<Offer[]>(() => {
   const found = suggest(names, q, [], 12).map((n) => projects.usable.find((p) => p.name === n)!)
   const exact = projects.list.some((p) => p.name.toLowerCase() === q.toLowerCase())
   return [
-    ...(q ? [] : [{ kind: 'auto' } as Offer]),
+    ...(q || props.required ? [] : [{ kind: 'auto' } as Offer]),
     ...found.map((project) => ({ kind: 'project', project }) as Offer),
-    ...(q && !exact ? [{ kind: 'new', name: q } as Offer] : []),
+    ...(q && !exact && !props.required ? [{ kind: 'new', name: q } as Offer] : []),
   ]
 })
 
@@ -42,7 +42,7 @@ async function take(o: Offer): Promise<void> {
   else if (o.kind === 'project') emit('update:modelValue', o.project.id)
   else {
     busy.value = true
-    const ok = await projects.save(null, { name: o.name, folder: props.newFolder, colour: null })
+    const ok = await projects.save(null, { name: o.name, folder: props.newFolder ?? null, colour: null })
     busy.value = false
     const made = ok ? projects.list.filter((p) => p.name === o.name).sort((a, b) => b.id - a.id)[0] : undefined
     if (made) emit('update:modelValue', made.id)
@@ -71,7 +71,7 @@ function onKey(e: KeyboardEvent): void {
     <span class="swatch" :style="{ background: chosen?.colour ?? auto?.colour ?? 'transparent' }" :class="{ none: !chosen && !auto }" />
     <input
       v-model="draft"
-      :placeholder="chosen ? chosen.name : autoText"
+      :placeholder="chosen ? chosen.name : required ? 'Choose a project…' : autoText"
       :class="{ set: chosen }"
       aria-label="Project"
       role="combobox"

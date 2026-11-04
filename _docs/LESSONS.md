@@ -587,3 +587,12 @@ what OpenRouter billed.
 `dragDropEnabled: true`, WebView2 never fires `drop` for HTML5 drags inside the page, so a
 draggable list can't reorder. The main window sets `"dragDropEnabled": false`; because the webview
 then opens a file dropped on it, `App.vue` cancels `dragover` and `drop` events that carry files.
+
+**L74 — WebView2's debug port needs Tauri's own browser arguments too.** Setting
+`WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=N` alone makes a dev build panic at
+start with `failed to create webview: WebView2 error … 0x800700AA "The requested resource is in
+use."`: the variable replaces the arguments Tauri passes, so the app's windows ask for the same
+profile with different options. Include Tauri's defaults:
+`--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --remote-debugging-port=N`. Then
+`http://127.0.0.1:N/json` lists the windows (the main one is `http://localhost:1420/`), and
+`Runtime.evaluate` reaches `window.__chorus`.

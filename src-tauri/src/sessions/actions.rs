@@ -5,7 +5,8 @@ use chorus_core::actions::{ActionCapabilities, SessionAction, capabilities};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
-use super::{SessionManager, commands::Manager, delivery::deliver_prompt};
+use super::{SessionManager, commands::Manager, delivery::{deliver_late_answer, deliver_prompt}};
+use chorus_core::replies::ReplyDetails;
 use crate::store::delivery::Delivered;
 use crate::store::replies::{self, ReplyReceipt};
 use crate::events::replies::PendingReply;
@@ -36,11 +37,11 @@ impl ActionRouter {
         manager.row(session)?;
         match request.action {
             SessionAction::Prompt { text, source } => deliver_prompt(manager, session, request.run_id, &request.request_id, &text, source).map(|receipt| ActionResult::Prompt { receipt }),
-            _ => Self::reply(manager, session, request).map(|receipt| ActionResult::Reply { receipt }),
+            _ => Self::reply(manager, session, request),
         }
     }
 
-    fn reply(manager: &SessionManager, session: u32, request: ActionRequest) -> Result<ReplyReceipt, String> {
+    fn reply(manager: &SessionManager, session: u32, request: ActionRequest) -> Result<ActionResult, String> {
         let ask = match &request.action {
             SessionAction::Answer { ask_id, .. } | SessionAction::Approval { ask_id, .. } | SessionAction::Release { ask_id } => *ask_id,
             _ => return Err("Expected a reply.".into()),
@@ -55,12 +56,31 @@ impl ActionRouter {
         let run = live.current_run().ok_or("No live run. Use Raw after restarting.")?;
         let mut recorder = run.recorder.lock().expect("recorder lock");
         let scrubbed = recorder.clean_value(&serde_json::to_value(&request.action).map_err(|e| e.to_string())?).to_string();
-        if let Some(receipt) = replies::existing(&manager.store, session, request.run_id, ask, &request.request_id, &scrubbed)? { return Ok(receipt); }
+        if let Some(receipt) = replies::existing(&manager.store, session, request.run_id, ask, &request.request_id, &scrubbed)? { return Ok(ActionResult::Reply { receipt }); }
+        // A late answer's retry (D112) returns the receipt of the message it became.
+        if matches!(request.action, SessionAction::Answer { .. })
+            && let Some(receipt) = crate::store::delivery::by_request(&manager.store, session, &request.request_id)? { return Ok(ActionResult::Prompt { receipt }); }
         if run.id != request.run_id { return Err("The session restarted. Review its current request.".into()); }
         if run.exit.lock().expect("exit lock").is_some() || run.requested.lock().expect("requested lock").is_some()
             || manager.quitting.load(std::sync::atomic::Ordering::SeqCst) { return Err("The run ended. Its reply channel is closed.".into()); }
         let held = recorder.replies.get_mut(&i64::from(ask)).ok_or("This request is no longer available in Friendly. Check Raw.")?;
-        if !held.available() { return Err("This reply channel expired, disconnected, or was already used. Check Raw.".into()); }
+        if !held.available() {
+            // The hold ended and Claude Code shows its own question in Raw: answer it as a message.
+            if let SessionAction::Answer { answers, .. } = &request.action
+                && held.late_answer()
+                && let ReplyDetails::Question { questions } = &held.request.details
+            {
+                let text = chorus_core::replies::late_answers_prompt(questions, answers)?;
+                // One attempt per ask, as for a held reply.
+                held.sender = None;
+                drop(recorder);
+                let receipt = deliver_late_answer(manager, session, &run, i64::from(ask), &request.request_id, &text)?;
+                drop(_action);
+                manager.notify_id(session);
+                return Ok(ActionResult::Prompt { receipt });
+            }
+            return Err("This reply channel expired, disconnected, or was already used. Check Raw.".into());
+        }
         let body = chorus_core::replies::response(&held.request, &request.action)?;
         let receipt = replies::begin(&manager.store, session, run.id, ask, &request.request_id, &scrubbed)?;
         // A receiver disconnect racing this send is uncertain, never permission to retry. The
@@ -69,7 +89,7 @@ impl ActionRouter {
         drop(recorder);
         drop(_action);
         manager.notify_id(session);
-        Ok(receipt)
+        Ok(ActionResult::Reply { receipt })
     }
 }
 
