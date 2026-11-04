@@ -45,6 +45,30 @@ pub fn deliver_prompt(manager: &SessionManager, session_id: u32, run_id: u32, re
     Ok(receipt)
 }
 
+/// D112: a Claude Code question whose hold ended is showing in Raw. Esc closes it, then the answers
+/// go to the agent as a message on the same persist-before-write path. The caller holds the action
+/// lock (so Raw keystrokes can't interleave), not the recorder's, and has spent the reply's attempt.
+pub(super) fn deliver_late_answer(manager: &SessionManager, session_id: u32, run: &super::Run, ask_row: i64, request_id: &str, text: &str) -> Result<Delivered, String> {
+    // Persisted before anything is written, the Esc included.
+    let scrubbed = run.recorder.lock().expect("recorder lock").clean(text);
+    let receipt = delivery::begin(&manager.store, session_id, run.id, request_id, &scrubbed, PromptSource::Composer, crate::store::now_ms())?;
+    let closed = {
+        use std::io::Write;
+        let mut writer = run.writer.lock().expect("writer lock");
+        writer.write_all(b"\x1b").and_then(|()| writer.flush())
+    };
+    // An uncertain receipt after a failed Esc, never a retry.
+    if closed.is_err() { return Ok(receipt); }
+    // Let Claude Code close its question and return to its prompt. The recorder stays unlocked
+    // meanwhile, so a hook it sends for the dismissal isn't held up.
+    std::thread::sleep(std::time::Duration::from_millis(1200));
+    let mut recorder = run.recorder.lock().expect("recorder lock");
+    recorder.raw_dirty = false;
+    let receipt = write_attempt(manager, run, text, receipt);
+    recorder.answer_late(&manager.store, ask_row, text);
+    Ok(receipt)
+}
+
 /// Caller holds the session action and recorder locks, and has committed the attempt.
 pub(super) fn write_attempt(manager: &SessionManager, run: &super::Run, text: &str, mut receipt: Delivered) -> Delivered {
     // Keep the writer across both writes so Raw keystrokes cannot interleave the text and Enter.

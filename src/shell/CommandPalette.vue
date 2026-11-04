@@ -46,8 +46,7 @@ const sessionItems = computed<PaletteItem[]>(() =>
 )
 
 const projectItems = computed<PaletteItem[]>(() => [
-  { id: 'p-all', group: 'Projects', label: 'All projects', hint: `${sessions.list.length} sessions`, run: () => view.openProject(null) },
-  ...projects.usable.map((p) => {
+  { id: 'p-all', group: 'Projects', label: 'All projects', hint: `${sessions.list.length} sessions`, run: () => view.openProject(null) },  ...projects.usable.map((p) => {
     const mine = sessions.list.filter((s) => s.projectId === p.id)
     const waiting = mine.filter((s) => needsYou(s.attention)).length
     return {
@@ -63,10 +62,34 @@ const projectItems = computed<PaletteItem[]>(() => [
   }),
 ])
 
+/** The project the window is showing: the open session's, or the Overview's or Grid's filter. */
+const currentProject = computed(() => {
+  if (view.name !== 'session') return view.projectFilter
+  return sessions.list.find((s) => s.id === view.sessionId)?.projectId ?? null
+})
+
+/** Grid View and Filmstrip View swap: the palette offers whichever isn't the current mode (D113). */
+const layoutItem = computed<PaletteItem>(() => {
+  if (view.projectLayout === 'filmstrip') {
+    return { id: 'go-grid', group: 'Go to', label: 'Grid View', keywords: 'wall terminals sessions tiles', run: () => view.openGrid(currentProject.value) }
+  }
+  return {
+    id: 'go-filmstrip',
+    group: 'Go to',
+    label: 'Filmstrip View',
+    keywords: 'strip one session',
+    run: () => {
+      const p = currentProject.value
+      const open = view.name === 'session' ? view.sessionId : ([...sessions.list].filter((s) => s.projectId === p).sort(byUrgency)[0]?.id ?? null)
+      view.openFilmstrip(p, open)
+    },
+  }
+})
+
 const placeItems = computed<PaletteItem[]>(() => [
-  { id: 'go-overview', group: 'Go to', label: 'Overview', run: () => view.openProject(null) },
-  { id: 'go-sessions', group: 'Go to', label: 'Sessions', run: () => ((view.sessionsLayout = 'list'), view.go('sessions')) },
-  { id: 'go-wall', group: 'Go to', label: 'Wall of live terminals', keywords: 'sessions grid', run: () => ((view.sessionsLayout = 'wall'), view.go('sessions')) },
+  { id: 'go-overview', group: 'Go to', label: 'Overview', run: () => view.openOverview() },
+  { id: 'go-sessions', group: 'Go to', label: 'Sessions', run: () => view.go('sessions') },
+  layoutItem.value,
   { id: 'go-appearance', group: 'Go to', label: 'Settings: Appearance', keywords: 'theme zoom', run: () => view.openSettings('appearance') },
   { id: 'go-projects', group: 'Go to', label: 'Settings: Projects', keywords: 'colours folders', run: () => view.openSettings('projects') },
   { id: 'go-providers', group: 'Go to', label: 'Settings: Providers', keywords: 'openrouter jev gateway models', run: () => view.openSettings('providers') },

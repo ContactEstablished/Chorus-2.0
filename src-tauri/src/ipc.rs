@@ -57,6 +57,7 @@ pub fn builder() -> Builder<tauri::Wry> {
             routing::commands::routing_refresh_log,
             s::sessions_list,
             s::session_open_folder,
+            s::session_open_path,
             s::session_create,
             s::sessions_launch,
             s::launch_presets,

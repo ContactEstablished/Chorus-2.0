@@ -1,8 +1,9 @@
 <script setup lang="ts">
 /**
  * New session, in the two-pane layout of Matthew's design (1c, D56). The form: the agent as logo
- * tiles, the folder with Windows' picker and the recent folders, a worktree suggested when running
- * sessions already work there (D53), a suggested name, the project and tags (D52) with a note, and
+ * tiles, the project (required; its folder is the project's, shown beneath it) and where to work in
+ * it (a worktree is suggested when running sessions already work there, D53), a suggested name,
+ * tags (D52) with a note, and
  * effort and permissions; folded away, what it runs on (its own sign-in by default; a provider, a
  * model and a key). The summary: the mode (Solo, Pair, Workbench, Swarm), what will start, the exact
  * arguments, and Start.
@@ -83,8 +84,6 @@ function storedAgent(): AgentKind | null {
 const agent = ref<AgentKind>(storedAgent() ?? 'claude')
 const preset = ref<Preset>('solo')
 const swarmCount = ref(3)
-const cwd = ref('')
-const recent = ref<string[]>([])
 const check = ref<FolderCheck | null>(null)
 type WorkspaceChoice = 'here' | 'new-worktree' | 'existing'
 const workspace = ref<WorkspaceChoice>('here')
@@ -116,7 +115,7 @@ const presetChoices = ref<PresetChoice[]>([])
 
 const info = computed(() => agents.byKind.get(agent.value) ?? null)
 
-onMounted(async () => {
+onMounted(() => {
   void agents.load(true)
   void providers.load()
   void profiles.load()
@@ -131,9 +130,6 @@ onMounted(async () => {
   commands.tagsKnown().then((r) => {
     if (r.status === 'ok') knownTags.value = r.data.map((t) => t.tag)
   })
-  recent.value = await commands.foldersRecent().catch(() => [])
-  const projectFolder = props.initialProject === null ? null : (projects.byId.get(props.initialProject)?.folder ?? null)
-  if (!cwd.value) cwd.value = projectFolder ?? recent.value[0] ?? ''
 })
 
 // Agents, as logo tiles. One Chorus couldn't find says why and can't be chosen.
@@ -192,7 +188,10 @@ const presetText = computed(() => {
   return [p.blurb + '.', p.note].filter(Boolean).join(' ')
 })
 
-// The folder: checked as it's typed or picked.
+const chosenProject = computed(() => (projectId.value === null ? null : (projects.byId.get(projectId.value) ?? null)))
+const cwd = computed(() => chosenProject.value?.folder ?? '')
+
+// The folder is the chosen project's: checked when the project changes.
 let checkTimer: ReturnType<typeof setTimeout> | undefined
 let checkSeq = 0
 watch(cwd, (folder) => {
@@ -245,30 +244,6 @@ const sharingText = computed(() => {
   const list = who.length > 2 ? `${who.slice(0, 2).join(', ')} and ${who.length - 2} more` : who.join(' and ')
   return `${list} ${s.length === 1 ? 'is' : 'are'} already working on ${branchText.value} here.`
 })
-const autoProject = computed(() => (check.value?.projectId == null ? null : (projects.byId.get(check.value.projectId) ?? null)))
-const chosenProject = computed(() => (projectId.value === null ? null : (projects.byId.get(projectId.value) ?? null)))
-const recentChips = computed(() => recent.value.filter((f) => f.toLowerCase() !== cwd.value.trim().toLowerCase()).slice(0, 5))
-function leaf(path: string): string {
-  return path.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || path
-}
-// A long path shows its end (the folder's own name) unless it's being edited.
-const folderEl = ref<HTMLInputElement | null>(null)
-function showFolderEnd(): void {
-  const el = folderEl.value
-  if (el && document.activeElement !== el) el.scrollLeft = el.scrollWidth
-}
-watch(cwd, () => void nextTick(showFolderEnd))
-// Again once the monospace font has loaded and the dialog has finished rising: both change widths.
-onMounted(() => {
-  void document.fonts?.ready.then(showFolderEnd)
-  setTimeout(showFolderEnd, 300)
-})
-
-async function browse(): Promise<void> {
-  const picked = await commands.folderPick(cwd.value.trim() || null).catch(() => null)
-  if (picked) cwd.value = picked
-}
-
 // The name: suggested from Chorus 1's pool; another on request.
 async function suggestName(): Promise<void> {
   const next = await commands.sessionSuggestName(offeredNames.value).catch(() => '')
@@ -404,7 +379,8 @@ async function saveProfile(): Promise<void> {
 }
 
 const blocker = computed(() => {
-  if (!cwd.value.trim()) return 'Choose a folder.'
+  if (!chosenProject.value) return 'Choose a project.'
+  if (!cwd.value.trim()) return `${chosenProject.value.name} has no folder. Set one in the project's settings.`
   if (folderPending.value) return 'Checking folder and worktrees…'
   if (!check.value) return retainedProblem.value ?? 'Could not check the folder.'
   if (check.value?.problem) return check.value.problem
@@ -486,15 +462,10 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
       </section>
 
       <section class="field">
-        <span class="label">Folder</span>
-        <div class="boxed folder">
-          <input ref="folderEl" v-model="cwd" class="mono" placeholder="C:\Projects\app" spellcheck="false" autocomplete="off" aria-label="Folder" @blur="showFolderEnd" />
-          <button type="button" class="inner" @click="browse"><Icon name="folder" :size="14" /> Browse…</button>
-        </div>
-        <div v-if="recentChips.length" class="chips">
-          <span class="small">Recent</span>
-          <button v-for="f in recentChips" :key="f" type="button" class="folder-chip" :title="f" @click="cwd = f">{{ leaf(f) }}</button>
-        </div>
+        <span class="label">Project</span>
+        <ProjectPicker v-model="projectId" required />
+        <p v-if="chosenProject?.folder" class="path mono" :title="chosenProject.folder">{{ chosenProject.folder }}</p>
+        <p v-else-if="chosenProject" class="hint bad">{{ chosenProject.name }} has no folder. Set one in the project's settings.</p>
         <p v-if="check?.problem" class="hint bad">{{ check.problem }}</p>
         <p v-else-if="check?.gitNote" class="hint warn">{{ check.gitNote }}</p>
         <p v-else-if="check && !git" class="hint">Not a git repository: sessions work in the folder itself.</p>
@@ -527,19 +498,13 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
         <p v-else-if="git" class="hint">Each agent gets a worktree and branch of its own ({{ git.newBranch }}), made from {{ branchText }}.</p>
       </section>
 
-      <section class="pair">
-        <div class="field">
-          <span class="label">Name</span>
-          <div class="boxed">
-            <input v-model="name" maxlength="80" autocomplete="off" aria-label="Name" placeholder="unnamed" />
-            <button type="button" class="quiet inner icon" title="Suggest another name" aria-label="Suggest another name" @click="suggestName">
-              <Icon name="shuffle" :size="15" />
-            </button>
-          </div>
-        </div>
-        <div class="field">
-          <span class="label">Project</span>
-          <ProjectPicker v-model="projectId" :auto="autoProject" :new-folder="git?.topLevel ?? (check && !check.problem ? cwd.trim() : null)" />
+      <section class="field">
+        <span class="label">Name</span>
+        <div class="boxed">
+          <input v-model="name" maxlength="80" autocomplete="off" aria-label="Name" placeholder="unnamed" />
+          <button type="button" class="quiet inner icon" title="Suggest another name" aria-label="Suggest another name" @click="suggestName">
+            <Icon name="shuffle" :size="15" />
+          </button>
         </div>
       </section>
 
@@ -675,7 +640,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
         <dt>Name</dt>
         <dd>{{ name.trim() || 'unnamed' }}</dd>
         <dt>Project</dt>
-        <dd :class="{ muted: !chosenProject }">{{ chosenProject?.name ?? `By folder${autoProject ? `: ${autoProject.name}` : ''}` }}</dd>
+        <dd :class="{ muted: !chosenProject }">{{ chosenProject?.name ?? '—' }}</dd>
         <template v-if="tags.length">
           <dt>Tags</dt>
           <dd>{{ tags.join(', ') }}</dd>
@@ -700,7 +665,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
       <button type="button" class="quiet runs" :title="'What it runs on: change it in the form'" @click="openRunsOn">
         <span class="led" :class="{ key: provider || keyLabel }" />Runs on {{ runsOnText }}
       </button>
-      <p v-if="blocker && cwd.trim()" class="small warn">{{ blocker }}</p>
+      <p v-if="blocker" class="small warn">{{ blocker }}</p>
       <div class="buttons">
         <button type="submit" class="primary start" :disabled="!!blocker || busy" title="Start (Ctrl+Enter)">
           {{ busy ? 'Starting…' : sessionCount > 1 ? `Start ${sessionCount} sessions` : 'Start session' }}
@@ -855,10 +820,13 @@ em {
   gap: 6px;
   align-items: center;
 }
-.folder-chip {
-  padding: 2px 10px;
-  border-radius: var(--radius-pill);
-  font-size: 12px;
+/* The project's folder, under the picker. */
+.path {
+  margin: 0;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .chip {
   display: inline-flex;

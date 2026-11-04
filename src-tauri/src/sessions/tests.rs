@@ -322,6 +322,46 @@ fn expired_raw_answered_locked_and_stale_requests_cannot_reply() {
 }
 
 #[test]
+fn an_expired_question_is_answered_as_a_message_once() {
+    use chorus_core::actions::SessionAction;
+    let f = Fixture::new("reply-late");
+    let (id, run, chunks) = delivery_fixture(&f, false);
+    let payload = serde_json::json!({"hook_event_name":"PreToolUse","tool_name":"AskUserQuestion","tool_use_id":"q1",
+        "tool_input":{"questions":[{"question":"Move them?","options":[{"label":"Leave them","description":""}]},{"question":"Backups?"}]}});
+    let (ask, receiver) = {
+        let mut r = run.recorder.lock().unwrap();
+        r.record(&f.manager.store, "test", &payload, &chorus_core::events::from_claude_hook(&payload), crate::store::now_ms());
+        let receiver = r.hold_reply(&f.manager.store, &payload).unwrap();
+        assert!(!r.pending_replies()[0].late_answer, "still held: answered through the hook");
+        (r.newest_ask().unwrap() as u32, receiver)
+    };
+    // The hold ends: Claude Code shows its own question in Raw.
+    drop(receiver);
+    assert!(run.recorder.lock().unwrap().pending_replies()[0].late_answer);
+    let answer = |answers: Vec<String>| actions::ActionRequest { run_id: run.id, request_id: DELIVERY_REQUEST.into(), action: SessionAction::Answer { ask_id: ask, answers } };
+    assert!(actions::ActionRouter::dispatch(&f.manager, id, answer(vec!["Leave them".into(), " ".into()])).is_err());
+    assert!(chunks.lock().unwrap().is_empty(), "an incomplete answer writes nothing");
+    let request = answer(vec!["Leave them".into(), "DB only".into()]);
+    let actions::ActionResult::Prompt { receipt } = actions::ActionRouter::dispatch(&f.manager, id, request.clone()).unwrap() else { panic!("expected a message") };
+    let written = chunks.lock().unwrap().clone();
+    assert_eq!(written[0], b"\x1b", "Esc closes the question first");
+    let text = String::from_utf8(written[1].clone()).unwrap();
+    assert!(text.contains("1. Move them?\nLeave them") && text.contains("2. Backups?\nDB only"), "{text}");
+    assert_eq!(written[2], b"\r");
+    // The ask is settled with the answers, and the card is gone.
+    assert!(run.recorder.lock().unwrap().pending_replies().is_empty());
+    let settled: Option<String> = f.manager.store.with(|c| c.query_row("SELECT answer FROM asks WHERE id=?1", [ask], |r| r.get(0))).unwrap();
+    assert!(settled.unwrap().contains("DB only"));
+    // A retry returns the same receipt and writes nothing more; another request is refused.
+    let actions::ActionResult::Prompt { receipt: again } = actions::ActionRouter::dispatch(&f.manager, id, request.clone()).unwrap() else { panic!("expected a message") };
+    assert_eq!(again.prompt_id, receipt.prompt_id);
+    let mut other = request;
+    other.request_id = OTHER_REQUEST.into();
+    assert!(actions::ActionRouter::dispatch(&f.manager, id, other).is_err());
+    assert_eq!(chunks.lock().unwrap().len(), 3);
+}
+
+#[test]
 fn reply_database_failure_does_not_send_and_release_makes_no_decision() {
     use chorus_core::actions::SessionAction;
     let f = Fixture::new("reply-store-failure");

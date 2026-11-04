@@ -150,7 +150,7 @@ onBeforeUnmount(() => { disposed = true; generation++; clearTimeout(timer); resi
               </div>
               <div v-else class="sent-row">
                 <article class="sent" :class="{ folded: isLongPrompt(turn.prompt) && !expanded.has(turn.id) }">
-                  <MessageContent :text="turn.prompt ?? 'Prompt was not observed.'">You<small v-if="sourceBadge(turn.promptSource)">{{ sourceBadge(turn.promptSource) }}</small></MessageContent>
+                  <MessageContent :session-id="session.id" :text="turn.prompt ?? 'Prompt was not observed.'">You<small v-if="sourceBadge(turn.promptSource)">{{ sourceBadge(turn.promptSource) }}</small></MessageContent>
                   <button v-if="isLongPrompt(turn.prompt)" class="quiet fold" @click="toggle(turn.id)">{{ expanded.has(turn.id) ? 'Show less' : 'Show the full prompt' }}</button>
                 </article>
               </div>
@@ -167,7 +167,7 @@ onBeforeUnmount(() => { disposed = true; generation++; clearTimeout(timer); resi
                   <ol v-if="steps(turn).length" class="steps">
                     <li v-for="step in steps(turn)" :key="step.id" :class="step.kind">
                       <span v-if="step.kind === 'proposed-plan'" class="step-tag">Proposed plan</span>
-                      <MessageContent :text="step.text" plain />
+                      <MessageContent :session-id="session.id" :text="step.text" plain />
                     </li>
                   </ol>
                   <section v-if="latestPlan(turn)" class="plan" aria-label="Agent plan">
@@ -199,7 +199,7 @@ onBeforeUnmount(() => { disposed = true; generation++; clearTimeout(timer); resi
                   <img :src="AGENT_LOGOS[session.agent]" :alt="agentLabel" />
                 </span>
                 <article class="reply">
-                  <MessageContent :text="turn.finalMessage">{{ agentLabel }}<small v-if="turn.endedAtSecs">{{ timeLabel(turn.endedAtSecs) }}</small></MessageContent>
+                  <MessageContent :session-id="session.id" :text="turn.finalMessage">{{ agentLabel }}<small v-if="turn.endedAtSecs">{{ timeLabel(turn.endedAtSecs) }}</small></MessageContent>
                 </article>
               </div>
               <p v-else-if="turn.endReason && turn.endReason !== 'done'" class="noreply">The turn {{ endLabel(turn).label.toLowerCase() }} without a reply.</p>

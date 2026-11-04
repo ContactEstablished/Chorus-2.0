@@ -151,7 +151,10 @@ impl Recorder {
                 remaining_secs: chorus_core::replies::REPLY_WAIT_SECS.saturating_sub(reply.opened.elapsed().as_secs()) as u32,
                 blocked_reason: (!reply.available()).then(|| if reply.sender.is_none() {
                     "Reply attempted or returned to Raw. Waiting for the agent; no automatic resend.".into()
+                } else if reply.late_answer() {
+                    "The question has moved to Raw. Send as a message closes it there and sends your answers to the agent.".into()
                 } else { "Reply channel expired or disconnected. Answer the agent in Raw.".into() }),
+                late_answer: reply.late_answer(),
             })
         }).collect()
     }
@@ -246,6 +249,12 @@ impl Recorder {
                 self.replies.retain(|id, _| self.asks.iter().any(|a| a.row == *id));
             }
         }
+    }
+
+    /// Settles a question answered as a message after its hold ended (D112).
+    pub fn answer_late(&mut self, store: &Store, ask_row: i64, answer: &str) {
+        let answer = self.clean(answer);
+        self.answer(store, |a| a.row == ask_row, &answer);
     }
 
     fn answer(&mut self, store: &Store, pick: impl Fn(&OpenAsk) -> bool, answer: &str) {

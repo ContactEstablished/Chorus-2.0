@@ -20,6 +20,26 @@ markdown.renderer.rules.link_open = (tokens, idx, options, _env, renderer) => {
   tokens[idx]!.attrSet('title', `${tokens[idx]!.attrGet('href')} — opens in your browser`)
   return renderer.renderToken(tokens, idx, options)
 }
+/**
+ * The path in an inline code span, when it reads as a file or folder: a drive path, or a relative one
+ * with a separator that ends in a file extension or a slash. A `:line` or `:line:col` suffix is dropped.
+ * Whether it exists, and whether it is inside the session folder, is decided by the back end on click.
+ */
+export function localPath(value: string): string | null {
+  const text = value.trim().replace(/:\d+(?::\d+)?$/, '')
+  if (!text || text.length > 1024 || /[\u0000-\u001f\u007f<>"|?*]/.test(text) || /^[a-z][a-z0-9+.-]*:\/\//i.test(text)) return null
+  if (/^[a-z]:[\\/]/i.test(text)) return text
+  if (/^[a-z]:/i.test(text) || text.startsWith('\\\\') || /^[\\/]/.test(text)) return null
+  if (!/[\\/]/.test(text) || /^\s|\s$/.test(text)) return null
+  return /\.[a-z0-9]{1,8}$/i.test(text) || /[\\/]$/.test(text) ? text : null
+}
+markdown.renderer.rules.code_inline = (tokens, idx) => {
+  const content = tokens[idx]!.content
+  const path = localPath(content)
+  if (!path) return `<code>${escape(content)}</code>`
+  return `<code class="path-link" role="link" tabindex="0" data-path="${escape(path)}" title="Open ${escape(path)}">${escape(content)}</code>`
+}
+
 markdown.renderer.rules.table_open = () => '<div class="message-table" tabindex="0" role="region" aria-label="Table"><table>\n'
 markdown.renderer.rules.table_close = () => '</table></div>\n'
 

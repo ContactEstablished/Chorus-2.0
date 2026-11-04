@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 
 /** The rail's destinations, plus one session's own view. */
-export type ViewName = 'overview' | 'sessions' | 'session' | 'bots' | 'automations' | 'loop' | 'documents' | 'notes' | 'settings'
+export type ViewName = 'overview' | 'sessions' | 'session' | 'grid' | 'bots' | 'automations' | 'loop' | 'documents' | 'notes' | 'settings'
 
 export type SettingsSection = 'appearance' | 'projects' | 'providers' | 'routing' | 'keys' | 'agents' | 'narrator' | 'phone'
 
@@ -20,12 +20,16 @@ const MAX_BACK = 50
 export const useViewStore = defineStore('view', () => {
   const place = ref<Place>({ name: 'overview', sessionId: null })
   const back = ref<Place[]>([])
-  /** The Overview's project filter; null is every project. */
+  /** The Overview's and the Grid's project filter; null is every project. */
   const projectFilter = ref<number | null>(null)
   const settingsSection = ref<SettingsSection>('appearance')
   /** Whether the New session dialog is open. */
   const newSessionOpen = ref(false)
-  const sessionsLayout = ref<'list' | 'wall'>('list')
+  /**
+   * How a project is shown: the Grid of its sessions' live terminals, or the Filmstrip (one session
+   * at a time, its project's others in the strip above). In Grid mode a project click opens its Grid.
+   */
+  const projectLayout = ref<'filmstrip' | 'grid'>('filmstrip')
   /** The command palette (Ctrl+K), or its projects-only form (Ctrl+G). */
   const palette = ref<'all' | 'projects' | null>(null)
 
@@ -48,10 +52,29 @@ export const useViewStore = defineStore('view', () => {
     go('settings')
   }
 
-  /** Shows the Overview filtered to one project (null: all). */
+  /** Shows one project (null: all): its Grid in Grid mode, otherwise the Overview filtered to it. */
   function openProject(id: number | null): void {
     projectFilter.value = id
+    go(projectLayout.value === 'grid' ? 'grid' : 'overview')
+  }
+
+  /** Shows the Overview of every project, whatever the mode. */
+  function openOverview(): void {
+    projectFilter.value = null
     go('overview')
+  }
+
+  /** Switches to Grid mode and shows one project's Grid (null: every session). */
+  function openGrid(id: number | null): void {
+    projectLayout.value = 'grid'
+    openProject(id)
+  }
+
+  /** Switches to Filmstrip mode and opens a session, or the project's Overview when it has none. */
+  function openFilmstrip(projectId: number | null, sessionId: number | null): void {
+    projectLayout.value = 'filmstrip'
+    if (sessionId !== null) openSession(sessionId)
+    else openProject(projectId)
   }
 
   function goBack(): void {
@@ -72,13 +95,16 @@ export const useViewStore = defineStore('view', () => {
     projectFilter,
     settingsSection,
     newSessionOpen,
-    sessionsLayout,
+    projectLayout,
     palette,
     canGoBack: computed(() => back.value.length > 0),
     go,
     openSession,
     openSettings,
     openProject,
+    openOverview,
+    openGrid,
+    openFilmstrip,
     goBack,
     forgetSession,
   }

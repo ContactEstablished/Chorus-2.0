@@ -17,6 +17,13 @@ impl HeldReply {
     pub fn available(&self) -> bool {
         self.opened.elapsed() < Duration::from_secs(REPLY_WAIT_SECS) && self.sender.as_ref().is_some_and(|s| !s.is_closed())
     }
+
+    /// A Claude Code question whose hold ended unanswered: its own question is now showing in Raw,
+    /// so Friendly can still answer it as a message (D112). Never an approval, and never after an
+    /// attempt (any reply or release takes the sender).
+    pub fn late_answer(&self) -> bool {
+        matches!(self.request.details, ReplyDetails::Question { .. }) && self.request.protocol.is_none() && self.sender.is_some() && !self.available()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Type)]
@@ -28,4 +35,6 @@ pub struct PendingReply {
     pub denial_reason_supported: bool,
     pub remaining_secs: u32,
     pub blocked_reason: Option<String>,
+    /// The hold ended, but the answers can still reach the agent as a message (D112).
+    pub late_answer: bool,
 }

@@ -42,6 +42,15 @@ pub fn existing(store: &Store, session: u32, request: &str, text: &str, source: 
     }
 }
 
+/// The receipt a request id already has, whatever its text: a late answer's retry (D112) can't
+/// rebuild its text once the question is settled.
+pub fn by_request(store: &Store, session: u32, request: &str) -> Result<Option<Delivered>, String> {
+    store.with(|c| c.query_row(
+        "SELECT d.prompt_id,d.run_id,d.status FROM prompt_deliveries d WHERE d.session_id=?1 AND d.request_id=?2",
+        params![session, request], receipt,
+    ).optional())
+}
+
 pub fn begin(store: &Store, session: u32, run: u32, request: &str, text: &str, source: PromptSource, at: i64) -> Result<Delivered, String> {
     begin_with_queue(store, session, run, request, text, source, at, None)
 }

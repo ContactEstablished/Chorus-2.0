@@ -23,6 +23,7 @@ import { events } from '../ipc'
 import OverviewView from '../views/OverviewView.vue'
 import SessionsView from '../views/SessionsView.vue'
 import SessionView from '../views/session/SessionView.vue'
+import GridView from '../views/grid/GridView.vue'
 
 const SettingsView = defineAsyncComponent(() => import('../views/SettingsView.vue'))
 // P8's screens.
@@ -133,6 +134,7 @@ watch(
         <SettingsView v-if="view.name === 'settings'" />
         <SessionView v-else-if="view.name === 'session' && view.sessionId !== null" :session-id="view.sessionId" />
         <SessionsView v-else-if="view.name === 'sessions'" />
+        <GridView v-else-if="view.name === 'grid'" />
         <BotsView v-else-if="view.name === 'bots'" />
         <AutomationsView v-else-if="view.name === 'automations'" />
         <LoopView v-else-if="view.name === 'loop'" />

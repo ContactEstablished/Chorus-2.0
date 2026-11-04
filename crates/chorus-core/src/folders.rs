@@ -23,6 +23,47 @@ pub fn inside(path: &str, folder: &str) -> bool {
     p == f || p.starts_with(&if f.ends_with('\\') { f } else { format!("{f}\\") })
 }
 
+/// Joins a path an agent wrote (absolute, or relative to the session folder) onto `folder`, resolving
+/// `.` and `..` by text. `None` when it is empty, has characters Windows forbids in a name, or climbs out
+/// of its own root. Whether it is inside the folder is a separate check ([`inside`]).
+pub fn resolve_in(raw: &str, folder: &str) -> Option<String> {
+    let raw = raw.trim();
+    if raw.is_empty() || raw.chars().any(|c| c.is_control() || matches!(c, '<' | '>' | '"' | '|' | '?' | '*')) {
+        return None;
+    }
+    let raw = raw.replace('/', "\\");
+    let bytes = raw.as_bytes();
+    let absolute = bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':';
+    let joined = if absolute { raw } else { format!("{}\\{}", folder.trim().replace('/', "\\").trim_end_matches('\\'), raw) };
+    let mut parts: Vec<&str> = Vec::new();
+    let mut segments = joined.split('\\');
+    let drive = segments.next()?;
+    if drive.len() != 2 || !drive.ends_with(':') {
+        return None;
+    }
+    for seg in segments {
+        match seg {
+            "" | "." => {}
+            ".." => {
+                parts.pop()?;
+            }
+            s => parts.push(s),
+        }
+    }
+    Some(if parts.is_empty() { format!("{drive}\\") } else { format!("{drive}\\{}", parts.join("\\")) })
+}
+
+/// Files that run code when opened. Chorus shows these in Explorer instead of launching them.
+pub fn runs_code(path: &str) -> bool {
+    let name = path.rsplit(['\\', '/']).next().unwrap_or("");
+    let ext = name.rsplit_once('.').map_or("", |(_, e)| e).to_ascii_lowercase();
+    matches!(
+        ext.as_str(),
+        "exe" | "com" | "bat" | "cmd" | "ps1" | "psm1" | "vbs" | "vbe" | "js" | "jse" | "wsf" | "wsh" | "msi" | "msp"
+            | "scr" | "lnk" | "url" | "reg" | "hta" | "cpl" | "jar" | "appx" | "msix" | "dll" | "sys" | "pif" | "gadget"
+    )
+}
+
 /// `path`'s place inside `folder`, as a relative path with backslashes; empty for `folder` itself.
 pub fn relative(path: &str, folder: &str) -> Option<String> {
     if !inside(path, folder) {
@@ -55,6 +96,25 @@ pub fn trim_trailing_separators(path: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn agent_paths_resolve_by_text_and_cannot_leave_the_folder_unnoticed() {
+        let f = r"C:\Projects\App";
+        assert_eq!(resolve_in(r"C:\Projects\App\_docs\a b.md", f).as_deref(), Some(r"C:\Projects\App\_docs\a b.md"));
+        assert_eq!(resolve_in("_docs/x/", f).as_deref(), Some(r"C:\Projects\App\_docs\x"));
+        assert_eq!(resolve_in("./src/../README.md", f).as_deref(), Some(r"C:\Projects\App\README.md"));
+        let escaped = resolve_in(r"..\Other\x.txt", f).unwrap();
+        assert!(!inside(&escaped, f));
+        assert_eq!(resolve_in(r"..\..\..\x", f), None);
+        assert_eq!(resolve_in("a|b", f), None);
+        assert_eq!(resolve_in("", f), None);
+    }
+
+    #[test]
+    fn code_running_files_are_not_launched() {
+        assert!(runs_code(r"C:\x\Setup.EXE") && runs_code("a.ps1") && runs_code("b.lnk"));
+        assert!(!runs_code("notes.md") && !runs_code(r"C:\x\folder.d\readme"));
+    }
 
     #[test]
     fn trailing_separators_go_but_a_drive_root_keeps_its_own() {

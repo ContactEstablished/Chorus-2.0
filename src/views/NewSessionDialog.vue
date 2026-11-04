@@ -22,7 +22,7 @@ const dialog = ref<HTMLElement | null>(null)
 // Focus goes to the first field, and back where it was when the dialog closes.
 const before = document.activeElement instanceof HTMLElement ? document.activeElement : null
 // Opened over a project's Overview, the session starts in that project.
-const initialProject = view.name === 'overview' ? view.projectFilter : null
+const initialProject = view.name === 'overview' || view.name === 'grid' ? view.projectFilter : null
 
 function close(): void {
   view.newSessionOpen = false

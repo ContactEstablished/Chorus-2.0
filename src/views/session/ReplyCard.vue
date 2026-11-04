@@ -46,7 +46,7 @@ async function send(action: SessionAction): Promise<void> {
     <p v-if="pending.blockedReason || sent" class="status" role="status">
       {{ pending.blockedReason ?? 'Reply attempted. Waiting for the agent to confirm; Raw may have answered first.' }}
     </p>
-    <fieldset :disabled="sending || sent || !!pending.blockedReason || !!retry">
+    <fieldset :disabled="sending || sent || (!!pending.blockedReason && !pending.lateAnswer) || !!retry">
       <template v-if="pending.details.kind === 'question'">
         <div v-for="(q, i) in pending.details.questions" :key="i" class="question">
           <strong>{{ q.question }}</strong>
@@ -56,8 +56,9 @@ async function send(action: SessionAction): Promise<void> {
           </span>
           <textarea v-model="answers[i]" :aria-label="q.question" rows="2" maxlength="16384" />
         </div>
-        <p>Send answer returns the text above for each question. Agent processing time varies.</p>
-        <button class="primary" type="button" :disabled="answers.some(a => !a.trim())" @click="send({ kind: 'answer', ask_id: pending.askId, answers: [...answers] })">Send answer</button>
+        <p v-if="pending.lateAnswer">Send as a message closes the question in Raw, then sends each question with your answer to the agent.</p>
+        <p v-else>Send answer returns the text above for each question. Agent processing time varies.</p>
+        <button class="primary" type="button" :disabled="answers.some(a => !a.trim())" @click="send({ kind: 'answer', ask_id: pending.askId, answers: [...answers] })">{{ pending.lateAnswer ? 'Send as a message' : 'Send answer' }}</button>
       </template>
       <template v-else>
         <label v-if="pending.denialReasonSupported" class="question">Optional denial reason<textarea v-model="message" rows="2" maxlength="16384" /></label>
@@ -66,7 +67,7 @@ async function send(action: SessionAction): Promise<void> {
           <button type="button" @click="send({ kind: 'approval', ask_id: pending.askId, decision: 'deny', message: message.trim() || null })">Deny</button>
         </div>
       </template>
-      <button class="quiet" type="button" @click="send({ kind: 'release', ask_id: pending.askId })">Answer in Raw</button>
+      <button v-if="!pending.lateAnswer" class="quiet" type="button" @click="send({ kind: 'release', ask_id: pending.askId })">Answer in Raw</button>
     </fieldset>
     <button v-if="pending.blockedReason || sent" class="quiet" type="button" @click="emit('raw')">Open Raw</button>
     <button v-if="retry" :disabled="sending" type="button" @click="send(retry.action)">Check the same reply</button>

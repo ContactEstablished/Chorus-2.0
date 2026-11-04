@@ -76,6 +76,13 @@ export const commands = {
 	sessionsList: () => typedError<SessionSummary[], string>(__TAURI_INVOKE("sessions_list")),
 	/**  Open only this session's recorded working directory; the frontend cannot supply an arbitrary path. */
 	sessionOpenFolder: (sessionId: number) => typedError<null, string>(__TAURI_INVOKE("session_open_folder", { sessionId })),
+	/**
+	 *  Opens a path an agent wrote in its message: a folder in Explorer, a file in its default program.
+	 *  The path must resolve (symlinks and `..` included) to somewhere inside the session's folder, so a
+	 *  message cannot make Chorus open an arbitrary file. Files that run code are shown in Explorer
+	 *  instead of launched. Returns `true` when opened, `false` when shown in Explorer for that reason.
+	 */
+	sessionOpenPath: (sessionId: number, path: string) => typedError<boolean, string>(__TAURI_INVOKE("session_open_path", { sessionId, path })),
 	sessionCreate: (request: CreateSession) => typedError<SessionSummary, string>(__TAURI_INVOKE("session_create", { request })),
 	/**  Starts the sessions a preset makes (one for Solo, two for Pair and Workbench). */
 	sessionsLaunch: (request: LaunchRequest) => typedError<LaunchOutcome[], string>(__TAURI_INVOKE("sessions_launch", { request })),
@@ -1176,6 +1183,8 @@ export type PendingReply = {
 	denialReasonSupported: boolean,
 	remainingSecs: number,
 	blockedReason: string | null,
+	/**  The hold ended, but the answers can still reach the agent as a message (D112). */
+	lateAnswer: boolean,
 };
 
 /**  How much the agent may do without asking. */
