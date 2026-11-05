@@ -45,14 +45,34 @@ pub async fn session_open_folder(app: tauri::AppHandle, state: Manager<'_>, sess
     }).await
 }
 
+/// What a click on a path in an agent's message ended up doing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, specta::Type)]
+#[serde(rename_all = "snake_case")]
+pub enum PathOpened {
+    Opened,
+    /// The file can run code, so it was selected in Explorer instead of launched.
+    ShownInExplorer,
+    /// The person declined the approval dialog.
+    Cancelled,
+}
+
 /// Opens a path an agent wrote in its message: a folder in Explorer, a file in its default program.
-/// The path must resolve (symlinks and `..` included) to somewhere inside the session's folder, so a
-/// message cannot make Chorus open an arbitrary file. Files that run code are shown in Explorer
-/// instead of launched. Returns `true` when opened, `false` when shown in Explorer for that reason.
+/// A path that resolves (symlinks and `..` included) outside the session's folder opens only after the
+/// person approves its real location in a native dialog, raised here so the front end cannot skip it
+/// (D114). Network paths outside the folder are refused. Files that run code are shown in Explorer
+/// instead of launched.
 #[tauri::command]
 #[specta::specta]
-pub async fn session_open_path(app: tauri::AppHandle, state: Manager<'_>, session_id: u32, path: String) -> Result<bool, String> {
-    use chorus_core::folders;
+pub async fn session_open_path(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+    state: Manager<'_>,
+    session_id: u32,
+    path: String,
+) -> Result<PathOpened, String> {
+    use chorus_core::folders::{self, OpenAction, PathAccess};
+    use std::path::Path;
+    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
     use tauri_plugin_opener::OpenerExt;
     if path.len() > 1024 {
         return Err("That path is too long to open.".into());
@@ -60,21 +80,44 @@ pub async fn session_open_path(app: tauri::AppHandle, state: Manager<'_>, sessio
     blocking(&state, move |m| {
         let cwd = m.row(session_id)?.cwd;
         let resolved = folders::resolve_in(&path, &cwd).ok_or("That doesn't look like a path Chorus can open.")?;
-        let real = std::fs::canonicalize(&resolved).map_err(|_| format!("Nothing exists at {resolved}."))?;
+        let real_path = std::fs::canonicalize(&resolved).map_err(|_| format!("Nothing exists at {resolved}."))?;
         let root = std::fs::canonicalize(&cwd).map_err(|_| "The session folder no longer exists or is unavailable.".to_string())?;
-        let (real, root) = (real.to_string_lossy().into_owned(), root.to_string_lossy().into_owned());
-        if !folders::inside(&real, &root) {
-            return Err("Chorus only opens paths inside this session's folder.".into());
+        let (real, root) = (real_path.to_string_lossy().into_owned(), root.to_string_lossy().into_owned());
+        match folders::path_access(&real, &root) {
+            PathAccess::Inside => {}
+            PathAccess::Refused => return Err("Chorus doesn't open network paths from outside this session's folder.".into()),
+            PathAccess::AskFirst => {
+                let prompt = folders::approval_prompt(folders::open_action(&real, Path::new(&real).is_dir()), &real);
+                let approved = app
+                    .dialog()
+                    .message(prompt.message)
+                    .title(prompt.title)
+                    .kind(MessageDialogKind::Warning)
+                    .buttons(MessageDialogButtons::OkCancelCustom(prompt.confirm.to_owned(), "Cancel".to_owned()))
+                    .parent(&window)
+                    .blocking_show();
+                if !approved {
+                    return Ok(PathOpened::Cancelled);
+                }
+                // What was approved is what opens, even if a link was swapped while the dialog was up.
+                if std::fs::canonicalize(&resolved).ok().as_ref() != Some(&real_path) {
+                    return Err("That path changed while Chorus was asking, so nothing was opened.".into());
+                }
+            }
         }
-        if std::path::Path::new(&real).is_dir() {
-            app.opener().open_path(real, None::<&str>).map_err(|e| format!("opening the folder: {e}"))?;
-            Ok(true)
-        } else if folders::runs_code(&real) {
-            app.opener().reveal_item_in_dir(real).map_err(|e| format!("showing the file: {e}"))?;
-            Ok(false)
-        } else {
-            app.opener().open_path(real, None::<&str>).map_err(|e| format!("opening the file: {e}"))?;
-            Ok(true)
+        match folders::open_action(&real, Path::new(&real).is_dir()) {
+            OpenAction::OpenFolder => {
+                app.opener().open_path(real, None::<&str>).map_err(|e| format!("opening the folder: {e}"))?;
+                Ok(PathOpened::Opened)
+            }
+            OpenAction::ShowInExplorer => {
+                app.opener().reveal_item_in_dir(real).map_err(|e| format!("showing the file: {e}"))?;
+                Ok(PathOpened::ShownInExplorer)
+            }
+            OpenAction::OpenFile => {
+                app.opener().open_path(real, None::<&str>).map_err(|e| format!("opening the file: {e}"))?;
+                Ok(PathOpened::Opened)
+            }
         }
     }).await
 }

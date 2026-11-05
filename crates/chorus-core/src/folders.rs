@@ -61,7 +61,118 @@ pub fn runs_code(path: &str) -> bool {
         ext.as_str(),
         "exe" | "com" | "bat" | "cmd" | "ps1" | "psm1" | "vbs" | "vbe" | "js" | "jse" | "wsf" | "wsh" | "msi" | "msp"
             | "scr" | "lnk" | "url" | "reg" | "hta" | "cpl" | "jar" | "appx" | "msix" | "dll" | "sys" | "pif" | "gadget"
+            | "msc" | "chm" | "scf" | "ws" | "wsc" | "inf" | "py" | "pyw" | "ps1xml" | "appref-ms" | "application"
+            | "library-ms" | "settingcontent-ms"
     )
+}
+
+/// How a click on an agent's path is treated, once symlinks and `..` have been resolved.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PathAccess {
+    /// Inside the session's folder: opens straight away.
+    Inside,
+    /// Outside it, on this machine: opens only after the person approves the real path.
+    AskFirst,
+    /// Outside it, on a network share: never opened, because reaching a share can send it the
+    /// person's Windows credentials.
+    Refused,
+}
+
+/// `real` and `root` are canonical paths, which Windows writes as `\\?\C:\…` or `\\?\UNC\server\…`.
+pub fn path_access(real: &str, root: &str) -> PathAccess {
+    if inside(real, root) {
+        PathAccess::Inside
+    } else if is_local_drive(real) {
+        PathAccess::AskFirst
+    } else {
+        PathAccess::Refused
+    }
+}
+
+fn is_local_drive(path: &str) -> bool {
+    let bytes = path.strip_prefix(r"\\?\").unwrap_or(path).as_bytes();
+    bytes.len() >= 3 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && bytes[2] == b'\\'
+}
+
+/// What opening a path does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OpenAction {
+    OpenFolder,
+    OpenFile,
+    /// The file can run code, so it is selected in Explorer and never launched.
+    ShowInExplorer,
+}
+
+pub fn open_action(path: &str, is_dir: bool) -> OpenAction {
+    if is_dir {
+        OpenAction::OpenFolder
+    } else if runs_code(path) {
+        OpenAction::ShowInExplorer
+    } else {
+        OpenAction::OpenFile
+    }
+}
+
+/// The dialog that approves a path outside the session's folder.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ApprovalPrompt {
+    pub title: &'static str,
+    pub message: String,
+    pub confirm: &'static str,
+}
+
+/// `real` is the resolved path, so the person approves where it really leads rather than what the
+/// agent wrote.
+pub fn approval_prompt(action: OpenAction, real: &str) -> ApprovalPrompt {
+    let (noun, confirm) = match action {
+        OpenAction::OpenFolder => ("folder", "Open folder"),
+        OpenAction::OpenFile => ("file", "Open file"),
+        OpenAction::ShowInExplorer => ("file, which can run code, so it will only be shown in Explorer", "Show in Explorer"),
+    };
+    ApprovalPrompt {
+        title: "Outside this session's folder",
+        message: format!(
+            "An agent's message points to this {noun}:\n\n{}\n\nContinue only if you expected this path.",
+            wrapped_path(&readable_path(real))
+        ),
+        confirm,
+    }
+}
+
+/// The longest line of a path in the approval dialog.
+const PATH_LINE: usize = 60;
+
+/// Windows' task dialog replaces the middle of a long path with `...`, which would hide the part the
+/// person is approving, but it leaves short lines whole. Breaks after a separator where it can.
+fn wrapped_path(path: &str) -> String {
+    let mut out = String::with_capacity(path.len() + 8);
+    let mut line = 0;
+    for segment in path.split_inclusive('\\') {
+        let length = segment.chars().count();
+        if line > 0 && line + length > PATH_LINE {
+            out.push('\n');
+            line = 0;
+        }
+        for c in segment.chars() {
+            if line == PATH_LINE {
+                out.push('\n');
+                line = 0;
+            }
+            out.push(c);
+            line += 1;
+        }
+    }
+    out
+}
+
+/// A canonical path as a person reads it: no `\\?\` prefix, and no invisible direction marks, which
+/// could make a file name appear to be something it isn't.
+pub fn readable_path(path: &str) -> String {
+    path.strip_prefix(r"\\?\")
+        .unwrap_or(path)
+        .chars()
+        .map(|c| if matches!(c, '\u{200E}' | '\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}') { '\u{FFFD}' } else { c })
+        .collect()
 }
 
 /// `path`'s place inside `folder`, as a relative path with backslashes; empty for `folder` itself.
@@ -96,6 +207,60 @@ pub fn trim_trailing_separators(path: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_path_outside_the_folder_asks_first_and_a_network_one_is_refused() {
+        let root = r"\\?\C:\Projects\App";
+        assert_eq!(path_access(r"\\?\C:\Projects\App\_docs\a.md", root), PathAccess::Inside);
+        assert_eq!(path_access(r"\\?\c:\projects\app", root), PathAccess::Inside);
+        assert_eq!(path_access(r"\\?\C:\Projects\App2\a.md", root), PathAccess::AskFirst);
+        assert_eq!(path_access(r"\\?\C:\Users\me\AppData\Local\Temp\a.md", root), PathAccess::AskFirst);
+        assert_eq!(path_access(r"\\?\D:\other", root), PathAccess::AskFirst);
+        assert_eq!(path_access(r"\\?\UNC\server\share\a.md", root), PathAccess::Refused);
+        assert_eq!(path_access(r"\\server\share\a.md", root), PathAccess::Refused);
+        assert_eq!(path_access(r"\\?\Volume{1234}\a.md", root), PathAccess::Refused);
+        // A session whose own folder is on a share keeps working inside that folder.
+        assert_eq!(path_access(r"\\?\UNC\server\share\app\a.md", r"\\?\UNC\server\share\app"), PathAccess::Inside);
+    }
+
+    #[test]
+    fn code_is_only_ever_shown_whether_or_not_it_is_inside_the_folder() {
+        assert_eq!(open_action(r"C:\x\setup.exe", false), OpenAction::ShowInExplorer);
+        assert_eq!(open_action(r"C:\x\console.msc", false), OpenAction::ShowInExplorer);
+        assert_eq!(open_action(r"C:\x\app.appref-ms", false), OpenAction::ShowInExplorer);
+        assert_eq!(open_action(r"C:\x\notes.md", false), OpenAction::OpenFile);
+        assert_eq!(open_action(r"C:\x\folder.exe", true), OpenAction::OpenFolder);
+    }
+
+    #[test]
+    fn the_approval_shows_the_real_path_and_says_what_will_happen() {
+        let file = approval_prompt(OpenAction::OpenFile, r"\\?\C:\Temp\report.md");
+        assert!(file.message.contains(r"C:\Temp\report.md") && !file.message.contains(r"\\?\"));
+        assert_eq!(file.confirm, "Open file");
+        assert_eq!(approval_prompt(OpenAction::OpenFolder, r"\\?\C:\Temp").confirm, "Open folder");
+        let code = approval_prompt(OpenAction::ShowInExplorer, r"\\?\C:\Temp\a.exe");
+        assert!(code.message.contains("only be shown in Explorer"));
+        assert_eq!(code.confirm, "Show in Explorer");
+    }
+
+    #[test]
+    fn a_long_path_is_wrapped_so_windows_cannot_hide_its_middle() {
+        let long = format!(r"C:\Users\me\AppData\Local\Temp\claude\{}\scratchpad\report.md", "x".repeat(150));
+        let wrapped = wrapped_path(&long);
+        assert!(wrapped.lines().all(|l| l.chars().count() <= PATH_LINE), "{wrapped}");
+        assert_eq!(wrapped.replace('\n', ""), long);
+        assert!(wrapped.lines().next().is_some_and(|l| l.ends_with('\\')));
+        assert_eq!(wrapped_path(r"C:\short\a.md"), r"C:\short\a.md");
+        let prompt = approval_prompt(OpenAction::OpenFile, &format!(r"\\?\{long}"));
+        assert_eq!(prompt.message.replace('\n', "").matches(&long).count(), 1);
+    }
+
+    #[test]
+    fn a_file_name_cannot_disguise_itself_with_direction_marks() {
+        assert_eq!(readable_path("\\\\?\\C:\\x\\a\u{202E}dm.exe"), "C:\\x\\a\u{FFFD}dm.exe");
+        assert_eq!(readable_path(r"\\?\UNC\server\share"), r"UNC\server\share");
+        assert_eq!(readable_path(r"C:\plain path\é.md"), r"C:\plain path\é.md");
+    }
 
     #[test]
     fn agent_paths_resolve_by_text_and_cannot_leave_the_folder_unnoticed() {

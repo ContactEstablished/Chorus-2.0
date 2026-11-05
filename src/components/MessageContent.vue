@@ -21,7 +21,7 @@ async function openPath(path: string): Promise<void> {
   if (props.sessionId === undefined) return
   const result = await commands.sessionOpenPath(props.sessionId, path)
   if (result.status === 'error') notices.error(result.error)
-  else if (!result.data) notices.success('That file can run code, so it is shown in Explorer instead of being opened.')
+  else if (result.data === 'shown_in_explorer') notices.success('That file can run code, so it is shown in Explorer instead of being opened.')
 }
 
 function pathKey(event: KeyboardEvent): void {

@@ -23,7 +23,8 @@ markdown.renderer.rules.link_open = (tokens, idx, options, _env, renderer) => {
 /**
  * The path in an inline code span, when it reads as a file or folder: a drive path, or a relative one
  * with a separator that ends in a file extension or a slash. A `:line` or `:line:col` suffix is dropped.
- * Whether it exists, and whether it is inside the session folder, is decided by the back end on click.
+ * Whether it exists, and whether it needs approval for being outside the session folder, is decided by
+ * the back end on click.
  */
 export function localPath(value: string): string | null {
   const text = value.trim().replace(/:\d+(?::\d+)?$/, '')
