@@ -78,11 +78,12 @@ export const commands = {
 	sessionOpenFolder: (sessionId: number) => typedError<null, string>(__TAURI_INVOKE("session_open_folder", { sessionId })),
 	/**
 	 *  Opens a path an agent wrote in its message: a folder in Explorer, a file in its default program.
-	 *  The path must resolve (symlinks and `..` included) to somewhere inside the session's folder, so a
-	 *  message cannot make Chorus open an arbitrary file. Files that run code are shown in Explorer
-	 *  instead of launched. Returns `true` when opened, `false` when shown in Explorer for that reason.
+	 *  A path that resolves (symlinks and `..` included) outside the session's folder opens only after the
+	 *  person approves its real location in a native dialog, raised here so the front end cannot skip it
+	 *  (D114). Network paths outside the folder are refused. Files that run code are shown in Explorer
+	 *  instead of launched.
 	 */
-	sessionOpenPath: (sessionId: number, path: string) => typedError<boolean, string>(__TAURI_INVOKE("session_open_path", { sessionId, path })),
+	sessionOpenPath: (sessionId: number, path: string) => typedError<PathOpened, string>(__TAURI_INVOKE("session_open_path", { sessionId, path })),
 	sessionCreate: (request: CreateSession) => typedError<SessionSummary, string>(__TAURI_INVOKE("session_create", { request })),
 	/**  Starts the sessions a preset makes (one for Solo, two for Pair and Workbench). */
 	sessionsLaunch: (request: LaunchRequest) => typedError<LaunchOutcome[], string>(__TAURI_INVOKE("sessions_launch", { request })),
@@ -1175,6 +1176,13 @@ export type PairingCode = {
 	code: string,
 	expiresAtSecs: number,
 };
+
+/**  What a click on a path in an agent's message ended up doing. */
+export type PathOpened = "opened" | 
+/**  The file can run code, so it was selected in Explorer instead of launched. */
+"shown_in_explorer" | 
+/**  The person declined the approval dialog. */
+"cancelled";
 
 export type PendingReply = {
 	askId: number,
