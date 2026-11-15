@@ -1,7 +1,7 @@
 # Roadmap: P16 Progress panel and P17 Goal mode
 
-Written 2026-11-14 from D115–D118. P16 is next. P17 is provisional until its own kickoff. Task docs
-come later from phase-kickoff, in [Tasks/](Tasks/) (not yet created).
+Written 2026-11-14 from D115–D118. P16 is next. P17 is provisional until its own kickoff. P16's task
+docs are in [P16/](P16/Phase-16-Overview.md), from its kickoff on 2026-11-15.
 
 ## 1. Purpose
 
@@ -71,8 +71,7 @@ Re-check a fact before relying on it; the code moves.
 
 ### P16 — Progress panel
 
-**Status: next.** Specified here at roadmap level. Task docs come from phase-kickoff, in
-[Tasks/](Tasks/) (not yet created).
+**Status: next; kicked off 2026-11-15.** Task docs in [P16/](P16/Phase-16-Overview.md). Q1–Q6 were settled at kickoff (D119–D122).
 
 Display rules for every slice:
 
@@ -169,6 +168,8 @@ Exit criteria are written at kickoff. The outline, in order:
 - P11's Usage screen (on hold, D102). P16 records step times; it doesn't build Usage.
 
 ## 7. Open questions for kickoff
+
+Q1–Q6 were settled at P16's kickoff on 2026-11-15: Q1 by D119, Q2, Q3 and Q6 by D122, Q4 by D120, Q5 by D121. Q7 and Q8 stay open for P17.
 
 1. **Time split source** (16.2): record activity changes, or derive from turns and asks?
 2. **Codex step times** (F11): one row per plan update, or step times kept as updates arrive?
