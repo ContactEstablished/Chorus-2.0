@@ -46,6 +46,12 @@ pub struct Recorder {
     transcript: Option<String>,
     plan: Vec<chorus_core::progress::PlanStep>,
     progress_sequence: u64,
+    /// The plan an Overview card shows (16-3): the newest snapshot, or the seeded one until then.
+    shown: Vec<chorus_core::progress::PlanStep>,
+    /// The current step's text and when it started in this run (16-3).
+    current: Option<(String, i64)>,
+    /// Bumped on every plan snapshot, so the hook path republishes the summary on a plan change.
+    plan_version: u64,
 }
 
 impl Recorder {
@@ -69,6 +75,9 @@ impl Recorder {
             transcript: None,
             plan: Vec::new(),
             progress_sequence: 0,
+            shown: Vec::new(),
+            current: None,
+            plan_version: 0,
         }
     }
 
@@ -84,9 +93,33 @@ impl Recorder {
     pub fn progress_at(&mut self, store: &Store, row: i64, key: &str, content: chorus_core::progress::Progress, at: i64) {
         let Ok(value) = serde_json::to_value(content) else { return };
         let Ok(content) = serde_json::from_value::<chorus_core::progress::Progress>(self.clean_value(&value)) else { return };
-        if let chorus_core::progress::Progress::Plan { steps } = &content { self.plan = steps.clone(); }
+        if let chorus_core::progress::Progress::Plan { steps } = &content {
+            self.plan = steps.clone();
+            // At the 500-row cap the snapshot isn't stored, but the glance still advances (16-3).
+            self.shown = steps.clone();
+            self.current = chorus_core::step_times::advance_current(self.current.as_ref(), steps, at);
+            self.plan_version += 1;
+        }
         let _ = history::progress(store, row, key, &content, at);
     }
+
+    /// A resumed run starts from the stored plan, so its task updates merge into it (P16).
+    pub fn seed_plan(&mut self, steps: Vec<chorus_core::progress::PlanStep>) {
+        if self.plan.is_empty() { self.plan = steps; }
+    }
+
+    /// Every run starts its card from the session's stored plan until the agent writes one (16-3).
+    /// The seeded plan has no running time: Chorus didn't see its current step start in this run.
+    pub fn seed_glance(&mut self, steps: Vec<chorus_core::progress::PlanStep>) {
+        if self.shown.is_empty() { self.shown = steps; }
+    }
+
+    /// The latest plan at a glance, for the Overview card (16-3, K7). No query.
+    pub fn glance(&self) -> Option<chorus_core::step_times::ProgressGlance> {
+        chorus_core::step_times::glance(&self.shown, self.current.as_ref().map(|c| c.1))
+    }
+
+    pub fn plan_version(&self) -> u64 { self.plan_version }
 
     pub fn has_open_turn(&self) -> bool {
         self.tracker.open_turns() > 0
@@ -179,14 +212,32 @@ impl Recorder {
     }
 
     pub fn resolved_request(&mut self, store: &Store, request: &str) {
+        let before = self.state();
         self.answer(store, |a| a.ask_ref.as_deref() == Some(request), "Request resolved by agent.");
         // Resolution is not evidence that an approval was granted.
-        let _ = self.tracker.apply(&AgentEvent::QuestionAnswered { ask: Some(request.into()), answer: None }, crate::store::now_ms());
+        let now = crate::store::now_ms();
+        let _ = self.tracker.apply(&AgentEvent::QuestionAnswered { ask: Some(request.into()), answer: None }, now);
+        self.log_activity(store, before, now);
+    }
+
+    /// The tracker's activity, and whether a NeedsAnswer is only the guess from a final `?`.
+    fn state(&self) -> (Activity, bool) {
+        (self.tracker.activity(), self.tracker.guessed_question())
+    }
+
+    /// One `activity_log` row when the tracker's state changed (P16, D119, D125). Several events in
+    /// one payload share a time, so only the state they leave counts.
+    fn log_activity(&self, store: &Store, before: (Activity, bool), at: i64) {
+        let now = self.state();
+        if now != before && let Err(e) = crate::store::activity_log::record(store, self.session_id, self.run_id, now.0, now.1, at) {
+            eprintln!("chorus: activity log for session {}: {e}", self.session_id);
+        }
     }
 
     /// Records one payload from an agent and the events it carried. The writes are done before
     /// this returns, so a prompt is durable before the agent acts on it.
     pub fn record(&mut self, store: &Store, source: &str, raw: &Value, events: &[AgentEvent], now_ms: i64) {
+        let before = self.state();
         if self.transcript.is_none()
             && let Some(path) = raw.get("transcript_path").and_then(Value::as_str).filter(|p| p.len() <= 1024 && std::path::Path::new(p).is_absolute())
         {
@@ -202,6 +253,7 @@ impl Recorder {
             }
             self.apply_detail(store, event);
         }
+        self.log_activity(store, before, now_ms);
         if let Some(plan) = chorus_core::progress::claude_plan(raw, &self.plan) {
             self.progress_sequence += 1;
             let key = raw.get("tool_use_id").and_then(Value::as_str).map(str::to_owned)
@@ -236,6 +288,10 @@ impl Recorder {
                 let Some(row) = self.turns.remove(&key) else { return };
                 let message = message.map(|m| self.clean(&m));
                 let _ = history::close_turn(store, row, end.as_str(), message.as_deref());
+                // Every skill estimate in the turn has ended now; keep the clean ones (16-4, K8).
+                if let Err(e) = crate::store::step_runs::persist_turn(store, self.session_id, self.run_id, row, end) {
+                    eprintln!("chorus: step times for turn {row}: {e}");
+                }
                 // Asks still open when their turn ends: nothing answered them through a channel.
                 let answer = match end {
                     chorus_core::activity::TurnEnd::Interrupted => "turn interrupted",
@@ -331,10 +387,13 @@ impl Recorder {
 
     /// The run ended: its open turns are lost.
     pub fn run_ended(&mut self, store: &Store) {
+        let before = self.state();
         self.replies.clear();
+        let now = crate::store::now_ms();
         for change in self.tracker.run_ended() {
-            self.apply_change(store, change, crate::store::now_ms());
+            self.apply_change(store, change, now);
         }
+        self.log_activity(store, before, now);
     }
 }
 
@@ -360,6 +419,180 @@ mod tests {
         assert_eq!(turns[0].prompt.as_deref(),Some("hello"));
         assert!(!serde_json::to_string(&turns).unwrap().contains("private-value-123"));
         assert_eq!(store.with(|c|c.query_row("SELECT count(*) FROM prompts",[],|r|r.get::<_,i64>(0))).unwrap(),1);
+    }
+
+    #[test]
+    fn a_seeded_plan_takes_task_updates_after_a_restart() {
+        let store = Store::in_memory();
+        store.with(|c| c.execute_batch("INSERT INTO sessions(id,name,agent,cwd,state,cols,rows,created_at) VALUES(1,'test','claude','scratch','running',100,30,0); INSERT INTO runs(id,session_id,program,args,started_at) VALUES(1,1,'test','[]',0);")).unwrap();
+        let mut r = Recorder::new(1, 1, "hook", Arc::new(vec![]), Arc::new(vec![]));
+        let step = |id: &str, text: &str, status: &str| chorus_core::progress::PlanStep { id: id.into(), text: text.into(), status: status.into() };
+        r.seed_plan(vec![step("1", "Read", "completed"), step("2", "Build", "pending")]);
+        r.seed_plan(vec![step("9", "Ignored", "pending")]);
+        r.record(&store, "test", &json!({}), &[AgentEvent::TurnStarted { turn: Some("t".into()), prompt: None }], 1);
+        let update = json!({"hook_event_name":"PostToolUse","tool_name":"TaskUpdate","tool_use_id":"u1","prompt_id":"t","tool_input":{"taskId":"2","status":"in_progress"},"tool_response":{"success":true}});
+        r.record(&store, "test", &update, &from_claude_hook(&update), 2);
+        let turns = history::recent_turns(&store, 1, 5).unwrap();
+        let plan = turns[0].progress.iter().rev().find_map(|p| match &p.content { chorus_core::progress::Progress::Plan { steps } => Some(steps.clone()), _ => None }).unwrap();
+        assert_eq!(plan.iter().map(|s| (s.text.as_str(), s.status.as_str())).collect::<Vec<_>>(), [("Read", "completed"), ("Build", "in-progress")]);
+    }
+
+    #[test]
+    fn a_task_update_bumps_the_plan_version_without_an_activity_change() {
+        let store = Store::in_memory();
+        store.with(|c| c.execute_batch("INSERT INTO sessions(id,name,agent,cwd,state,cols,rows,created_at) VALUES(1,'test','claude','scratch','running',100,30,0); INSERT INTO runs(id,session_id,program,args,started_at) VALUES(1,1,'test','[]',0);")).unwrap();
+        let mut r = Recorder::new(1, 1, "hook", Arc::new(vec![]), Arc::new(vec![]));
+        let feed = |r: &mut Recorder, v: Value, t: i64| r.record(&store, "test", &v, &from_claude_hook(&v), t);
+        feed(&mut r, json!({"hook_event_name":"UserPromptSubmit","prompt_id":"p","prompt":"go"}), 1_000);
+        assert_eq!((r.activity(), r.plan_version(), r.glance()), (Activity::Working, 0, None));
+        feed(&mut r, json!({"hook_event_name":"PostToolUse","prompt_id":"p","tool_name":"TaskCreate","tool_use_id":"c1","tool_input":{"subject":"Build"},"tool_response":{"task":{"id":"1","subject":"Build"}}}), 2_000);
+        assert_eq!((r.activity(), r.plan_version()), (Activity::Working, 1));
+        assert_eq!(r.glance().map(|g| (g.done, g.total)), Some((0, 1)));
+        feed(&mut r, json!({"hook_event_name":"PostToolUse","prompt_id":"p","tool_name":"TaskUpdate","tool_use_id":"u1","tool_input":{"taskId":"1","status":"in_progress"},"tool_response":{"success":true}}), 3_000);
+        let g = r.glance().unwrap();
+        assert_eq!((r.activity(), r.plan_version(), g.current.as_deref(), g.current_since_secs), (Activity::Working, 2, Some("Build"), Some(3)));
+        feed(&mut r, json!({"hook_event_name":"PostToolUse","prompt_id":"p","tool_name":"TaskUpdate","tool_use_id":"u2","tool_input":{"taskId":"1","status":"completed"},"tool_response":{"success":true}}), 9_000);
+        let g = r.glance().unwrap();
+        assert_eq!((r.activity(), r.plan_version(), g.done, g.current), (Activity::Working, 3, 1, None));
+    }
+
+    #[test]
+    fn a_seeded_glance_shows_until_a_new_plan() {
+        let store = Store::in_memory();
+        store.with(|c| c.execute_batch("INSERT INTO sessions(id,name,agent,cwd,state,cols,rows,created_at) VALUES(1,'test','claude','scratch','running',100,30,0); INSERT INTO runs(id,session_id,program,args,started_at) VALUES(1,1,'test','[]',0);")).unwrap();
+        let mut r = Recorder::new(1, 1, "hook", Arc::new(vec![]), Arc::new(vec![]));
+        let step = |id: &str, text: &str, status: &str| chorus_core::progress::PlanStep { id: id.into(), text: text.into(), status: status.into() };
+        r.seed_glance(vec![step("1", "Old", "completed"), step("2", "Running", "in-progress")]);
+        r.seed_glance(vec![step("9", "Ignored", "pending")]);
+        let g = r.glance().unwrap();
+        // Seeded: the current step is named, but Chorus didn't see it start, so it has no time.
+        assert_eq!((g.done, g.total, g.current.as_deref(), g.current_since_secs), (1, 2, Some("Running"), None));
+        assert_eq!(r.plan_version(), 0, "a seed is not a plan change");
+        let v = json!({"hook_event_name":"UserPromptSubmit","prompt_id":"p","prompt":"go"});
+        r.record(&store, "test", &v, &from_claude_hook(&v), 1_000);
+        let todo = json!({"hook_event_name":"PostToolUse","prompt_id":"p","tool_name":"TodoWrite","tool_use_id":"w","tool_input":{"todos":[{"content":"New","status":"in_progress","activeForm":"Doing new"}]},"tool_response":{}});
+        r.record(&store, "test", &todo, &from_claude_hook(&todo), 5_000);
+        let g = r.glance().unwrap();
+        assert_eq!((g.total, g.current.as_deref(), g.current_since_secs), (1, Some("New"), Some(5)));
+    }
+
+    fn skill_store() -> (Store, Recorder) {
+        let store = Store::in_memory();
+        store.with(|c| c.execute_batch("INSERT INTO sessions(id,name,agent,cwd,state,cols,rows,created_at) VALUES(1,'test','claude','scratch','running',100,30,0); INSERT INTO runs(id,session_id,program,args,started_at) VALUES(1,1,'test','[]',0);")).unwrap();
+        (store, Recorder::new(1, 1, "hook", Arc::new(vec![]), Arc::new(vec![])))
+    }
+    /// Tool calls and turn ends are stamped with Chorus's clock, so the payloads use it too.
+    fn feed_now(store: &Store, r: &mut Recorder, v: Value) {
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        r.record(store, "test", &v, &from_claude_hook(&v), crate::store::now_ms());
+    }
+    fn skill_call(r: &mut Recorder, store: &Store, id: &str, name: Option<&str>) {
+        let input = name.map_or_else(|| json!({}), |n| json!({"skill": n}));
+        feed_now(store, r, json!({"hook_event_name":"PreToolUse","prompt_id":"p","tool_name":"Skill","tool_use_id":id,"tool_input":input}));
+        feed_now(store, r, json!({"hook_event_name":"PostToolUse","prompt_id":"p","tool_name":"Skill","tool_use_id":id,"tool_input":input,"tool_response":{}}));
+    }
+    fn stored(store: &Store) -> Vec<(String, String)> {
+        store.with(|c| c.prepare("SELECT key, source_ref FROM step_runs ORDER BY id")?.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect()).unwrap()
+    }
+
+    #[test]
+    fn a_done_turn_stores_its_named_skill_estimates() {
+        let (store, mut r) = skill_store();
+        feed_now(&store, &mut r, json!({"hook_event_name":"UserPromptSubmit","prompt_id":"p","prompt":"go"}));
+        skill_call(&mut r, &store, "s1", Some("pdf"));
+        // The next step starts: the first estimate ends cleanly.
+        feed_now(&store, &mut r, json!({"hook_event_name":"PostToolUse","prompt_id":"p","tool_name":"TodoWrite","tool_use_id":"w","tool_input":{"todos":[{"content":"Read","status":"in_progress","activeForm":"Reading"}]},"tool_response":{}}));
+        skill_call(&mut r, &store, "s2", Some("anthropic-skills:pdf"));
+        assert!(stored(&store).is_empty(), "nothing is written before the turn closes");
+        // The turn ends done: the second estimate ends with it.
+        feed_now(&store, &mut r, json!({"hook_event_name":"Stop","prompt_id":"p","last_assistant_message":"Done."}));
+        let rows = stored(&store);
+        assert_eq!(rows.iter().map(|r| r.0.as_str()).collect::<Vec<_>>(), ["pdf", "anthropic-skills:pdf"]);
+        let calls: Vec<String> = store.with(|c| c.prepare("SELECT id FROM tool_calls WHERE tool = 'Skill' ORDER BY id")?.query_map([], |r| r.get::<_, i64>(0))?.map(|x| x.map(|i| i.to_string())).collect()).unwrap();
+        assert_eq!(rows.iter().map(|r| r.1.clone()).collect::<Vec<_>>(), calls, "keyed by the call, so written once");
+        let durations: Vec<i64> = store.with(|c| c.prepare("SELECT duration_ms FROM step_runs")?.query_map([], |r| r.get(0))?.collect()).unwrap();
+        assert!(durations.iter().all(|&d| d >= 0));
+    }
+
+    #[test]
+    fn cut_off_or_unnamed_skills_are_not_stored() {
+        let (store, mut r) = skill_store();
+        // An unnamed Skill call in a done turn.
+        feed_now(&store, &mut r, json!({"hook_event_name":"UserPromptSubmit","prompt_id":"p","prompt":"one"}));
+        skill_call(&mut r, &store, "u", None);
+        feed_now(&store, &mut r, json!({"hook_event_name":"Stop","prompt_id":"p","last_assistant_message":"Done."}));
+        // A named one cut off by an interrupt.
+        feed_now(&store, &mut r, json!({"hook_event_name":"UserPromptSubmit","prompt_id":"q","prompt":"two"}));
+        skill_call(&mut r, &store, "i", Some("pdf"));
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        r.record(&store, "test", &json!({}), &[AgentEvent::TurnInterrupted { turn: None }], crate::store::now_ms());
+        // A named one still running when the run ends: the turn is lost.
+        feed_now(&store, &mut r, json!({"hook_event_name":"UserPromptSubmit","prompt_id":"x","prompt":"three"}));
+        skill_call(&mut r, &store, "l", Some("pdf"));
+        r.run_ended(&store);
+        let ends: Vec<String> = store.with(|c| c.prepare("SELECT end_reason FROM turns ORDER BY id")?.query_map([], |r| r.get(0))?.collect()).unwrap();
+        assert_eq!(ends, ["done", "interrupted", "lost"]);
+        assert!(stored(&store).is_empty(), "{:?}", stored(&store));
+        assert!(!crate::store::step_runs::stored(&store, "skill", "2").unwrap(), "a cut-off call reads as not finished, so it can only be longer");
+    }
+
+    #[test]
+    fn each_activity_change_is_logged_once() {
+        let store = Store::in_memory();
+        store.with(|c| c.execute_batch("INSERT INTO sessions(id,name,agent,cwd,state,cols,rows,created_at) VALUES(1,'test','claude','scratch','running',100,30,0); INSERT INTO runs(id,session_id,program,args,started_at) VALUES(1,1,'test','[]',0);")).unwrap();
+        let mut r = Recorder::new(1, 1, "hook", Arc::new(vec![]), Arc::new(vec![]));
+        let feed = |r: &mut Recorder, v: Value, t: i64| r.record(&store, "test", &v, &from_claude_hook(&v), t);
+        feed(&mut r, json!({"hook_event_name":"UserPromptSubmit","prompt_id":"p","prompt":"go"}), 10);
+        feed(&mut r, json!({"hook_event_name":"PreToolUse","prompt_id":"p","tool_name":"Read","tool_use_id":"a","tool_input":{"file_path":"x"}}), 20);
+        feed(&mut r, json!({"hook_event_name":"PostToolUse","prompt_id":"p","tool_name":"Read","tool_use_id":"a","tool_input":{"file_path":"x"},"tool_response":{}}), 30);
+        // Claude Code's order: PreToolUse, then PermissionRequest, then PostToolUse once allowed.
+        feed(&mut r, json!({"hook_event_name":"PreToolUse","prompt_id":"p","tool_name":"Write","tool_use_id":"b","tool_input":{"file_path":"y"}}), 40);
+        feed(&mut r, json!({"hook_event_name":"PermissionRequest","prompt_id":"p","tool_name":"Write","tool_input":{"file_path":"y"}}), 45);
+        feed(&mut r, json!({"hook_event_name":"PermissionRequest","prompt_id":"p","tool_name":"Write","tool_input":{"file_path":"y"}}), 47);
+        feed(&mut r, json!({"hook_event_name":"PostToolUse","prompt_id":"p","tool_name":"Write","tool_use_id":"b","tool_input":{"file_path":"y"},"tool_response":{}}), 50);
+        feed(&mut r, json!({"hook_event_name":"PreToolUse","prompt_id":"p","tool_name":"AskUserQuestion","tool_use_id":"q","tool_input":{"questions":[{"question":"Which?","header":"h","options":[{"label":"A","description":"a"},{"label":"B","description":"b"}],"multiSelect":false}]}}), 60);
+        feed(&mut r, json!({"hook_event_name":"PostToolUse","prompt_id":"p","tool_name":"AskUserQuestion","tool_use_id":"q","tool_input":{},"tool_response":{}}), 70);
+        feed(&mut r, json!({"hook_event_name":"Stop","prompt_id":"p","last_assistant_message":"Done."}), 80);
+        feed(&mut r, json!({"hook_event_name":"Notification","message":"Claude is waiting for your input"}), 90);
+        r.run_ended(&store);
+        let rows: Vec<(String, i64)> = store.with(|c| c.prepare("SELECT activity, at FROM activity_log WHERE run_id = 1 ORDER BY id")?
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect()).unwrap();
+        let names: Vec<&str> = rows.iter().map(|(a, _)| a.as_str()).collect();
+        assert_eq!(names, ["working", "awaiting-approval", "working", "needs-answer", "working", "ready", "unknown"]);
+        assert_eq!(rows[..6].iter().map(|r| r.1).collect::<Vec<_>>(), [10, 45, 50, 60, 70, 80], "each row carries its payload's time");
+    }
+
+    #[test]
+    fn a_resolved_request_logs_the_return_to_work_and_a_payload_logs_its_final_state() {
+        let store = Store::in_memory();
+        store.with(|c| c.execute_batch("INSERT INTO sessions(id,name,agent,cwd,state,cols,rows,created_at) VALUES(1,'test','codex','scratch','running',100,30,0); INSERT INTO runs(id,session_id,program,args,started_at) VALUES(1,1,'test','[]',0);")).unwrap();
+        let mut r = Recorder::new(1, 1, "server", Arc::new(vec![]), Arc::new(vec![]));
+        r.record(&store, "test", &json!({}), &[
+            AgentEvent::TurnStarted { turn: Some("t".into()), prompt: None },
+            AgentEvent::QuestionAsked { turn: Some("t".into()), ask: Some("r1".into()), question: "Which?".into() },
+        ], 5);
+        r.resolved_request(&store, "r1");
+        r.resolved_request(&store, "r1");
+        let rows: Vec<(String, i64)> = store.with(|c| c.prepare("SELECT activity, at FROM activity_log ORDER BY id")?
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect()).unwrap();
+        assert_eq!(rows.iter().map(|(a, _)| a.as_str()).collect::<Vec<_>>(), ["needs-answer", "working"]);
+        assert_eq!(rows[0].1, 5);
+    }
+
+    #[test]
+    fn a_final_question_is_logged_as_a_guess_and_a_real_one_replaces_it() {
+        let store = Store::in_memory();
+        store.with(|c| c.execute_batch("INSERT INTO sessions(id,name,agent,cwd,state,cols,rows,created_at) VALUES(1,'test','claude','scratch','running',100,30,0); INSERT INTO runs(id,session_id,program,args,started_at) VALUES(1,1,'test','[]',0);")).unwrap();
+        let mut r = Recorder::new(1, 1, "hook", Arc::new(vec![]), Arc::new(vec![]));
+        let feed = |r: &mut Recorder, v: Value, t: i64| r.record(&store, "test", &v, &from_claude_hook(&v), t);
+        feed(&mut r, json!({"hook_event_name":"UserPromptSubmit","prompt_id":"p","prompt":"go"}), 10);
+        feed(&mut r, json!({"hook_event_name":"Stop","prompt_id":"p","last_assistant_message":"Shall I commit it?"}), 20);
+        feed(&mut r, json!({"hook_event_name":"Notification","message":"Claude is waiting for your input"}), 30);
+        r.record(&store, "test", &json!({}), &[AgentEvent::QuestionAsked { turn: None, ask: Some("q".into()), question: "Which?".into() }], 40);
+        let rows: Vec<(String, bool, i64)> = store.with(|c| c.prepare("SELECT activity, guessed, at FROM activity_log ORDER BY id")?
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect()).unwrap();
+        let rows: Vec<(&str, bool, i64)> = rows.iter().map(|(a, g, t)| (a.as_str(), *g, *t)).collect();
+        assert_eq!(rows, [("working", false, 10), ("needs-answer", true, 20), ("needs-answer", false, 40)], "the idle notice changes nothing");
     }
 
     #[test]

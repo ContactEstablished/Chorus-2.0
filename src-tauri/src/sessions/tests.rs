@@ -1076,3 +1076,26 @@ fn a_worktree_git_removed_only_in_part_is_reported_so() {
     assert!(f.manager.summary(s.id).unwrap().worktree.unwrap().removed);
     assert!(!git_in(&repo, &["worktree", "list"]).contains(&wt.branch));
 }
+
+#[test]
+fn progress_splits_the_newest_run_from_its_first_row_and_stops_at_its_end() {
+    use chorus_core::activity::Activity;
+    let f = Fixture::new("time-split");
+    let id = f.shell(None);
+    let run = f.manager.running(id).unwrap();
+    let marks = crate::store::activity_log::marks_for_run(&f.manager.store, run.id).unwrap();
+    assert_eq!(marks.iter().map(|m| m.activity).collect::<Vec<_>>(), [Activity::Unknown], "a run starts with one row");
+    let before = f.manager.progress(id).unwrap().split.unwrap();
+    assert_eq!(before.not_split.as_deref(), Some(chorus_core::time_split::NO_EVENTS_YET), "no evidence to split yet");
+    run.recorder.lock().unwrap().record(&f.manager.store, "test", &serde_json::json!({}),
+        &[chorus_core::events::AgentEvent::TurnStarted { turn: None, prompt: None }], crate::store::now_ms());
+    let split = f.manager.progress(id).unwrap().split.unwrap();
+    assert_eq!((split.not_split, split.ended_at_secs, split.turns), (None, None, 1));
+
+    let live = f.manager.live.lock().unwrap().get(&id).cloned().unwrap();
+    f.manager.end_run_for(&live, ExitCause::UserClose);
+    wait_for("the run's end", || f.manager.progress(id).unwrap().split.unwrap().ended_at_secs.is_some());
+    let ended = f.manager.progress(id).unwrap().split.unwrap();
+    std::thread::sleep(Duration::from_millis(1100));
+    assert_eq!(f.manager.progress(id).unwrap().split.unwrap(), ended, "an ended run's split stops growing");
+}

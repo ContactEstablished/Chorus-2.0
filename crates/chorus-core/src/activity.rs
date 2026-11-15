@@ -31,6 +31,26 @@ pub enum Activity {
     Failed,
 }
 
+impl Activity {
+    pub const ALL: [Self; 6] = [Self::Unknown, Self::Working, Self::AwaitingApproval, Self::NeedsAnswer, Self::Ready, Self::Failed];
+
+    /// The stored name: the same as serde's.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Unknown => "unknown",
+            Self::Working => "working",
+            Self::AwaitingApproval => "awaiting-approval",
+            Self::NeedsAnswer => "needs-answer",
+            Self::Ready => "ready",
+            Self::Failed => "failed",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|a| a.as_str() == s)
+    }
+}
+
 /// How a turn ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "kebab-case")]
@@ -75,11 +95,13 @@ pub struct Tracker {
     open: VecDeque<OpenTurn>,
     next_key: u64,
     last_event_ms: i64,
+    /// The current NeedsAnswer came from [`looks_like_question`], not from the agent asking.
+    guessed: bool,
 }
 
 impl Default for Tracker {
     fn default() -> Self {
-        Self { activity: Activity::Unknown, open: VecDeque::new(), next_key: 1, last_event_ms: 0 }
+        Self { activity: Activity::Unknown, open: VecDeque::new(), next_key: 1, last_event_ms: 0, guessed: false }
     }
 }
 
@@ -97,6 +119,12 @@ pub fn looks_like_question(message: &str) -> bool {
 impl Tracker {
     pub fn activity(&self) -> Activity {
         self.activity
+    }
+
+    /// NeedsAnswer only because the final message ended with `?`: no request is open, so the time
+    /// split lets it go idle like Ready (D125).
+    pub fn guessed_question(&self) -> bool {
+        self.activity == Activity::NeedsAnswer && self.guessed
     }
 
     pub fn open_turns(&self) -> usize {
@@ -158,6 +186,7 @@ impl Tracker {
             AgentEvent::TurnEnded { turn, message } => {
                 self.close(turn.as_deref(), TurnEnd::Done, message.clone(), &mut out);
                 self.activity = after_close(self, message.as_deref());
+                self.guessed = self.activity == Activity::NeedsAnswer;
             }
             AgentEvent::TurnInterrupted { turn } => {
                 self.close(turn.as_deref(), TurnEnd::Interrupted, None, &mut out);
@@ -168,7 +197,10 @@ impl Tracker {
                 self.activity = if self.open.is_empty() { Activity::Failed } else { Activity::Working };
             }
             AgentEvent::ApprovalAsked { .. } => self.activity = Activity::AwaitingApproval,
-            AgentEvent::QuestionAsked { .. } => self.activity = Activity::NeedsAnswer,
+            AgentEvent::QuestionAsked { .. } => {
+                self.activity = Activity::NeedsAnswer;
+                self.guessed = false;
+            }
             // An answer, or the agent getting on with tools, means it is working again.
             AgentEvent::ApprovalAnswered { .. }
             | AgentEvent::QuestionAnswered { .. }
@@ -273,9 +305,14 @@ mod tests {
         t.apply(&AgentEvent::ToolFinished { turn: None, call: None, tool: "Bash".into(), target: None, failed: false }, 3);
         assert_eq!(t.activity(), Activity::Working);
         t.apply(&AgentEvent::QuestionAsked { turn: None, ask: None, question: "Which?".into() }, 4);
-        assert_eq!(t.activity(), Activity::NeedsAnswer);
+        assert_eq!((t.activity(), t.guessed_question()), (Activity::NeedsAnswer, false), "the agent asked");
         t.apply(&ended(Some("a"), "Shall I also update the tests?"), 5);
         assert_eq!(t.activity(), Activity::NeedsAnswer, "a final question needs an answer");
+        assert!(t.guessed_question(), "but only by its final message");
+        t.apply(&AgentEvent::Idle, 6);
+        assert!(t.guessed_question(), "an idle notice keeps the guess");
+        t.apply(&AgentEvent::QuestionAsked { turn: None, ask: None, question: "Really?".into() }, 6);
+        assert!(!t.guessed_question(), "a real question replaces the guess");
         t.apply(&started("b"), 6);
         t.apply(&AgentEvent::TurnFailed { turn: Some("b".into()), error: "rate limited".into() }, 7);
         assert_eq!(t.activity(), Activity::Failed);
@@ -301,6 +338,21 @@ mod tests {
         assert!(t.stale(STALE_MS + 1, 0));
         assert!(!t.stale(STALE_MS + 1, 5_000), "recent output keeps it live");
         assert_eq!(t.activity(), Activity::Working, "staleness never changes the state");
+    }
+
+    #[test]
+    fn activity_names_round_trip() {
+        // A new variant fails to compile here until it is added to `ALL`.
+        let place = |a: Activity| match a {
+            Activity::Unknown => 0, Activity::Working => 1, Activity::AwaitingApproval => 2,
+            Activity::NeedsAnswer => 3, Activity::Ready => 4, Activity::Failed => 5,
+        };
+        assert!(Activity::ALL.iter().enumerate().all(|(i, &a)| place(a) == i));
+        for a in Activity::ALL {
+            assert_eq!(serde_json::to_value(a).unwrap(), serde_json::Value::from(a.as_str()));
+            assert_eq!(Activity::parse(a.as_str()), Some(a));
+        }
+        assert_eq!(Activity::parse("Working"), None);
     }
 
     #[test]

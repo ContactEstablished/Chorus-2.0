@@ -75,6 +75,7 @@ function session(id: number, over: Partial<SessionSummary> = {}): SessionSummary
     routing: null,
     latest: null,
     latestAtSecs: 0,
+    progress: null,
     ...over,
   }
 }

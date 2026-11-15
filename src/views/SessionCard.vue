@@ -12,6 +12,7 @@ import { AGENT_LABELS } from '../raw/labels'
 import AgentLogo from '../components/AgentLogo.vue'
 import { ageLabel, attentionTier, waitingSeconds } from '../shell/inbox'
 import { ATTENTION, ago, needsYou, shortDuration, shortPath } from '../shell/status'
+import { cardLine, cardSegments, stepDuration } from './session/progress'
 
 const props = defineProps<{ session: SessionSummary; project: Project | null; home: string | null; now: number }>()
 defineEmits<{ open: [] }>()
@@ -39,6 +40,10 @@ const body = computed(() => {
   if (x.attention === 'failed' && x.note) return x.note
   return x.latest ?? x.description ?? x.note ?? (x.agent === 'shell' ? 'A shell. Chorus records no turns for it.' : 'No turns yet.')
 })
+
+/** The plan at a glance (16-3): hidden without a plan (D122), in a slot reserved so nothing jumps. */
+const line = computed(() => s.value.progress ? cardLine(s.value.progress, s.value.live, props.now) : null)
+const bar = computed(() => s.value.progress ? cardSegments(s.value.progress) : null)
 
 const timing = computed(() => {
   const x = s.value
@@ -89,6 +94,23 @@ const timing = computed(() => {
     <p v-if="needsYou(s.attention)" class="waiting" :class="tier ? `waiting-${tier}` : ''">
       {{ waiting === null ? 'Waiting · start time unavailable' : `Waiting ${ageLabel(waiting)}` }}
     </p>
+    <div v-if="s.hasEventChannel" class="progress">
+      <template v-if="s.progress && line && bar">
+        <p class="progress-line">
+          <span class="now">{{ line.label }} <b v-if="line.step">{{ line.step }}</b><span v-if="line.secs !== null" class="mono"> · {{ stepDuration(line.secs) }}</span></span>
+          <span class="count">{{ s.progress.done }} of {{ s.progress.total }} done</span>
+        </p>
+        <div class="bar" role="img" :aria-label="`${s.progress.done} of ${s.progress.total} steps done`">
+          <template v-if="bar.kind === 'segments'">
+            <span v-for="(st, i) in bar.statuses" :key="i" class="seg" :class="[st, { 'bar-pulse': st === 'in-progress' && s.live }]" />
+          </template>
+          <span v-else class="track">
+            <span class="fill done" :style="{ width: `${bar.donePct}%` }" />
+            <span class="fill in-progress" :class="{ 'bar-pulse': s.live }" :style="{ width: `${bar.currentPct}%` }" />
+          </span>
+        </div>
+      </template>
+    </div>
     <footer class="foot">
       <span>{{ timing }}</span>
       <span class="cta">{{ ATTENTION[s.attention].cta }} →</span>
@@ -244,6 +266,72 @@ const timing = computed(() => {
   white-space: pre-line;
   flex: 1;
 }
+/* The progress slot (16-3, Card.dc.html): reserved on every card with an event channel. */
+.progress {
+  flex: none;
+  height: 30px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 6px;
+  min-width: 0;
+}
+.progress-line {
+  margin: 0;
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--text-2);
+  white-space: nowrap;
+}
+.now {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.now b {
+  color: var(--text);
+  font-weight: 600;
+}
+.now .mono {
+  font-family: var(--font-mono);
+}
+.count {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+.bar {
+  display: flex;
+  gap: 3px;
+}
+.seg {
+  flex: 1;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--border-strong);
+}
+.seg.completed,
+.fill.done {
+  background: var(--status-ready);
+}
+.seg.in-progress,
+.fill.in-progress {
+  background: var(--accent);
+}
+.track {
+  flex: 1;
+  display: flex;
+  height: 5px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: var(--border-strong);
+}
+.bar-pulse {
+  animation: card-progress-pulse 1.6s ease-in-out infinite;
+}
+@keyframes card-progress-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+@media (prefers-reduced-motion: reduce) { .bar-pulse { animation: none; } }
 .foot {
   display: flex;
   justify-content: space-between;

@@ -95,6 +95,8 @@ export const commands = {
 	sessionHistory: (sessionId: number, limit: number) => typedError<SessionHistory, string>(__TAURI_INVOKE("session_history", { sessionId, limit })),
 	/**  A session's tokens and cost over its turns, and its newest turn's (D107). */
 	sessionUsage: (sessionId: number) => typedError<SessionUsage, string>(__TAURI_INVOKE("session_usage", { sessionId })),
+	/**  A session's plan with step times, skill chips and the current step's tool calls (P16). */
+	sessionProgress: (sessionId: number) => typedError<SessionProgress, string>(__TAURI_INVOKE("session_progress", { sessionId })),
 	profilesList: () => typedError<ProfileSummary[], string>(__TAURI_INVOKE("profiles_list")),
 	profileSave: (input: ProfileSave) => typedError<ProfileSummary, string>(__TAURI_INVOKE("profile_save", { input })),
 	profileDelete: (id: number) => typedError<boolean, string>(__TAURI_INVOKE("profile_delete", { id })),
@@ -718,6 +720,8 @@ export type Diff = {
 	binary: number,
 };
 
+export type Direction = "shorter" | "longer";
+
 export type DocKind = "plan" | "spec" | "report" | "review" | "decision";
 
 export type Document = {
@@ -1321,6 +1325,21 @@ export type Progress = { kind: "message"; text: string } | { kind: "plan"; steps
 export type ProgressEntry = {
 	id: number,
 	content: Progress,
+	atSecs: number,
+};
+
+/**  The latest plan at a glance, for an Overview card's bar (16-3, K7). */
+export type ProgressGlance = {
+	done: number,
+	total: number,
+	/**  Each step's status in plan order (plans hold at most 100 steps). */
+	statuses: StepStatus[],
+	/**  The first in-progress step's text. */
+	current: string | null,
+	/**  When it started, while it runs in the live run; `None` when stopped or only seeded. */
+	currentSinceSecs: number | null,
+	/**  The first pending step after the current one, or the first pending one. */
+	next: string | null,
 };
 
 export type Project = {
@@ -1648,6 +1667,8 @@ export type RoutingSettingsView = {
 	problem: string | null,
 };
 
+export type RowKind = "step" | "skill";
+
 /**  A run's settings, which only Matthew edits, in Chorus. */
 export type RunConfig = {
 	roles: RoleSetting[],
@@ -1759,6 +1780,21 @@ export type SessionInstructions = {
 	unsupported: string | null,
 };
 
+export type SessionProgress = {
+	steps: TimedStep[],
+	current: number | null,
+	next: number | null,
+	/**  Step rows only, not skill rows. */
+	done: number,
+	total: number,
+	currentTools: ToolGroup[],
+	planAtSecs: number | null,
+	/**  A turn reached the 500-row cap, so later plan updates in it weren't stored. */
+	capped: boolean,
+	/**  Where the newest run's time went (16-2). `None` when the session never ran. */
+	split: TimeSplit | null,
+};
+
 export type SessionStatus = "running" | "exited" | "closed";
 
 /**  Everything the UI shows about a session. */
@@ -1835,6 +1871,8 @@ export type SessionSummary = {
 	latest: string | null,
 	/**  When that turn started, or 0. */
 	latestAtSecs: number,
+	/**  The latest plan at a glance (P16); none without a plan (D122). */
+	progress: ProgressGlance | null,
 };
 
 export type SessionUpdated = {
@@ -1867,6 +1905,17 @@ export type Signature = {
 	/**  Failing test names, sorted, at most [`MAX_TESTS`]. */
 	tests: string[],
 	firstError: string | null,
+};
+
+/**  A skill call shown as a chip. Its time is always an estimate. */
+export type SkillUse = {
+	callId: number,
+	name: string | null,
+	atSecs: number,
+	secs: number,
+	runningSinceSecs: number | null,
+	/**  Far off this skill's usual time (16-4, D121). `compute` leaves it `None`; the app sets it. */
+	usual: UsualMarker | null,
 };
 
 /**
@@ -1904,6 +1953,8 @@ export type SpeedHistoryRow = {
 export type StepKind = "plan" | "build" | "check" | "tag";
 
 export type StepState = "running" | "done" | "failed";
+
+export type StepStatus = "pending" | "in-progress" | "completed";
 
 export type StepView = {
 	id: number,
@@ -2109,6 +2160,36 @@ export type TiersView_Serialize = {
 	retryInSecs: number,
 };
 
+export type TimeSplit = {
+	/**  Why there is no split ("not split"); `None` when the figures below are real. */
+	notSplit: string | null,
+	workingSecs: number,
+	youSecs: number,
+	approvalSecs: number,
+	idleSecs: number,
+	startedAtSecs: number,
+	endedAtSecs: number | null,
+	turns: number,
+};
+
+export type TimedStep = {
+	kind: RowKind,
+	text: string,
+	status: StepStatus,
+	/**  When it was first seen in progress in this plan. */
+	startedAtSecs: number | null,
+	/**  Closed time. While it runs in the live run, add `now - running_since_secs`. */
+	secs: number,
+	runningSinceSecs: number | null,
+	/**  False when it was completed without ever being seen in progress. */
+	timed: boolean,
+	/**
+	 *  A step row's skill chips. A skill row holds its own call here, so it can carry a usual-time
+	 *  marker too (16-4); the panel draws chips only on step rows.
+	 */
+	skills: SkillUse[],
+};
+
 /**  One turn's usage, or a sum of turns'. */
 export type TokenUsage = {
 	/**  Prompt tokens not read from the cache. */
@@ -2127,7 +2208,22 @@ export type ToolEntry = {
 	target: string | null,
 	failed: boolean,
 	finished: boolean,
+	startedAtSecs: number,
+	endedAtSecs: number | null,
 };
+
+export type ToolGroup = {
+	kind: ToolKind,
+	tool: string,
+	count: number,
+	/**  Set only when every call in the group shares it. */
+	target: string | null,
+	secs: number,
+	runningSinceSecs: number | null,
+	failed: number,
+};
+
+export type ToolKind = "read" | "edit" | "run" | "search" | "web" | "agent" | "other";
 
 export type Trigger = "schedule" | "manual";
 
@@ -2154,6 +2250,14 @@ export type UnknownQuantPolicy =
  *  record for the tag.
  */
 "first-party-and-verified";
+
+export type UsualMarker = {
+	direction: Direction,
+	/**  The median of the earlier runs, rounded to seconds. */
+	usualSecs: number,
+	/**  How many earlier runs it was compared with. */
+	runs: number,
+};
 
 /**  How a found version relates to the one Chorus checked. */
 export type VersionFit = "verified" | "newer" | "older" | 

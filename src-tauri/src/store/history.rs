@@ -157,7 +157,8 @@ pub struct TurnEntry {
 }
 
 #[derive(Debug, Clone, Serialize, Type)]
-pub struct ProgressEntry { pub id: u32, pub content: chorus_core::progress::Progress }
+#[serde(rename_all = "camelCase")]
+pub struct ProgressEntry { pub id: u32, pub content: chorus_core::progress::Progress, pub at_secs: u32 }
 
 pub fn progress(store: &Store, turn: i64, key: &str, content: &chorus_core::progress::Progress, at: i64) -> Result<(), String> {
     let body = serde_json::to_string(content).map_err(|e| e.to_string())?;
@@ -179,6 +180,8 @@ pub struct ToolEntry {
     pub target: Option<String>,
     pub failed: bool,
     pub finished: bool,
+    pub started_at_secs: u32,
+    pub ended_at_secs: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Type)]
@@ -222,15 +225,15 @@ pub fn recent_turns(store: &Store, session_id: u32, limit: u32) -> Result<Vec<Tu
             })?
             .collect::<rusqlite::Result<_>>()?;
         turns.reverse();
-        let mut tools = c.prepare("SELECT tool, target, failed, ended_at IS NOT NULL FROM tool_calls WHERE turn_id = ?1 ORDER BY id")?;
+        let mut tools = c.prepare("SELECT tool, target, failed, ended_at IS NOT NULL, started_at, ended_at FROM tool_calls WHERE turn_id = ?1 ORDER BY id")?;
         let mut asks = c.prepare("SELECT id, kind, subject, answer, details, (SELECT action FROM reply_attempts r WHERE r.ask_id = asks.id) FROM asks WHERE turn_id = ?1 ORDER BY id")?;
         for t in &mut turns {
-            t.progress = c.prepare("SELECT id,body FROM turn_progress WHERE turn_id=?1 ORDER BY at,id")?
-                .query_map([t.id], |r| Ok((r.get::<_,u32>(0)?, r.get::<_,String>(1)?)))?
-                .filter_map(|r| match r { Ok((id,body)) => serde_json::from_str(&body).ok().map(|content| Ok(ProgressEntry { id,content })), Err(e) => Some(Err(e)) })
+            t.progress = c.prepare("SELECT id,body,at FROM turn_progress WHERE turn_id=?1 ORDER BY at,id")?
+                .query_map([t.id], |r| Ok((r.get::<_,u32>(0)?, r.get::<_,String>(1)?, r.get::<_,i64>(2)?)))?
+                .filter_map(|r| match r { Ok((id,body,at)) => serde_json::from_str(&body).ok().map(|content| Ok(ProgressEntry { id,content,at_secs: secs(at) })), Err(e) => Some(Err(e)) })
                 .collect::<rusqlite::Result<_>>()?;
             t.tools = tools
-                .query_map([t.id], |r| Ok(ToolEntry { tool: r.get(0)?, target: r.get(1)?, failed: r.get(2)?, finished: r.get(3)? }))?
+                .query_map([t.id], |r| Ok(ToolEntry { tool: r.get(0)?, target: r.get(1)?, failed: r.get(2)?, finished: r.get(3)?, started_at_secs: secs(r.get(4)?), ended_at_secs: r.get::<_, Option<i64>>(5)?.map(secs) }))?
                 .collect::<rusqlite::Result<_>>()?;
             t.asks = asks
                 .query_map([t.id], |r| Ok(AskEntry {

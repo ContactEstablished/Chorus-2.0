@@ -55,7 +55,7 @@ pub fn tool_target(input: &Value) -> Option<String> {
     }
     let text = match &input {
         Value::String(s) => Some(s.clone()),
-        Value::Object(o) => ["file_path", "path", "filePath", "command", "cmd", "pattern", "url", "query", "description"]
+        Value::Object(o) => ["file_path", "path", "filePath", "command", "cmd", "pattern", "url", "query", "skill", "description"]
             .iter()
             .find_map(|k| o.get(*k).and_then(Value::as_str).map(str::to_owned)),
         _ => None,
@@ -267,5 +267,11 @@ mod tests {
         let long = tool_target(&json!({"command": "x".repeat(400)})).unwrap();
         assert_eq!(long.chars().count(), MAX_TARGET_CHARS + 1);
         assert_eq!(tool_target(&json!({"other": 1})), None);
+    }
+
+    #[test]
+    fn a_skill_call_is_named_by_its_skill() {
+        let input = json!({"skill": "anthropic-skills:pdf", "args": "summarise report.pdf"});
+        assert_eq!(tool_target(&input).as_deref(), Some("anthropic-skills:pdf"));
     }
 }

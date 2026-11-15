@@ -5,8 +5,9 @@
  * Everything shown comes from recorded history; nothing here infers session state.
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { commands, unwrap, type SessionHistory, type SessionSummary, type PendingReply, type NarratorView, type TurnEntry } from '../../ipc'
+import { commands, unwrap, type SessionHistory, type SessionSummary, type PendingReply, type NarratorView, type SessionProgress, type TurnEntry } from '../../ipc'
 import NarratorPanel from './NarratorPanel.vue'
+import ProgressPanel from './ProgressPanel.vue'
 import ReplyCard from './ReplyCard.vue'
 import MessageContent from '../../components/MessageContent.vue'
 import FriendlyComposer from './FriendlyComposer.vue'
@@ -27,6 +28,8 @@ const pending = ref<PendingReply[]>([])
 const error = ref('')
 const narrator = ref<NarratorView | null>(null)
 const narratorError = ref('')
+const progress = ref<SessionProgress | null>(null)
+const progressError = ref('')
 const viewport = ref<HTMLElement | null>(null)
 const content = ref<HTMLElement | null>(null)
 const agentLabel = computed(() => AGENT_LABELS[props.session.agent])
@@ -95,6 +98,13 @@ async function load(): Promise<void> {
       const n = await unwrap(commands.sessionNarrator(id))
       if (!disposed && current === generation) { narrator.value = n; narratorError.value = '' }
     } catch (e) { if (!disposed && current === generation) narratorError.value = /command.*not found|unknown command/i.test(String(e)) ? 'Restart Chorus 2 to load the updated narrator backend.' : String(e) }
+    // The Progress panel (P16) has its own read, so a failure there never stops the timeline.
+    if (props.session.hasEventChannel) {
+      try {
+        const pr = await unwrap(commands.sessionProgress(id))
+        if (!disposed && current === generation) { progress.value = pr; progressError.value = '' }
+      } catch (e) { if (!disposed && current === generation) progressError.value = /command.*not found|unknown command/i.test(String(e)) ? 'Restart Chorus 2 to load the updated progress backend.' : String(e) }
+    }
     await nextTick()
     if (!disposed && current === generation) followLatest()
   } catch (e) {
@@ -115,7 +125,7 @@ async function loadEarlier(): Promise<void> {
 }
 watch(() => props.session.id, () => {
   following.value = true; seen.value = 0; limit.value = PAGE; expanded.value.clear()
-  history.value = null; pending.value = []; narrator.value = null; narratorError.value = ''
+  history.value = null; pending.value = []; narrator.value = null; narratorError.value = ''; progress.value = null; progressError.value = ''
   void load()
 }, { immediate: true })
 onBeforeUnmount(() => { disposed = true; generation++; clearTimeout(timer); resizeObserver?.disconnect() })
@@ -124,6 +134,7 @@ onBeforeUnmount(() => { disposed = true; generation++; clearTimeout(timer); resi
 <template>
   <div class="friendly">
     <div class="thread">
+      <div v-if="session.hasEventChannel" class="pinned"><ProgressPanel :session="session" :progress="progress" :error="progressError" /></div>
       <div ref="viewport" class="conversation scroll" @scroll="trackScroll">
         <div ref="content" class="content">
           <p v-if="error" class="error" role="alert">History could not refresh: {{ error }}. <button class="quiet" @click="emit('raw')">Open Raw</button></p>
@@ -229,6 +240,8 @@ onBeforeUnmount(() => { disposed = true; generation++; clearTimeout(timer); resi
 <style scoped>
 .friendly { height: 100%; min-height: 0; min-width: 0; display: flex; flex-direction: column; }
 .thread { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.pinned { flex: none; padding: 14px clamp(18px, 3vw, 40px) 0; }
+.pinned > * { max-width: 920px; margin: 0 auto; }
 .conversation { flex: 1; min-height: 0; padding: 18px clamp(18px, 3vw, 40px) 16px; }
 .content { max-width: 920px; margin: 0 auto; }
 .empty, .error { font-size: 13px; color: var(--text-muted); line-height: 1.6; }
@@ -323,7 +336,7 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; max-heigh
 .pending { display: grid; gap: 10px; }
 
 @media (max-width: 720px) {
-  .conversation, .dock { padding-left: 14px; padding-right: 14px; }
+  .conversation, .dock, .pinned { padding-left: 14px; padding-right: 14px; }
   .sent { max-width: 94%; }
   .work, .noreply { margin-left: 0; }
   .reply-row { grid-template-columns: minmax(0, 1fr); }
