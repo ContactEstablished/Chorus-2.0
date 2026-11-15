@@ -1326,6 +1326,20 @@ export type ProgressEntry = {
 	atSecs: number,
 };
 
+/**  The latest plan at a glance, for an Overview card's bar (16-3, K7). */
+export type ProgressGlance = {
+	done: number,
+	total: number,
+	/**  Each step's status in plan order (plans hold at most 100 steps). */
+	statuses: StepStatus[],
+	/**  The first in-progress step's text. */
+	current: string | null,
+	/**  When it started, while it runs in the live run; `None` when stopped or only seeded. */
+	currentSinceSecs: number | null,
+	/**  The first pending step after the current one, or the first pending one. */
+	next: string | null,
+};
+
 export type Project = {
 	id: number,
 	name: string,
@@ -1855,6 +1869,8 @@ export type SessionSummary = {
 	latest: string | null,
 	/**  When that turn started, or 0. */
 	latestAtSecs: number,
+	/**  The latest plan at a glance (P16); none without a plan (D122). */
+	progress: ProgressGlance | null,
 };
 
 export type SessionUpdated = {

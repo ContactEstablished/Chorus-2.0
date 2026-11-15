@@ -174,6 +174,8 @@ pub struct SessionSummary {
     pub latest: Option<String>,
     /// When that turn started, or 0.
     pub latest_at_secs: u32,
+    /// The latest plan at a glance (P16); none without a plan (D122).
+    pub progress: Option<chorus_core::step_times::ProgressGlance>,
 }
 
 /// A key minted for one run (`providers::keys`). The key itself is never shown or kept.
@@ -618,18 +620,20 @@ impl SessionManager {
             AgentKind::Codex => ("codex-hook", chorus_core::events::from_codex_hook(&payload)),
             _ => return Err(HookRefused::NotFound),
         };
-        let (before, reply) = {
+        let (changed, reply) = {
             let mut recorder = run.recorder.lock().expect("recorder lock");
             if run.requested.lock().expect("requested lock").is_some() || run.exit.lock().expect("exit lock").is_some() { return Err(HookRefused::NotFound); }
             let before = recorder.activity();
+            // A plan update while Working changes no activity, but moves the card's bar (16-3).
+            let version = recorder.plan_version();
             let last_ask = recorder.newest_ask();
             recorder.record(&self.store, source, &payload, &events, crate::store::now_ms());
             let reply = if agent == AgentKind::Claude && last_ask != recorder.newest_ask() {
                 recorder.hold_reply(&self.store, &payload)
             } else { None };
-            (before != recorder.activity(), reply)
+            (before != recorder.activity() || version != recorder.plan_version(), reply)
         };
-        if before {
+        if changed {
             self.notify_id(session_id);
         }
         Ok(reply)
@@ -754,7 +758,16 @@ impl SessionManager {
         let credential_label =
             row.credential_id.and_then(|id| credentials::get(&self.store, id).ok().flatten()).map(|c| c.label);
         let latest = history::latest(&self.store, row.id).ok().flatten();
-        let activity = run.as_ref().map_or(Activity::Unknown, |r| r.recorder.lock().expect("recorder lock").activity());
+        // A live run's glance comes from its recorder, under the lock already taken for the
+        // activity; a stopped session's costs one bounded read (16-3, K7).
+        let (activity, glance) = run.as_ref().map_or((Activity::Unknown, None), |r| {
+            let r = r.recorder.lock().expect("recorder lock");
+            (r.activity(), r.glance())
+        });
+        let progress = if run.is_some() { glance } else {
+            crate::store::progress::latest_plan(&self.store, row.id).ok().flatten()
+                .and_then(|steps| chorus_core::step_times::glance(&steps, None))
+        };
         let current_attention = attention(row.state, run.is_some(), activity,
             last.as_ref().and_then(|r| r.end_reason), last.as_ref().and_then(|r| r.exit_code));
         SessionSummary {
@@ -812,6 +825,7 @@ impl SessionManager {
             routing: routing::describe(row.routing.as_deref()),
             latest_at_secs: latest.as_ref().map_or(0, |(_, at)| vault::commands::secs(*at)),
             latest: latest.map(|(text, _)| text),
+            progress,
         }
     }
 
@@ -1307,10 +1321,13 @@ impl SessionManager {
             last_output_ms: AtomicI64::new(crate::store::now_ms()),
             no_signal_shown: AtomicBool::new(false),
         });
-        // A resumed conversation keeps its task ids, so its plan continues from the stored one (P16).
-        // A fresh one restarts them at "1" and must not merge into an old plan.
-        if resumed && let Ok(Some(steps)) = crate::store::progress::latest_plan(&self.store, row.id) {
-            run.recorder.lock().expect("recorder lock").seed_plan(steps);
+        // Every run's card starts from the session's stored plan, as the panel does (16-3). A resumed
+        // conversation keeps its task ids, so its plan continues from the stored one (P16); a fresh
+        // one restarts them at "1" and must not merge into an old plan.
+        if let Ok(Some(steps)) = crate::store::progress::latest_plan(&self.store, row.id) {
+            let mut recorder = run.recorder.lock().expect("recorder lock");
+            if resumed { recorder.seed_plan(steps.clone()); }
+            recorder.seed_glance(steps);
         }
         *live.run.lock().expect("run lock") = Some(run.clone());
         if spec.resume.kind() == ResumeKind::Discovered && row.agent_session_id.is_none() && run.codex_bridge.is_none() {

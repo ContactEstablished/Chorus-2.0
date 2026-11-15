@@ -46,6 +46,12 @@ pub struct Recorder {
     transcript: Option<String>,
     plan: Vec<chorus_core::progress::PlanStep>,
     progress_sequence: u64,
+    /// The plan an Overview card shows (16-3): the newest snapshot, or the seeded one until then.
+    shown: Vec<chorus_core::progress::PlanStep>,
+    /// The current step's text and when it started in this run (16-3).
+    current: Option<(String, i64)>,
+    /// Bumped on every plan snapshot, so the hook path republishes the summary on a plan change.
+    plan_version: u64,
 }
 
 impl Recorder {
@@ -69,6 +75,9 @@ impl Recorder {
             transcript: None,
             plan: Vec::new(),
             progress_sequence: 0,
+            shown: Vec::new(),
+            current: None,
+            plan_version: 0,
         }
     }
 
@@ -84,7 +93,13 @@ impl Recorder {
     pub fn progress_at(&mut self, store: &Store, row: i64, key: &str, content: chorus_core::progress::Progress, at: i64) {
         let Ok(value) = serde_json::to_value(content) else { return };
         let Ok(content) = serde_json::from_value::<chorus_core::progress::Progress>(self.clean_value(&value)) else { return };
-        if let chorus_core::progress::Progress::Plan { steps } = &content { self.plan = steps.clone(); }
+        if let chorus_core::progress::Progress::Plan { steps } = &content {
+            self.plan = steps.clone();
+            // At the 500-row cap the snapshot isn't stored, but the glance still advances (16-3).
+            self.shown = steps.clone();
+            self.current = chorus_core::step_times::advance_current(self.current.as_ref(), steps, at);
+            self.plan_version += 1;
+        }
         let _ = history::progress(store, row, key, &content, at);
     }
 
@@ -92,6 +107,19 @@ impl Recorder {
     pub fn seed_plan(&mut self, steps: Vec<chorus_core::progress::PlanStep>) {
         if self.plan.is_empty() { self.plan = steps; }
     }
+
+    /// Every run starts its card from the session's stored plan until the agent writes one (16-3).
+    /// The seeded plan has no running time: Chorus didn't see its current step start in this run.
+    pub fn seed_glance(&mut self, steps: Vec<chorus_core::progress::PlanStep>) {
+        if self.shown.is_empty() { self.shown = steps; }
+    }
+
+    /// The latest plan at a glance, for the Overview card (16-3, K7). No query.
+    pub fn glance(&self) -> Option<chorus_core::step_times::ProgressGlance> {
+        chorus_core::step_times::glance(&self.shown, self.current.as_ref().map(|c| c.1))
+    }
+
+    pub fn plan_version(&self) -> u64 { self.plan_version }
 
     pub fn has_open_turn(&self) -> bool {
         self.tracker.open_turns() > 0
@@ -403,6 +431,45 @@ mod tests {
         let turns = history::recent_turns(&store, 1, 5).unwrap();
         let plan = turns[0].progress.iter().rev().find_map(|p| match &p.content { chorus_core::progress::Progress::Plan { steps } => Some(steps.clone()), _ => None }).unwrap();
         assert_eq!(plan.iter().map(|s| (s.text.as_str(), s.status.as_str())).collect::<Vec<_>>(), [("Read", "completed"), ("Build", "in-progress")]);
+    }
+
+    #[test]
+    fn a_task_update_bumps_the_plan_version_without_an_activity_change() {
+        let store = Store::in_memory();
+        store.with(|c| c.execute_batch("INSERT INTO sessions(id,name,agent,cwd,state,cols,rows,created_at) VALUES(1,'test','claude','scratch','running',100,30,0); INSERT INTO runs(id,session_id,program,args,started_at) VALUES(1,1,'test','[]',0);")).unwrap();
+        let mut r = Recorder::new(1, 1, "hook", Arc::new(vec![]), Arc::new(vec![]));
+        let feed = |r: &mut Recorder, v: Value, t: i64| r.record(&store, "test", &v, &from_claude_hook(&v), t);
+        feed(&mut r, json!({"hook_event_name":"UserPromptSubmit","prompt_id":"p","prompt":"go"}), 1_000);
+        assert_eq!((r.activity(), r.plan_version(), r.glance()), (Activity::Working, 0, None));
+        feed(&mut r, json!({"hook_event_name":"PostToolUse","prompt_id":"p","tool_name":"TaskCreate","tool_use_id":"c1","tool_input":{"subject":"Build"},"tool_response":{"task":{"id":"1","subject":"Build"}}}), 2_000);
+        assert_eq!((r.activity(), r.plan_version()), (Activity::Working, 1));
+        assert_eq!(r.glance().map(|g| (g.done, g.total)), Some((0, 1)));
+        feed(&mut r, json!({"hook_event_name":"PostToolUse","prompt_id":"p","tool_name":"TaskUpdate","tool_use_id":"u1","tool_input":{"taskId":"1","status":"in_progress"},"tool_response":{"success":true}}), 3_000);
+        let g = r.glance().unwrap();
+        assert_eq!((r.activity(), r.plan_version(), g.current.as_deref(), g.current_since_secs), (Activity::Working, 2, Some("Build"), Some(3)));
+        feed(&mut r, json!({"hook_event_name":"PostToolUse","prompt_id":"p","tool_name":"TaskUpdate","tool_use_id":"u2","tool_input":{"taskId":"1","status":"completed"},"tool_response":{"success":true}}), 9_000);
+        let g = r.glance().unwrap();
+        assert_eq!((r.activity(), r.plan_version(), g.done, g.current), (Activity::Working, 3, 1, None));
+    }
+
+    #[test]
+    fn a_seeded_glance_shows_until_a_new_plan() {
+        let store = Store::in_memory();
+        store.with(|c| c.execute_batch("INSERT INTO sessions(id,name,agent,cwd,state,cols,rows,created_at) VALUES(1,'test','claude','scratch','running',100,30,0); INSERT INTO runs(id,session_id,program,args,started_at) VALUES(1,1,'test','[]',0);")).unwrap();
+        let mut r = Recorder::new(1, 1, "hook", Arc::new(vec![]), Arc::new(vec![]));
+        let step = |id: &str, text: &str, status: &str| chorus_core::progress::PlanStep { id: id.into(), text: text.into(), status: status.into() };
+        r.seed_glance(vec![step("1", "Old", "completed"), step("2", "Running", "in-progress")]);
+        r.seed_glance(vec![step("9", "Ignored", "pending")]);
+        let g = r.glance().unwrap();
+        // Seeded: the current step is named, but Chorus didn't see it start, so it has no time.
+        assert_eq!((g.done, g.total, g.current.as_deref(), g.current_since_secs), (1, 2, Some("Running"), None));
+        assert_eq!(r.plan_version(), 0, "a seed is not a plan change");
+        let v = json!({"hook_event_name":"UserPromptSubmit","prompt_id":"p","prompt":"go"});
+        r.record(&store, "test", &v, &from_claude_hook(&v), 1_000);
+        let todo = json!({"hook_event_name":"PostToolUse","prompt_id":"p","tool_name":"TodoWrite","tool_use_id":"w","tool_input":{"todos":[{"content":"New","status":"in_progress","activeForm":"Doing new"}]},"tool_response":{}});
+        r.record(&store, "test", &todo, &from_claude_hook(&todo), 5_000);
+        let g = r.glance().unwrap();
+        assert_eq!((g.total, g.current.as_deref(), g.current_since_secs), (1, Some("New"), Some(5)));
     }
 
     #[test]

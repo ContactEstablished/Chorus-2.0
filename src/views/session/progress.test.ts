@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import type { SessionProgress, TimeSplit, TimedStep, ToolGroup } from '../../ipc'
-import { elapsedLabel, emptyLine, liveSecs, nowNext, skillChip, splitAria, splitLegend, splitNote, spokenDuration, stepDuration, stepTime, stopped, toolGroupLabel, toolSummary } from './progress'
+import type { ProgressGlance, SessionProgress, StepStatus, TimeSplit, TimedStep, ToolGroup } from '../../ipc'
+import { cardLine, cardSegments, elapsedLabel, emptyLine, liveSecs, nowNext, skillChip, splitAria, splitLegend, splitNote, spokenDuration, stepDuration, stepTime, stopped, toolGroupLabel, toolSummary } from './progress'
 
 const step = (over: Partial<TimedStep> = {}): TimedStep => ({
   kind: 'step', text: 'Build', status: 'completed', startedAtSecs: 100, secs: 300, runningSinceSecs: null, timed: true, skills: [], ...over,
@@ -121,5 +121,35 @@ describe('the time split', () => {
   })
   it('says so when every part rounds to nothing', () => {
     expect(splitNote(split({ workingSecs: 0, youSecs: 0, approvalSecs: 0, idleSecs: 0 }))).toBe('Where the time went: nothing recorded yet.')
+  })
+})
+
+const glance = (over: Partial<ProgressGlance> = {}): ProgressGlance => ({
+  done: 4, total: 9, statuses: [], current: 'Kick off P16', currentSinceSecs: 1000, next: 'Write specs', ...over,
+})
+
+describe('cardLine', () => {
+  it('names the current step with its running time while live', () => {
+    expect(cardLine(glance(), true, 1420)).toEqual({ label: 'Now:', step: 'Kick off P16', secs: 420 })
+    // Seeded after a restart: named, but not timed until the agent's next update.
+    expect(cardLine(glance({ currentSinceSecs: null }), true, 1420)).toEqual({ label: 'Now:', step: 'Kick off P16', secs: null })
+  })
+  it('says where a stopped session stopped, without a time', () => {
+    expect(cardLine(glance(), false, 1420)).toEqual({ label: 'Stopped at:', step: 'Kick off P16', secs: null })
+  })
+  it('names the next step when nothing runs, and says when all are done', () => {
+    expect(cardLine(glance({ current: null, currentSinceSecs: null }), true, 1420)).toEqual({ label: 'Next:', step: 'Write specs', secs: null })
+    expect(cardLine(glance({ current: null, next: null, done: 9 }), true, 1420)).toEqual({ label: 'All steps done', step: '', secs: null })
+  })
+})
+
+describe('cardSegments', () => {
+  it('draws one segment per step up to 24', () => {
+    const statuses = [...Array(24)].map((_, i): StepStatus => (i < 4 ? 'completed' : i === 4 ? 'in-progress' : 'pending'))
+    expect(cardSegments(glance({ statuses, total: 24 }))).toEqual({ kind: 'segments', statuses })
+  })
+  it('draws one continuous bar above 24', () => {
+    const statuses = [...Array(40)].map((_, i): StepStatus => (i < 10 ? 'completed' : i === 10 ? 'in-progress' : 'pending'))
+    expect(cardSegments(glance({ statuses, total: 40, done: 10 }))).toEqual({ kind: 'continuous', donePct: 25, currentPct: 2.5 })
   })
 })

@@ -2,7 +2,7 @@
  * Wording for the Progress panel (P16). Every number comes from `chorus_core::step_times`; this only
  * words it and adds the ticking part of a step that is still running (K5).
  */
-import type { AgentKind, SessionProgress, TimeSplit, TimedStep, ToolGroup } from '../../ipc'
+import type { AgentKind, ProgressGlance, SessionProgress, StepStatus, TimeSplit, TimedStep, ToolGroup } from '../../ipc'
 
 /** A step's rounded duration: "40 sec", "5 min", "1.5 h", "12 h". */
 export function stepDuration(secs: number): string {
@@ -130,4 +130,29 @@ export function spokenDuration(secs: number): string {
 /** The split bar's accessible label: "Agent working 47 minutes, waiting on you 13 minutes". */
 export function splitAria(s: TimeSplit): string {
   return splitLegend(s).map((p, i) => `${i === 0 ? p.label : p.label.toLowerCase()} ${spokenDuration(p.secs)}`).join(', ')
+}
+
+/** The most steps an Overview card draws as separate segments; more becomes one continuous bar. */
+export const CARD_SEGMENTS = 24
+
+/** The card's line above its bar (16-3). Only a live run's current step has a ticking time. */
+export function cardLine(g: ProgressGlance, live: boolean, now: number): { label: string; step: string; secs: number | null } {
+  if (g.current !== null) {
+    const since = live ? g.currentSinceSecs : null
+    return { label: live ? 'Now:' : 'Stopped at:', step: g.current, secs: since === null ? null : Math.max(0, now - since) }
+  }
+  if (g.next !== null) return { label: 'Next:', step: g.next, secs: null }
+  return { label: 'All steps done', step: '', secs: null }
+}
+
+export type CardBar =
+  | { kind: 'segments'; statuses: StepStatus[] }
+  | { kind: 'continuous'; donePct: number; currentPct: number }
+
+/** One segment per step up to CARD_SEGMENTS, else one bar: done, then the steps in progress. */
+export function cardSegments(g: ProgressGlance): CardBar {
+  if (g.statuses.length <= CARD_SEGMENTS) return { kind: 'segments', statuses: g.statuses }
+  const n = g.statuses.length
+  const running = g.statuses.filter((x) => x === 'in-progress').length
+  return { kind: 'continuous', donePct: (g.done / n) * 100, currentPct: (running / n) * 100 }
 }

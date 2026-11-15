@@ -147,6 +147,7 @@ export type {
 
 // P16: the Progress panel.
 export type {
+  ProgressGlance,
   RowKind,
   SessionProgress,
   SkillUse,

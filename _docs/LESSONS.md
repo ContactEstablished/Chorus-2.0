@@ -620,3 +620,9 @@ starts it again. Chorus records each live run as `chorus-crashed` and relaunches
 new run, so a real-app check that spans a long wait (the 17-minute Idle check) starts over. Finish
 every code change, including tests, before starting a long check, or run it in a build that isn't
 watched.
+
+**L79 — A plugin's start-up instructions can keep Claude Code off its own task list (P16).** In the
+16-3 check, a probe prompt to "create a task list" was carried out with the claude-mem plugin's
+`work_state_write` tool, because that plugin's SessionStart hook tells agents to use it instead of
+the built-in to-do tools. Chorus correctly showed no plan. When a live check needs a plan, name
+Claude Code's `TaskCreate` and `TaskUpdate` tools in the prompt.

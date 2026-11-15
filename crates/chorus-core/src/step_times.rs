@@ -344,6 +344,55 @@ pub fn compute(snapshots: &[PlanSnapshot], runs: &[RunSpan], live_run: Option<u3
     (progress, window)
 }
 
+/// The latest plan at a glance, for an Overview card's bar (16-3, K7).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ProgressGlance {
+    pub done: u32,
+    pub total: u32,
+    /// Each step's status in plan order (plans hold at most 100 steps).
+    pub statuses: Vec<StepStatus>,
+    /// The first in-progress step's text.
+    pub current: Option<String>,
+    /// When it started, while it runs in the live run; `None` when stopped or only seeded.
+    pub current_since_secs: Option<u32>,
+    /// The first pending step after the current one, or the first pending one.
+    pub next: Option<String>,
+}
+
+/// The first in-progress step, by index.
+fn first_in_progress(steps: &[PlanStep]) -> Option<usize> {
+    steps.iter().position(|s| StepStatus::from_plan(&s.status) == StepStatus::InProgress)
+}
+
+/// `None` for an empty plan (D122: no bar without a plan).
+pub fn glance(steps: &[PlanStep], current_since_ms: Option<i64>) -> Option<ProgressGlance> {
+    if steps.is_empty() { return None; }
+    let statuses: Vec<StepStatus> = steps.iter().map(|s| StepStatus::from_plan(&s.status)).collect();
+    let current = first_in_progress(steps);
+    let pending_from = |from: usize| statuses.iter().skip(from).position(|&s| s == StepStatus::Pending).map(|i| i + from);
+    let next = current.map_or_else(|| pending_from(0), |c| pending_from(c + 1));
+    Some(ProgressGlance {
+        done: u32::try_from(statuses.iter().filter(|&&s| s == StepStatus::Completed).count()).unwrap_or(u32::MAX),
+        total: u32::try_from(steps.len()).unwrap_or(u32::MAX),
+        current: current.map(|c| steps[c].text.trim().to_owned()),
+        current_since_secs: current.and(current_since_ms).map(at_secs),
+        next: next.map(|n| steps[n].text.trim().to_owned()),
+        statuses,
+    })
+}
+
+/// The current step's text and since when, after a new snapshot at `at_ms`. The same step (the same
+/// trimmed text, as K1 matches) keeps its start; another step starts at `at_ms`; none in progress
+/// gives `None`.
+pub fn advance_current(prev: Option<&(String, i64)>, steps: &[PlanStep], at_ms: i64) -> Option<(String, i64)> {
+    let text = steps[first_in_progress(steps)?].text.trim().to_owned();
+    match prev {
+        Some((p, since)) if *p == text => Some((text, *since)),
+        _ => Some((text, at_ms)),
+    }
+}
+
 /// Tools that are bookkeeping, not work, and never appear in a summary.
 const NOT_WORK: &[&str] = &["Skill", "TodoWrite", "TaskCreate", "TaskUpdate", "TaskList", "TaskGet", "ToolSearch"];
 
@@ -592,5 +641,48 @@ mod tests {
         assert_eq!(StepStatus::from_plan("in-progress"), StepStatus::InProgress);
         assert_eq!(StepStatus::from_plan("completed"), StepStatus::Completed);
         assert_eq!(StepStatus::from_plan("odd"), StepStatus::Pending);
+    }
+
+    fn steps(list: &[(&str, &str)]) -> Vec<PlanStep> { list.iter().map(|(t, s)| step(t, s)).collect() }
+
+    #[test]
+    fn glance_counts_done_and_names_the_current_step() {
+        let g = glance(&steps(&[("A", C), ("B", P), ("C", I), ("D", P), ("E", I)]), Some(42_400)).unwrap();
+        assert_eq!((g.done, g.total), (1, 5));
+        assert_eq!(g.statuses, vec![StepStatus::Completed, StepStatus::Pending, StepStatus::InProgress, StepStatus::Pending, StepStatus::InProgress]);
+        assert_eq!(g.current.as_deref(), Some("C"));
+        assert_eq!(g.current_since_secs, Some(42));
+        // The first pending step after the current one, not the one before it.
+        assert_eq!(g.next.as_deref(), Some("D"));
+        // No current step: the first pending one is next, and there is no time.
+        let g = glance(&steps(&[("A", C), ("B", P)]), Some(5_000)).unwrap();
+        assert_eq!((g.current, g.current_since_secs, g.next.as_deref()), (None, None, Some("B")));
+        let g = glance(&steps(&[("A", C), ("B", C)]), None).unwrap();
+        assert_eq!((g.done, g.current, g.next), (2, None, None));
+    }
+
+    #[test]
+    fn no_steps_give_no_glance() {
+        assert_eq!(glance(&[], Some(1_000)), None);
+    }
+
+    #[test]
+    fn advance_current_keeps_the_start_while_the_same_step_runs() {
+        let prev = ("B".to_owned(), 10_000);
+        assert_eq!(advance_current(Some(&prev), &steps(&[("A", C), (" B ", I), ("C", P)]), 50_000), Some(("B".into(), 10_000)));
+    }
+
+    #[test]
+    fn advance_current_restarts_when_another_step_starts() {
+        let prev = ("B".to_owned(), 10_000);
+        assert_eq!(advance_current(Some(&prev), &steps(&[("B", C), ("C", I)]), 50_000), Some(("C".into(), 50_000)));
+        assert_eq!(advance_current(None, &steps(&[("A", I)]), 7_000), Some(("A".into(), 7_000)));
+    }
+
+    #[test]
+    fn advance_current_clears_when_nothing_runs() {
+        let prev = ("B".to_owned(), 10_000);
+        assert_eq!(advance_current(Some(&prev), &steps(&[("B", C), ("C", P)]), 50_000), None);
+        assert_eq!(advance_current(Some(&prev), &[], 50_000), None);
     }
 }
