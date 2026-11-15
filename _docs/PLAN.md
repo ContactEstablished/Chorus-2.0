@@ -71,7 +71,7 @@ these held items later as a real-world test; this is not authorization to start 
 Keep completed work and phase identifiers. M3's full scope remains, with no completion date while
 these phases are held. This override takes precedence over the historical execution order below.
 
-There are **15 active phases**: P0–P15 with P9 removed; P11 and P14 are now on hold (D102).
+There are **17 active phases**: P0–P17 with P9 removed; P11 and P14 are now on hold (D102).
 Keep these identifiers: scope and decisions
 already refer to them. P0–P5 are closed; P4's full-day acceptance check was explicitly waived on
 2026-10-22, not performed (D72). P5's remaining work passed its app checks on 2026-10-22.
@@ -95,7 +95,9 @@ does not close those phases.
 | P13 | Phone relay | Built once inside P15, for the loop, from [its design](HANDOFF-P13-telegram.md) (D97); P6 has since built the reply channels P13b needed |
 | P14 | More agents and ship | **On hold until further notice (D102); at the end, before P11.** Partly built: Gemini, Aider, Ollama, CI, installer polish and Q28–Q30 fixes; complete real turns, DeepSeek spike/adapter, signing, updates and eventual name migration remain for a future Chorus 2 real-world test |
 | P11 | Measurement, made visible | **On hold until further notice (D102); last priority.** Tokens, costs, attention and Usage UI remain for a future Chorus 2 real-world test; forecasts remain gated on data completeness |
-| P15 | Autonomous phase loop | Next (D97): [plan](HANDOFF-P15-loop.md). Runs a roadmap phase after phase, stopping at milestones or real blockers; includes Council (P10) and the Telegram relay (P13) |
+| P15 | Autonomous phase loop | Resumes after P16 (D97, D115): slices 1–4 done, 5–9 remain. [plan](HANDOFF-P15-loop.md). Runs a roadmap phase after phase, stopping at milestones or real blockers; includes Council (P10) and the Telegram relay (P13) |
+| P16 | Progress panel | Next (D115–D116): [roadmap](HANDOFF-P16-P17-progress-goals.md). A pinned panel in Friendly with step and skill times, then a time split, an Overview card bar and "usual time" markers |
+| P17 | Goal mode | Provisional, after P16 (D117–D118): [roadmap](HANDOFF-P16-P17-progress-goals.md). A standing goal per session that keeps the agent working, with guards that pause; a Stop-hook spike first |
 
 **Execution order agreed 2026-10-22:** roadmap consolidation, Q28–Q30 and P5 are complete. Build P6
 and P7 for M2, then finish the remaining capability and release phases for M3. P6 began with the
@@ -124,6 +126,7 @@ P7 and P8 are now merged; P14 is partly merged. Contracts from unfinished phases
 | [P11](HANDOFF-P11-measurement.md) | Measurement UI and explicit completeness |
 | [P13](HANDOFF-P13-telegram.md) | Initial relay; interactive answers depend on P6 |
 | [P15](HANDOFF-P15-loop.md) | The autonomous phase loop, with Council and the relay built for it |
+| [P16 and P17](HANDOFF-P16-P17-progress-goals.md) | The Progress panel, then goal mode (provisional) |
 | [P14](HANDOFF-P14-agents-ship.md) · [review](HANDOFF-P14-REVIEW.md) | Original hand-off and actual result; this roadmap includes the later DeepSeek addition |
 | [opencode port](HANDOFF-OC2-opencode.md) · [merge notes](HANDOFF-P14-OC2-MERGE.md) | Historical, superseded/completed; retain for context, do not restart |
 
@@ -434,6 +437,19 @@ phases run back to back on a run branch, each planned, grilled by a second vendo
 worktrees, checked by scripts, reviewed by a different vendor and tagged, until a milestone or a
 limit stops them. Questions are blocking, timed or log only; Counsel settles hard calls; Telegram
 carries questions, stops and milestone packets. P10 and P13 are built inside it (D97).
+
+### P16 — Progress panel
+A panel pinned at the top of Friendly shows the session's plan, not one turn's: done, current and
+next steps, skill chips and rounded durations from Chorus's clock (D115). Then a time split (working,
+waiting on you, waiting on approval), a thin bar on Overview cards and quiet "usual time" markers
+(D116). It records and displays; it adds no agent behaviour. Planned in
+[HANDOFF-P16-P17-progress-goals.md](HANDOFF-P16-P17-progress-goals.md).
+
+### P17 — Goal mode
+Provisional until its own kickoff. A session can carry a standing goal; after each turn Chorus
+decides whether to send a continue message, from the agent's verdict on a Chorus tool (D117). Guards
+pause, never stop, and name their reason. Claude Code's Stop hook is spiked first (D118). Goal mode
+never changes a session's permissions.
 
 ## 5. Ways of working
 
