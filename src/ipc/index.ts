@@ -144,3 +144,14 @@ export type {
   RelayUser,
   RelayProject,
 } from './bindings'
+
+// P16: the Progress panel.
+export type {
+  RowKind,
+  SessionProgress,
+  SkillUse,
+  StepStatus,
+  TimedStep,
+  ToolGroup,
+  ToolKind,
+} from './bindings'

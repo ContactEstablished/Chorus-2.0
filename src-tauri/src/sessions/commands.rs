@@ -294,3 +294,10 @@ pub fn session_usage(state: Manager<'_>, session_id: u32) -> Result<crate::store
 pub fn session_history(state: Manager<'_>, session_id: u32, limit: u32) -> Result<crate::store::history::SessionHistory, String> {
     state.history(session_id, limit)
 }
+
+/// A session's plan with step times, skill chips and the current step's tool calls (P16).
+#[tauri::command]
+#[specta::specta]
+pub fn session_progress(state: Manager<'_>, session_id: u32) -> Result<chorus_core::step_times::SessionProgress, String> {
+    state.progress(session_id)
+}

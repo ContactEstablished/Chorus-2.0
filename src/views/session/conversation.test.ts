@@ -56,19 +56,19 @@ describe('isLongPrompt', () => {
 describe('steps and plans', () => {
   it('keeps notes in order and drops a repeat of the final reply', () => {
     const t = turn({ progress: [
-      { id: 1, content: { kind: 'message', text: 'Reading.' } },
-      { id: 2, content: { kind: 'plan', steps: [{ id: 'a', text: 'Read', status: 'completed' }] } },
-      { id: 3, content: { kind: 'message', text: 'All done.' } },
-      { id: 4, content: { kind: 'proposed-plan', text: '1. Do it' } },
-      { id: 5, content: { kind: 'message', text: '   ' } },
+      { id: 1, atSecs: 0, content: { kind: 'message', text: 'Reading.' } },
+      { id: 2, atSecs: 0, content: { kind: 'plan', steps: [{ id: 'a', text: 'Read', status: 'completed' }] } },
+      { id: 3, atSecs: 0, content: { kind: 'message', text: 'All done.' } },
+      { id: 4, atSecs: 0, content: { kind: 'proposed-plan', text: '1. Do it' } },
+      { id: 5, atSecs: 0, content: { kind: 'message', text: '   ' } },
     ] })
     expect(steps(t)).toEqual([{ id: 1, kind: 'note', text: 'Reading.' }, { id: 4, kind: 'proposed-plan', text: '1. Do it' }])
     expect(latestPlan(t)).toEqual([{ id: 'a', text: 'Read', status: 'completed' }])
   })
   it('summarises the folded work', () => {
     const t = turn({
-      progress: [{ id: 1, content: { kind: 'message', text: 'Reading.' } }],
-      tools: [{ tool: 'Read', target: 'a.rs', failed: false, finished: true }, { tool: 'Bash', target: null, failed: true, finished: true }],
+      progress: [{ id: 1, atSecs: 0, content: { kind: 'message', text: 'Reading.' } }],
+      tools: [{ tool: 'Read', target: 'a.rs', failed: false, finished: true, startedAtSecs: 0, endedAtSecs: 1 }, { tool: 'Bash', target: null, failed: true, finished: true, startedAtSecs: 0, endedAtSecs: 1 }],
       asks: [{ id: 1, kind: 'approval', subject: 'Bash', answer: 'allow', details: null, replyAttempted: true, replyAction: null }],
     })
     expect(workSummary(t)).toBe('1 note · 2 tool calls · 1 approval')
@@ -97,6 +97,6 @@ describe('endLabel and badges', () => {
 describe('eventCount', () => {
   it('counts prompts, notes and replies once each', () => {
     expect(eventCount([])).toBe(0)
-    expect(eventCount([turn({ progress: [{ id: 1, content: { kind: 'message', text: 'a' } }] }), turn({ finalMessage: null })])).toBe(4)
+    expect(eventCount([turn({ progress: [{ id: 1, atSecs: 0, content: { kind: 'message', text: 'a' } }] }), turn({ finalMessage: null })])).toBe(4)
   })
 })

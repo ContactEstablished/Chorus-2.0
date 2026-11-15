@@ -13,6 +13,7 @@ pub mod images;
 pub mod replies;
 pub mod history;
 pub mod profiles;
+pub mod progress;
 pub mod projects;
 pub mod providers;
 pub mod routing;

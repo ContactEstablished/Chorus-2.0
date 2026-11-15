@@ -1303,6 +1303,11 @@ impl SessionManager {
             last_output_ms: AtomicI64::new(crate::store::now_ms()),
             no_signal_shown: AtomicBool::new(false),
         });
+        // A resumed conversation keeps its task ids, so its plan continues from the stored one (P16).
+        // A fresh one restarts them at "1" and must not merge into an old plan.
+        if resumed && let Ok(Some(steps)) = crate::store::progress::latest_plan(&self.store, row.id) {
+            run.recorder.lock().expect("recorder lock").seed_plan(steps);
+        }
         *live.run.lock().expect("run lock") = Some(run.clone());
         if spec.resume.kind() == ResumeKind::Discovered && row.agent_session_id.is_none() && run.codex_bridge.is_none() {
             self.watch_for_conversation(&row, &run, launched_ms, &parent);
@@ -2010,6 +2015,7 @@ impl Drop for CappedGuard {
     }
 }
 
+mod progress;
 #[cfg(test)]
 mod tests;
 pub(crate) mod codex_bridge;

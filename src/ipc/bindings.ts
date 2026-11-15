@@ -95,6 +95,8 @@ export const commands = {
 	sessionHistory: (sessionId: number, limit: number) => typedError<SessionHistory, string>(__TAURI_INVOKE("session_history", { sessionId, limit })),
 	/**  A session's tokens and cost over its turns, and its newest turn's (D107). */
 	sessionUsage: (sessionId: number) => typedError<SessionUsage, string>(__TAURI_INVOKE("session_usage", { sessionId })),
+	/**  A session's plan with step times, skill chips and the current step's tool calls (P16). */
+	sessionProgress: (sessionId: number) => typedError<SessionProgress, string>(__TAURI_INVOKE("session_progress", { sessionId })),
 	profilesList: () => typedError<ProfileSummary[], string>(__TAURI_INVOKE("profiles_list")),
 	profileSave: (input: ProfileSave) => typedError<ProfileSummary, string>(__TAURI_INVOKE("profile_save", { input })),
 	profileDelete: (id: number) => typedError<boolean, string>(__TAURI_INVOKE("profile_delete", { id })),
@@ -1321,6 +1323,7 @@ export type Progress = { kind: "message"; text: string } | { kind: "plan"; steps
 export type ProgressEntry = {
 	id: number,
 	content: Progress,
+	atSecs: number,
 };
 
 export type Project = {
@@ -1648,6 +1651,8 @@ export type RoutingSettingsView = {
 	problem: string | null,
 };
 
+export type RowKind = "step" | "skill";
+
 /**  A run's settings, which only Matthew edits, in Chorus. */
 export type RunConfig = {
 	roles: RoleSetting[],
@@ -1757,6 +1762,19 @@ export type SessionInstructions = {
 	run: RunInstructions | null,
 	/**  Why this agent gets no instructions, whatever the session holds. */
 	unsupported: string | null,
+};
+
+export type SessionProgress = {
+	steps: TimedStep[],
+	current: number | null,
+	next: number | null,
+	/**  Step rows only, not skill rows. */
+	done: number,
+	total: number,
+	currentTools: ToolGroup[],
+	planAtSecs: number | null,
+	/**  A turn reached the 500-row cap, so later plan updates in it weren't stored. */
+	capped: boolean,
 };
 
 export type SessionStatus = "running" | "exited" | "closed";
@@ -1869,6 +1887,15 @@ export type Signature = {
 	firstError: string | null,
 };
 
+/**  A skill call shown as a chip. Its time is always an estimate. */
+export type SkillUse = {
+	callId: number,
+	name: string | null,
+	atSecs: number,
+	secs: number,
+	runningSinceSecs: number | null,
+};
+
 /**
  *  One session a launch makes. The first slot is the session the user set up; the others are
  *  derived from it.
@@ -1904,6 +1931,8 @@ export type SpeedHistoryRow = {
 export type StepKind = "plan" | "build" | "check" | "tag";
 
 export type StepState = "running" | "done" | "failed";
+
+export type StepStatus = "pending" | "in-progress" | "completed";
 
 export type StepView = {
 	id: number,
@@ -2109,6 +2138,20 @@ export type TiersView_Serialize = {
 	retryInSecs: number,
 };
 
+export type TimedStep = {
+	kind: RowKind,
+	text: string,
+	status: StepStatus,
+	/**  When it was first seen in progress in this plan. */
+	startedAtSecs: number | null,
+	/**  Closed time. While it runs in the live run, add `now - running_since_secs`. */
+	secs: number,
+	runningSinceSecs: number | null,
+	/**  False when it was completed without ever being seen in progress. */
+	timed: boolean,
+	skills: SkillUse[],
+};
+
 /**  One turn's usage, or a sum of turns'. */
 export type TokenUsage = {
 	/**  Prompt tokens not read from the cache. */
@@ -2127,7 +2170,22 @@ export type ToolEntry = {
 	target: string | null,
 	failed: boolean,
 	finished: boolean,
+	startedAtSecs: number,
+	endedAtSecs: number | null,
 };
+
+export type ToolGroup = {
+	kind: ToolKind,
+	tool: string,
+	count: number,
+	/**  Set only when every call in the group shares it. */
+	target: string | null,
+	secs: number,
+	runningSinceSecs: number | null,
+	failed: number,
+};
+
+export type ToolKind = "read" | "edit" | "run" | "search" | "web" | "agent" | "other";
 
 export type Trigger = "schedule" | "manual";
 

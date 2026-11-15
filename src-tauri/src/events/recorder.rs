@@ -88,6 +88,11 @@ impl Recorder {
         let _ = history::progress(store, row, key, &content, at);
     }
 
+    /// A resumed run starts from the stored plan, so its task updates merge into it (P16).
+    pub fn seed_plan(&mut self, steps: Vec<chorus_core::progress::PlanStep>) {
+        if self.plan.is_empty() { self.plan = steps; }
+    }
+
     pub fn has_open_turn(&self) -> bool {
         self.tracker.open_turns() > 0
     }
@@ -360,6 +365,22 @@ mod tests {
         assert_eq!(turns[0].prompt.as_deref(),Some("hello"));
         assert!(!serde_json::to_string(&turns).unwrap().contains("private-value-123"));
         assert_eq!(store.with(|c|c.query_row("SELECT count(*) FROM prompts",[],|r|r.get::<_,i64>(0))).unwrap(),1);
+    }
+
+    #[test]
+    fn a_seeded_plan_takes_task_updates_after_a_restart() {
+        let store = Store::in_memory();
+        store.with(|c| c.execute_batch("INSERT INTO sessions(id,name,agent,cwd,state,cols,rows,created_at) VALUES(1,'test','claude','scratch','running',100,30,0); INSERT INTO runs(id,session_id,program,args,started_at) VALUES(1,1,'test','[]',0);")).unwrap();
+        let mut r = Recorder::new(1, 1, "hook", Arc::new(vec![]), Arc::new(vec![]));
+        let step = |id: &str, text: &str, status: &str| chorus_core::progress::PlanStep { id: id.into(), text: text.into(), status: status.into() };
+        r.seed_plan(vec![step("1", "Read", "completed"), step("2", "Build", "pending")]);
+        r.seed_plan(vec![step("9", "Ignored", "pending")]);
+        r.record(&store, "test", &json!({}), &[AgentEvent::TurnStarted { turn: Some("t".into()), prompt: None }], 1);
+        let update = json!({"hook_event_name":"PostToolUse","tool_name":"TaskUpdate","tool_use_id":"u1","prompt_id":"t","tool_input":{"taskId":"2","status":"in_progress"},"tool_response":{"success":true}});
+        r.record(&store, "test", &update, &from_claude_hook(&update), 2);
+        let turns = history::recent_turns(&store, 1, 5).unwrap();
+        let plan = turns[0].progress.iter().rev().find_map(|p| match &p.content { chorus_core::progress::Progress::Plan { steps } => Some(steps.clone()), _ => None }).unwrap();
+        assert_eq!(plan.iter().map(|s| (s.text.as_str(), s.status.as_str())).collect::<Vec<_>>(), [("Read", "completed"), ("Build", "in-progress")]);
     }
 
     #[test]

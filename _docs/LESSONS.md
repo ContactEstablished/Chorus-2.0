@@ -596,3 +596,20 @@ profile with different options. Include Tauri's defaults:
 `--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --remote-debugging-port=N`. Then
 `http://127.0.0.1:N/json` lists the windows (the main one is `http://localhost:1420/`), and
 `Runtime.evaluate` reaches `window.__chorus`.
+
+**L75 — A crashed run's end is stamped at the next launch (P16).** When Chorus is killed, the run
+gets `ended_at` and `end_reason = 'chorus-crashed'` only when Chorus next starts, and its open turns
+become `lost` with that same time. Anything timed "until the run ended" would count the downtime
+(a 10-second step read 76 seconds in the P16 restart check). For `chorus-crashed` and
+`system-shutdown` runs, `store::progress::runs` uses the last thing Chorus recorded in the run
+instead. That undercounts a step that was quietly running (a long command) but never counts time
+while Chorus was down.
+
+**L76 — Claude Code 2.1.316's `Skill` hook names the skill in `tool_input.skill` (P16).** Seen live
+in the P16 check: a PostToolUse for `Skill` carries `{"skill": "<name>", "args": …}`, the same as the
+transcript, so `tool_target` reads `skill` and the panel's skill chip shows the name.
+
+**L77 — `npm run <script>` exits 1 with no output in the Git Bash tool (2026-11-15).** Even on a clean
+checkout, `npm run typecheck` and `npm test` return 1 there while `npx vue-tsc --noEmit` and
+`npx vitest run` pass. `npm run check` from PowerShell exits 0. Run the checks from PowerShell, or
+call the tools through `npx`, before deciding a check failed.

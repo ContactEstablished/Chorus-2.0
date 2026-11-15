@@ -49,6 +49,8 @@ pub struct Stream {
     turn: Option<String>, ended: bool, final_message: Option<String>,
     messages: HashMap<String, (String, i64)>,
     completed: HashSet<String>, requests: HashSet<String>,
+    /// Plan updates this turn, so each is its own progress row with its own time (D122).
+    plans: u32, last_plan: Option<Vec<crate::progress::PlanStep>>,
 }
 
 impl Stream {
@@ -82,7 +84,12 @@ impl Stream {
                 }));
             }
             "turn/plan/updated" => if let Some(content) = crate::progress::plan(&p["plan"]) {
-                out.push(Update::Progress { turn: turn.clone(), key: "codex-plan".into(), content });
+                let steps = match &content { Progress::Plan { steps } => Some(steps.clone()), _ => None };
+                if steps != self.last_plan {
+                    self.plans += 1;
+                    self.last_plan = steps;
+                    out.push(Update::Progress { turn: turn.clone(), key: format!("codex-plan-{}", self.plans), content });
+                }
             },
             "item/agentMessage/delta" | "item/plan/delta" => {
                 if let (Some(id), Some(delta)) = (p["itemId"].as_str(), p["delta"].as_str())
@@ -166,6 +173,18 @@ impl Stream {
         let item = json!({"type":"fileChange","id":"f","status":"completed","changes":[{"path":"_docs/PLAN-x.md","kind":{"type":"add"},"diff":"+# Plan"},{"path":"b.rs","kind":{"type":"add"},"diff":""}]});
         let out = s.accept("one",&event("item/completed",json!({"threadId":"one","turnId":"t","item":item})),10);
         assert!(out.iter().any(|u| matches!(u, Update::Event(AgentEvent::ToolFinished { tool, target: Some(t), .. }) if tool == "fileChange" && t == "_docs/PLAN-x.md")));
+    }
+    #[test] fn each_plan_update_is_its_own_row_and_repeats_are_skipped() {
+        let mut s = Stream::default();
+        s.accept("one",&event("turn/started",json!({"threadId":"one","turn":{"id":"t"}})),0);
+        let plan = |status: &str| event("turn/plan/updated",json!({"threadId":"one","turnId":"t","plan":[{"step":"Read","status":status}]}));
+        let keys = |out: Vec<Update>| out.into_iter().filter_map(|u| match u { Update::Progress { key, .. } => Some(key), _ => None }).collect::<Vec<_>>();
+        assert_eq!(keys(s.accept("one",&plan("inProgress"),10)), vec!["codex-plan-1"]);
+        assert!(keys(s.accept("one",&plan("inProgress"),20)).is_empty());
+        assert_eq!(keys(s.accept("one",&plan("completed"),30)), vec!["codex-plan-2"]);
+        s.accept("one",&event("turn/started",json!({"threadId":"one","turn":{"id":"u"}})),40);
+        let next = event("turn/plan/updated",json!({"threadId":"one","turnId":"u","plan":[{"step":"Read","status":"completed"}]}));
+        assert_eq!(keys(s.accept("one",&next,50)), vec!["codex-plan-1"]);
     }
     #[test] fn restarting_does_not_record_an_old_completed_turn_again() {
         let response=json!({"thread":{"turns":[{"id":"old","status":"completed","items":[]}]}});
