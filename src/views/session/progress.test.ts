@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ProgressGlance, SessionProgress, StepStatus, TimeSplit, TimedStep, ToolGroup } from '../../ipc'
-import { cardLine, cardSegments, elapsedLabel, emptyLine, liveSecs, nowNext, skillChip, splitAria, splitLegend, splitNote, spokenDuration, stepDuration, stepTime, stopped, toolGroupLabel, toolSummary } from './progress'
+import { cardLine, cardSegments, elapsedLabel, usualLabel, usualTitle, emptyLine, liveSecs, nowNext, skillChip, splitAria, splitLegend, splitNote, spokenDuration, stepDuration, stepTime, stopped, toolGroupLabel, toolSummary } from './progress'
 
 const step = (over: Partial<TimedStep> = {}): TimedStep => ({
   kind: 'step', text: 'Build', status: 'completed', startedAtSecs: 100, secs: 300, runningSinceSecs: null, timed: true, skills: [], ...over,
@@ -151,5 +151,16 @@ describe('cardSegments', () => {
   it('draws one continuous bar above 24', () => {
     const statuses = [...Array(40)].map((_, i): StepStatus => (i < 10 ? 'completed' : i === 10 ? 'in-progress' : 'pending'))
     expect(cardSegments(glance({ statuses, total: 40, done: 10 }))).toEqual({ kind: 'continuous', donePct: 25, currentPct: 2.5 })
+  })
+})
+
+describe('usual-time marker', () => {
+  it('reads this run, then the usual time, both as estimates', () => {
+    expect(usualLabel({ direction: 'shorter', usualSecs: 18 * 60, runs: 5 }, 30)).toBe('~30 sec · usually ~18 min')
+    expect(usualLabel({ direction: 'longer', usualSecs: 20, runs: 9 }, 200)).toBe('~3 min · usually ~20 sec')
+  })
+  it('says which way and how many runs in its tooltip', () => {
+    expect(usualTitle({ direction: 'shorter', usualSecs: 60, runs: 7 }, 'architect')).toBe('Much shorter than the architect skill usually takes (median of 7 runs)')
+    expect(usualTitle({ direction: 'longer', usualSecs: 60, runs: 5 }, 'p16-probe')).toBe('Much longer than the p16-probe skill usually takes (median of 5 runs)')
   })
 })

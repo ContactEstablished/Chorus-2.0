@@ -288,6 +288,10 @@ impl Recorder {
                 let Some(row) = self.turns.remove(&key) else { return };
                 let message = message.map(|m| self.clean(&m));
                 let _ = history::close_turn(store, row, end.as_str(), message.as_deref());
+                // Every skill estimate in the turn has ended now; keep the clean ones (16-4, K8).
+                if let Err(e) = crate::store::step_runs::persist_turn(store, self.session_id, self.run_id, row, end) {
+                    eprintln!("chorus: step times for turn {row}: {e}");
+                }
                 // Asks still open when their turn ends: nothing answered them through a channel.
                 let answer = match end {
                     chorus_core::activity::TurnEnd::Interrupted => "turn interrupted",
@@ -470,6 +474,66 @@ mod tests {
         r.record(&store, "test", &todo, &from_claude_hook(&todo), 5_000);
         let g = r.glance().unwrap();
         assert_eq!((g.total, g.current.as_deref(), g.current_since_secs), (1, Some("New"), Some(5)));
+    }
+
+    fn skill_store() -> (Store, Recorder) {
+        let store = Store::in_memory();
+        store.with(|c| c.execute_batch("INSERT INTO sessions(id,name,agent,cwd,state,cols,rows,created_at) VALUES(1,'test','claude','scratch','running',100,30,0); INSERT INTO runs(id,session_id,program,args,started_at) VALUES(1,1,'test','[]',0);")).unwrap();
+        (store, Recorder::new(1, 1, "hook", Arc::new(vec![]), Arc::new(vec![])))
+    }
+    /// Tool calls and turn ends are stamped with Chorus's clock, so the payloads use it too.
+    fn feed_now(store: &Store, r: &mut Recorder, v: Value) {
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        r.record(store, "test", &v, &from_claude_hook(&v), crate::store::now_ms());
+    }
+    fn skill_call(r: &mut Recorder, store: &Store, id: &str, name: Option<&str>) {
+        let input = name.map_or_else(|| json!({}), |n| json!({"skill": n}));
+        feed_now(store, r, json!({"hook_event_name":"PreToolUse","prompt_id":"p","tool_name":"Skill","tool_use_id":id,"tool_input":input}));
+        feed_now(store, r, json!({"hook_event_name":"PostToolUse","prompt_id":"p","tool_name":"Skill","tool_use_id":id,"tool_input":input,"tool_response":{}}));
+    }
+    fn stored(store: &Store) -> Vec<(String, String)> {
+        store.with(|c| c.prepare("SELECT key, source_ref FROM step_runs ORDER BY id")?.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect()).unwrap()
+    }
+
+    #[test]
+    fn a_done_turn_stores_its_named_skill_estimates() {
+        let (store, mut r) = skill_store();
+        feed_now(&store, &mut r, json!({"hook_event_name":"UserPromptSubmit","prompt_id":"p","prompt":"go"}));
+        skill_call(&mut r, &store, "s1", Some("pdf"));
+        // The next step starts: the first estimate ends cleanly.
+        feed_now(&store, &mut r, json!({"hook_event_name":"PostToolUse","prompt_id":"p","tool_name":"TodoWrite","tool_use_id":"w","tool_input":{"todos":[{"content":"Read","status":"in_progress","activeForm":"Reading"}]},"tool_response":{}}));
+        skill_call(&mut r, &store, "s2", Some("anthropic-skills:pdf"));
+        assert!(stored(&store).is_empty(), "nothing is written before the turn closes");
+        // The turn ends done: the second estimate ends with it.
+        feed_now(&store, &mut r, json!({"hook_event_name":"Stop","prompt_id":"p","last_assistant_message":"Done."}));
+        let rows = stored(&store);
+        assert_eq!(rows.iter().map(|r| r.0.as_str()).collect::<Vec<_>>(), ["pdf", "anthropic-skills:pdf"]);
+        let calls: Vec<String> = store.with(|c| c.prepare("SELECT id FROM tool_calls WHERE tool = 'Skill' ORDER BY id")?.query_map([], |r| r.get::<_, i64>(0))?.map(|x| x.map(|i| i.to_string())).collect()).unwrap();
+        assert_eq!(rows.iter().map(|r| r.1.clone()).collect::<Vec<_>>(), calls, "keyed by the call, so written once");
+        let durations: Vec<i64> = store.with(|c| c.prepare("SELECT duration_ms FROM step_runs")?.query_map([], |r| r.get(0))?.collect()).unwrap();
+        assert!(durations.iter().all(|&d| d >= 0));
+    }
+
+    #[test]
+    fn cut_off_or_unnamed_skills_are_not_stored() {
+        let (store, mut r) = skill_store();
+        // An unnamed Skill call in a done turn.
+        feed_now(&store, &mut r, json!({"hook_event_name":"UserPromptSubmit","prompt_id":"p","prompt":"one"}));
+        skill_call(&mut r, &store, "u", None);
+        feed_now(&store, &mut r, json!({"hook_event_name":"Stop","prompt_id":"p","last_assistant_message":"Done."}));
+        // A named one cut off by an interrupt.
+        feed_now(&store, &mut r, json!({"hook_event_name":"UserPromptSubmit","prompt_id":"q","prompt":"two"}));
+        skill_call(&mut r, &store, "i", Some("pdf"));
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        r.record(&store, "test", &json!({}), &[AgentEvent::TurnInterrupted { turn: None }], crate::store::now_ms());
+        // A named one still running when the run ends: the turn is lost.
+        feed_now(&store, &mut r, json!({"hook_event_name":"UserPromptSubmit","prompt_id":"x","prompt":"three"}));
+        skill_call(&mut r, &store, "l", Some("pdf"));
+        r.run_ended(&store);
+        let ends: Vec<String> = store.with(|c| c.prepare("SELECT end_reason FROM turns ORDER BY id")?.query_map([], |r| r.get(0))?.collect()).unwrap();
+        assert_eq!(ends, ["done", "interrupted", "lost"]);
+        assert!(stored(&store).is_empty(), "{:?}", stored(&store));
+        assert!(!crate::store::step_runs::stored(&store, "skill", "2").unwrap(), "a cut-off call reads as not finished, so it can only be longer");
     }
 
     #[test]

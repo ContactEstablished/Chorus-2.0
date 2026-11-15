@@ -720,6 +720,8 @@ export type Diff = {
 	binary: number,
 };
 
+export type Direction = "shorter" | "longer";
+
 export type DocKind = "plan" | "spec" | "report" | "review" | "decision";
 
 export type Document = {
@@ -1912,6 +1914,8 @@ export type SkillUse = {
 	atSecs: number,
 	secs: number,
 	runningSinceSecs: number | null,
+	/**  Far off this skill's usual time (16-4, D121). `compute` leaves it `None`; the app sets it. */
+	usual: UsualMarker | null,
 };
 
 /**
@@ -2179,6 +2183,10 @@ export type TimedStep = {
 	runningSinceSecs: number | null,
 	/**  False when it was completed without ever being seen in progress. */
 	timed: boolean,
+	/**
+	 *  A step row's skill chips. A skill row holds its own call here, so it can carry a usual-time
+	 *  marker too (16-4); the panel draws chips only on step rows.
+	 */
 	skills: SkillUse[],
 };
 
@@ -2242,6 +2250,14 @@ export type UnknownQuantPolicy =
  *  record for the tag.
  */
 "first-party-and-verified";
+
+export type UsualMarker = {
+	direction: Direction,
+	/**  The median of the earlier runs, rounded to seconds. */
+	usualSecs: number,
+	/**  How many earlier runs it was compared with. */
+	runs: number,
+};
 
 /**  How a found version relates to the one Chorus checked. */
 export type VersionFit = "verified" | "newer" | "older" | 

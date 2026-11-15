@@ -2,7 +2,7 @@
  * Wording for the Progress panel (P16). Every number comes from `chorus_core::step_times`; this only
  * words it and adds the ticking part of a step that is still running (K5).
  */
-import type { AgentKind, ProgressGlance, SessionProgress, StepStatus, TimeSplit, TimedStep, ToolGroup } from '../../ipc'
+import type { AgentKind, ProgressGlance, SessionProgress, StepStatus, TimeSplit, TimedStep, ToolGroup, UsualMarker } from '../../ipc'
 
 /** A step's rounded duration: "40 sec", "5 min", "1.5 h", "12 h". */
 export function stepDuration(secs: number): string {
@@ -155,4 +155,15 @@ export function cardSegments(g: ProgressGlance): CardBar {
   const n = g.statuses.length
   const running = g.statuses.filter((x) => x === 'in-progress').length
   return { kind: 'continuous', donePct: (g.done / n) * 100, currentPct: (running / n) * 100 }
+}
+
+/** A usual-time marker's text (16-4): this run's estimate, then the usual one. */
+export function usualLabel(m: UsualMarker, thisSecs: number): string {
+  return `~${stepDuration(thisSecs)} · usually ~${stepDuration(m.usualSecs)}`
+}
+
+/** A usual-time marker's tooltip: which way, and against how many earlier runs. */
+export function usualTitle(m: UsualMarker, skill: string): string {
+  const way = m.direction === 'shorter' ? 'shorter' : 'longer'
+  return `Much ${way} than the ${skill} skill usually takes (median of ${m.runs} runs)`
 }

@@ -19,6 +19,7 @@ pub mod projects;
 pub mod providers;
 pub mod routing;
 pub mod sessions;
+pub mod step_runs;
 pub mod settings;
 pub mod tags;
 pub mod usage;
@@ -58,6 +59,7 @@ const MIGRATION_FILES: &[(&str, &str)] = &[
     ("0024_relay_sessions.sql", include_str!("../../migrations/0024_relay_sessions.sql")),
     ("0025_turn_usage.sql", include_str!("../../migrations/0025_turn_usage.sql")),
     ("0026_activity_log.sql", include_str!("../../migrations/0026_activity_log.sql")),
+    ("0027_step_runs.sql", include_str!("../../migrations/0027_step_runs.sql")),
 ];
 
 pub struct Store {

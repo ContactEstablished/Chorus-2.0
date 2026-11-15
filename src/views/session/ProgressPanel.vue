@@ -10,7 +10,7 @@ import type { SessionProgress, SessionSummary } from '../../ipc'
 import { useNow } from '../../shell/now'
 import { ATTENTION } from '../../shell/status'
 import { timeLabel } from './conversation'
-import { elapsedLabel, emptyLine, liveSecs, nowNext, skillChip, skillTitle, splitAria, splitLegend, splitNote, stepDuration, stepTime, stopped, toolGroupLabel, toolSummary } from './progress'
+import { elapsedLabel, emptyLine, liveSecs, nowNext, skillChip, skillTitle, splitAria, splitLegend, splitNote, stepDuration, stepTime, stopped, toolGroupLabel, toolSummary, usualLabel, usualTitle } from './progress'
 
 const props = defineProps<{ session: SessionSummary; progress: SessionProgress | null; error: string }>()
 const now = useNow(1000)
@@ -87,9 +87,14 @@ const splitSince = computed(() => {
             <div class="name">
               <span class="text" :class="{ pending: s.status === 'pending' }">{{ s.text }}</span>
               <span v-if="s.kind === 'skill'" class="chip skill" title="A skill run outside the plan. Its time is an estimate.">skill</span>
-              <span v-for="u in s.skills" :key="u.callId" class="chip skill" :title="skillTitle(u.name, liveSecs(u, now))">
-                <svg width="11" height="11" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 1l1.4 3.1L10.7 4.5 8.2 6.7 8.9 10 6 8.3 3.1 10l.7-3.3L1.3 4.5l3.3-.4z" fill="currentColor" /></svg>{{ skillChip(u.name, liveSecs(u, now)) }}
-              </span>
+              <template v-for="u in s.skills" :key="u.callId">
+                <span v-if="s.kind === 'step'" class="chip skill" :title="skillTitle(u.name, liveSecs(u, now))">
+                  <svg width="11" height="11" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 1l1.4 3.1L10.7 4.5 8.2 6.7 8.9 10 6 8.3 3.1 10l.7-3.3L1.3 4.5l3.3-.4z" fill="currentColor" /></svg>{{ skillChip(u.name, liveSecs(u, now)) }}
+                </span>
+                <span v-if="u.usual" class="usual" role="note" :title="usualTitle(u.usual, u.name ?? 'skill')" :aria-label="usualTitle(u.usual, u.name ?? 'skill')">
+                  <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 1.2L11 10.4H1z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" /><path d="M6 5v2.4M6 8.8v.1" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" /></svg>{{ usualLabel(u.usual, liveSecs(u, now)) }}
+                </span>
+              </template>
             </div>
             <span class="started">{{ s.startedAtSecs ? timeLabel(s.startedAtSecs) : '' }}</span>
             <span class="dur" :class="{ untimed: !s.timed, live: p?.current === i && !stopped(s) }">
@@ -185,6 +190,8 @@ h2 { margin: 0; font-family: var(--font-heading); font-size: 19px; font-weight: 
 .text.pending { color: var(--text-2); }
 .chip { display: inline-flex; align-items: center; gap: 5px; font-family: var(--font-mono); font-size: 11.5px; border-radius: 6px; padding: 2px 7px; }
 .chip.skill { color: var(--tag-lavender); background: color-mix(in srgb, var(--tag-lavender) 14%, transparent); }
+/* A usual-time marker (16-4, Main.dc.html's note chip): quiet, no motion, no alarm. */
+.usual { display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px; border-radius: var(--radius-pill); font-size: 12px; color: var(--status-needs); background: color-mix(in srgb, var(--status-needs) 13%, transparent); white-space: nowrap; }
 .started { font-family: var(--font-mono); font-size: 12px; color: var(--text-2); text-align: right; }
 .dur { font-family: var(--font-mono); font-size: 13px; text-align: right; white-space: nowrap; }
 .dur.live { color: var(--accent); }

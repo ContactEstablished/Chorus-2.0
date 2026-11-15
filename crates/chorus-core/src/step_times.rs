@@ -33,7 +33,15 @@ pub struct Window { pub from_ms: i64, pub to_ms: Option<i64> }
 /// How long a skill call drove the work, as an estimate: from the call until the next step started,
 /// the next skill was called or its turn ended. `ended_ms` is `None` while it still runs.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SkillEstimate { pub call_id: u32, pub turn_id: Option<u32>, pub name: Option<String>, pub started_ms: i64, pub ended_ms: Option<i64> }
+pub struct SkillEstimate {
+    pub call_id: u32, pub turn_id: Option<u32>, pub name: Option<String>, pub started_ms: i64, pub ended_ms: Option<i64>,
+    /// What ended it (16-4 stores only clean ends); `None` while it still runs.
+    pub ended_by: Option<EndedBy>,
+}
+
+/// What ended a skill's estimate. A run's end cut it off; the others are clean boundaries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EndedBy { StepStart, NextSkill, TurnEnd, RunEnd }
 
 pub const SKILL_TOOL: &str = "Skill";
 pub const MAX_SNAPSHOTS: u32 = 2000;
@@ -86,13 +94,19 @@ pub struct TimedStep {
     pub running_since_secs: Option<u32>,
     /// False when it was completed without ever being seen in progress.
     pub timed: bool,
+    /// A step row's skill chips. A skill row holds its own call here, so it can carry a usual-time
+    /// marker too (16-4); the panel draws chips only on step rows.
     pub skills: Vec<SkillUse>,
 }
 
 /// A skill call shown as a chip. Its time is always an estimate.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
-pub struct SkillUse { pub call_id: u32, pub name: Option<String>, pub at_secs: u32, pub secs: u32, pub running_since_secs: Option<u32> }
+pub struct SkillUse {
+    pub call_id: u32, pub name: Option<String>, pub at_secs: u32, pub secs: u32, pub running_since_secs: Option<u32>,
+    /// Far off this skill's usual time (16-4, D121). `compute` leaves it `None`; the app sets it.
+    pub usual: Option<crate::usual_time::UsualMarker>,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "kebab-case")]
@@ -245,14 +259,16 @@ fn estimates(w: &Walk, runs: &[RunSpan], live_run: Option<u32>, skill_calls: &[C
     calls.iter().enumerate().map(|(i, c)| {
         let opening = w.openings.iter().copied().find(|&o| o > c.started_ms);
         let next_skill = calls.get(i + 1).map(|n| n.started_ms);
-        let mut end = [opening, next_skill, c.turn_ended_ms].into_iter().flatten().min();
-        if let Some(stop) = run_end(runs, c.run_id) { end = Some(end.map_or(stop, |e| e.min(stop))); }
-        let end = match end {
-            Some(e) => Some(e.max(c.started_ms)),
-            None if is_live(runs, live_run, c.run_id) => None,
-            None => Some(c.started_ms),
+        // The earliest bound wins; on a tie, the cleaner one (in this order) names it.
+        let bounds = [(opening, EndedBy::StepStart), (next_skill, EndedBy::NextSkill), (c.turn_ended_ms, EndedBy::TurnEnd), (run_end(runs, c.run_id), EndedBy::RunEnd)];
+        let first = bounds.into_iter().filter_map(|(at, by)| at.map(|at| (at, by)))
+            .fold(None, |best: Option<(i64, EndedBy)>, b| if best.is_some_and(|x| x.0 <= b.0) { best } else { Some(b) });
+        let (end, ended_by) = match first {
+            Some((e, by)) => (Some(e.max(c.started_ms)), Some(by)),
+            None if is_live(runs, live_run, c.run_id) => (None, None),
+            None => (Some(c.started_ms), Some(EndedBy::RunEnd)),
         };
-        SkillEstimate { call_id: c.id, turn_id: c.turn_id, name: c.target.clone(), started_ms: c.started_ms, ended_ms: end }
+        SkillEstimate { call_id: c.id, turn_id: c.turn_id, name: c.target.clone(), started_ms: c.started_ms, ended_ms: end, ended_by }
     }).collect()
 }
 
@@ -261,6 +277,7 @@ fn skill_use(e: &SkillEstimate) -> SkillUse {
         call_id: e.call_id, name: e.name.clone(), at_secs: at_secs(e.started_ms),
         secs: e.ended_ms.map_or(0, |end| dur_secs(end - e.started_ms)),
         running_since_secs: e.ended_ms.is_none().then(|| at_secs(e.started_ms)),
+        usual: None,
     }
 }
 
@@ -314,7 +331,8 @@ pub fn compute(snapshots: &[PlanSnapshot], runs: &[RunSpan], live_run: Option<u3
                 skill_rows.push(TimedStep {
                     kind: RowKind::Skill, text: e.name.clone().unwrap_or_else(|| "skill".into()),
                     status: if u.running_since_secs.is_some() { StepStatus::InProgress } else { StepStatus::Completed },
-                    started_at_secs: Some(u.at_secs), secs: u.secs, running_since_secs: u.running_since_secs, timed: true, skills: Vec::new(),
+                    started_at_secs: Some(u.at_secs), secs: u.secs, running_since_secs: u.running_since_secs, timed: true,
+                    skills: vec![u],
                 });
                 spans.push(vec![(e.started_ms, e.ended_ms)]);
             }
@@ -573,6 +591,7 @@ mod tests {
         assert_eq!(p.steps.len(), 2);
         assert_eq!(p.steps[0].kind, RowKind::Skill);
         assert_eq!((p.steps[0].text.as_str(), p.steps[0].secs, p.steps[0].status), ("grilling", 300, StepStatus::Completed));
+        assert_eq!(p.steps[0].skills.iter().map(|u| (u.call_id, u.name.as_deref())).collect::<Vec<_>>(), [(1, Some("grilling"))], "a skill row holds its own call");
         assert_eq!(p.steps[1].status, StepStatus::InProgress);
         assert_eq!(p.steps[1].running_since_secs, Some(600));
         assert_eq!((p.total, p.current), (0, Some(1)));
@@ -641,6 +660,26 @@ mod tests {
         assert_eq!(StepStatus::from_plan("in-progress"), StepStatus::InProgress);
         assert_eq!(StepStatus::from_plan("completed"), StepStatus::Completed);
         assert_eq!(StepStatus::from_plan("odd"), StepStatus::Pending);
+    }
+
+    #[test]
+    fn estimates_say_what_ended_them() {
+        let snaps = [snap(10, &[("A", I), ("B", P)]), snap(40, &[("A", C), ("B", I)])];
+        let mut ended = skill(4, 50, Some("d"));
+        ended.turn_ended_ms = Some(70_000);
+        let calls = [skill(1, 20, Some("a")), skill(2, 30, Some("b")), skill(3, 45, Some("c")), ended];
+        let e = skill_estimates(&snaps, &live(), Some(1), &calls);
+        // a: next skill at 30; b: step B starts at 40; c: next skill at 50; d: its turn ended at 70.
+        assert_eq!(e.iter().map(|x| (x.ended_ms, x.ended_by)).collect::<Vec<_>>(), [
+            (Some(30_000), Some(EndedBy::NextSkill)), (Some(40_000), Some(EndedBy::StepStart)),
+            (Some(50_000), Some(EndedBy::NextSkill)), (Some(70_000), Some(EndedBy::TurnEnd)),
+        ]);
+        // Still running in the live run: no end yet.
+        assert_eq!(skill_estimates(&[], &live(), Some(1), &[skill(5, 10, Some("e"))])[0].ended_by, None);
+        // The run ended before anything else did: cut off by the run's end.
+        let ended_run = [RunSpan { id: 1, started_ms: 0, ended_ms: Some(15_000) }];
+        let cut = skill_estimates(&[], &ended_run, None, &[skill(6, 10, Some("f"))]);
+        assert_eq!((cut[0].ended_ms, cut[0].ended_by), (Some(15_000), Some(EndedBy::RunEnd)));
     }
 
     fn steps(list: &[(&str, &str)]) -> Vec<PlanStep> { list.iter().map(|(t, s)| step(t, s)).collect() }

@@ -1,10 +1,13 @@
 //! The Progress panel's read (P16): the session's plan with step times, skill chips, the current
-//! step's tool calls and where the newest run's time went. Every rule lives in
-//! `chorus_core::step_times` and `chorus_core::time_split`; this only gathers bounded inputs.
+//! step's tool calls, where the newest run's time went and usual-time markers. Every rule lives in
+//! `chorus_core::step_times`, `time_split` and `usual_time`; this only gathers bounded inputs.
 use chorus_core::step_times::{self, MAX_SKILL_CALLS, MAX_SNAPSHOTS, MAX_WINDOW_CALLS, SessionProgress};
-use chorus_core::time_split;
+use chorus_core::{time_split, usual_time};
 
-use crate::store::{activity_log, progress as rows};
+use crate::store::{activity_log, progress as rows, step_runs};
+
+/// The most skill uses a read looks up earlier runs for, newest first; older ones get no marker.
+const MAX_USUAL_LOOKUPS: usize = 20;
 
 impl super::SessionManager {
     pub fn progress(&self, id: u32) -> Result<SessionProgress, String> {
@@ -30,6 +33,33 @@ impl super::SessionManager {
             let live = live_run == Some(run.id);
             progress.split = Some(time_split::split(run.started_ms, run.ended_ms, live, &marks, crate::store::now_ms(), turns));
         }
+        self.mark_usual(&mut progress);
         Ok(progress)
+    }
+
+    /// Sets each named skill use's marker from the runs of that skill that ended before it started
+    /// (16-4, D121). Two indexed reads per use, for the newest 20 uses. Only a run that finished
+    /// cleanly (one `persist_turn` stored) can be "shorter"; one cut off by an interrupt, a failure or
+    /// the run's end can only be "longer" (spec §6). A failed read leaves the marker off, never the panel.
+    fn mark_usual(&self, progress: &mut SessionProgress) {
+        let now = crate::store::now_ms();
+        let mut uses: Vec<&mut step_times::SkillUse> = progress.steps.iter_mut()
+            .flat_map(|s| s.skills.iter_mut()).filter(|u| u.name.is_some()).collect();
+        uses.sort_by_key(|u| std::cmp::Reverse((u.at_secs, u.call_id)));
+        for u in uses.into_iter().take(MAX_USUAL_LOOKUPS) {
+            let Some(name) = u.name.as_deref() else { continue };
+            let started_ms = i64::from(u.at_secs) * 1000;
+            let read = step_runs::past(&self.store, "skill", name, started_ms, usual_time::WINDOW)
+                .and_then(|past| Ok((past, step_runs::stored(&self.store, "skill", &u.call_id.to_string())?)));
+            let (past, finished) = match read {
+                Ok(r) => r,
+                Err(e) => { eprintln!("chorus: usual time for skill {name}: {e}"); continue }
+            };
+            let this_ms = match u.running_since_secs {
+                Some(since) => (now - i64::from(since) * 1000).max(0),
+                None => i64::from(u.secs) * 1000,
+            };
+            u.usual = usual_time::marker(&past, this_ms, finished);
+        }
     }
 }
