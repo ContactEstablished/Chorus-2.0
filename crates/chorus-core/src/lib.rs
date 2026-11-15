@@ -49,6 +49,7 @@ pub mod worktree;
 pub mod attachments;
 pub mod progress;
 pub mod step_times;
+pub mod time_split;
 pub mod codex_protocol;
 pub mod codex_stream;
 pub mod instructions;

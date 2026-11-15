@@ -184,14 +184,32 @@ impl Recorder {
     }
 
     pub fn resolved_request(&mut self, store: &Store, request: &str) {
+        let before = self.state();
         self.answer(store, |a| a.ask_ref.as_deref() == Some(request), "Request resolved by agent.");
         // Resolution is not evidence that an approval was granted.
-        let _ = self.tracker.apply(&AgentEvent::QuestionAnswered { ask: Some(request.into()), answer: None }, crate::store::now_ms());
+        let now = crate::store::now_ms();
+        let _ = self.tracker.apply(&AgentEvent::QuestionAnswered { ask: Some(request.into()), answer: None }, now);
+        self.log_activity(store, before, now);
+    }
+
+    /// The tracker's activity, and whether a NeedsAnswer is only the guess from a final `?`.
+    fn state(&self) -> (Activity, bool) {
+        (self.tracker.activity(), self.tracker.guessed_question())
+    }
+
+    /// One `activity_log` row when the tracker's state changed (P16, D119, D125). Several events in
+    /// one payload share a time, so only the state they leave counts.
+    fn log_activity(&self, store: &Store, before: (Activity, bool), at: i64) {
+        let now = self.state();
+        if now != before && let Err(e) = crate::store::activity_log::record(store, self.session_id, self.run_id, now.0, now.1, at) {
+            eprintln!("chorus: activity log for session {}: {e}", self.session_id);
+        }
     }
 
     /// Records one payload from an agent and the events it carried. The writes are done before
     /// this returns, so a prompt is durable before the agent acts on it.
     pub fn record(&mut self, store: &Store, source: &str, raw: &Value, events: &[AgentEvent], now_ms: i64) {
+        let before = self.state();
         if self.transcript.is_none()
             && let Some(path) = raw.get("transcript_path").and_then(Value::as_str).filter(|p| p.len() <= 1024 && std::path::Path::new(p).is_absolute())
         {
@@ -207,6 +225,7 @@ impl Recorder {
             }
             self.apply_detail(store, event);
         }
+        self.log_activity(store, before, now_ms);
         if let Some(plan) = chorus_core::progress::claude_plan(raw, &self.plan) {
             self.progress_sequence += 1;
             let key = raw.get("tool_use_id").and_then(Value::as_str).map(str::to_owned)
@@ -336,10 +355,13 @@ impl Recorder {
 
     /// The run ended: its open turns are lost.
     pub fn run_ended(&mut self, store: &Store) {
+        let before = self.state();
         self.replies.clear();
+        let now = crate::store::now_ms();
         for change in self.tracker.run_ended() {
-            self.apply_change(store, change, crate::store::now_ms());
+            self.apply_change(store, change, now);
         }
+        self.log_activity(store, before, now);
     }
 }
 
@@ -381,6 +403,65 @@ mod tests {
         let turns = history::recent_turns(&store, 1, 5).unwrap();
         let plan = turns[0].progress.iter().rev().find_map(|p| match &p.content { chorus_core::progress::Progress::Plan { steps } => Some(steps.clone()), _ => None }).unwrap();
         assert_eq!(plan.iter().map(|s| (s.text.as_str(), s.status.as_str())).collect::<Vec<_>>(), [("Read", "completed"), ("Build", "in-progress")]);
+    }
+
+    #[test]
+    fn each_activity_change_is_logged_once() {
+        let store = Store::in_memory();
+        store.with(|c| c.execute_batch("INSERT INTO sessions(id,name,agent,cwd,state,cols,rows,created_at) VALUES(1,'test','claude','scratch','running',100,30,0); INSERT INTO runs(id,session_id,program,args,started_at) VALUES(1,1,'test','[]',0);")).unwrap();
+        let mut r = Recorder::new(1, 1, "hook", Arc::new(vec![]), Arc::new(vec![]));
+        let feed = |r: &mut Recorder, v: Value, t: i64| r.record(&store, "test", &v, &from_claude_hook(&v), t);
+        feed(&mut r, json!({"hook_event_name":"UserPromptSubmit","prompt_id":"p","prompt":"go"}), 10);
+        feed(&mut r, json!({"hook_event_name":"PreToolUse","prompt_id":"p","tool_name":"Read","tool_use_id":"a","tool_input":{"file_path":"x"}}), 20);
+        feed(&mut r, json!({"hook_event_name":"PostToolUse","prompt_id":"p","tool_name":"Read","tool_use_id":"a","tool_input":{"file_path":"x"},"tool_response":{}}), 30);
+        // Claude Code's order: PreToolUse, then PermissionRequest, then PostToolUse once allowed.
+        feed(&mut r, json!({"hook_event_name":"PreToolUse","prompt_id":"p","tool_name":"Write","tool_use_id":"b","tool_input":{"file_path":"y"}}), 40);
+        feed(&mut r, json!({"hook_event_name":"PermissionRequest","prompt_id":"p","tool_name":"Write","tool_input":{"file_path":"y"}}), 45);
+        feed(&mut r, json!({"hook_event_name":"PermissionRequest","prompt_id":"p","tool_name":"Write","tool_input":{"file_path":"y"}}), 47);
+        feed(&mut r, json!({"hook_event_name":"PostToolUse","prompt_id":"p","tool_name":"Write","tool_use_id":"b","tool_input":{"file_path":"y"},"tool_response":{}}), 50);
+        feed(&mut r, json!({"hook_event_name":"PreToolUse","prompt_id":"p","tool_name":"AskUserQuestion","tool_use_id":"q","tool_input":{"questions":[{"question":"Which?","header":"h","options":[{"label":"A","description":"a"},{"label":"B","description":"b"}],"multiSelect":false}]}}), 60);
+        feed(&mut r, json!({"hook_event_name":"PostToolUse","prompt_id":"p","tool_name":"AskUserQuestion","tool_use_id":"q","tool_input":{},"tool_response":{}}), 70);
+        feed(&mut r, json!({"hook_event_name":"Stop","prompt_id":"p","last_assistant_message":"Done."}), 80);
+        feed(&mut r, json!({"hook_event_name":"Notification","message":"Claude is waiting for your input"}), 90);
+        r.run_ended(&store);
+        let rows: Vec<(String, i64)> = store.with(|c| c.prepare("SELECT activity, at FROM activity_log WHERE run_id = 1 ORDER BY id")?
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect()).unwrap();
+        let names: Vec<&str> = rows.iter().map(|(a, _)| a.as_str()).collect();
+        assert_eq!(names, ["working", "awaiting-approval", "working", "needs-answer", "working", "ready", "unknown"]);
+        assert_eq!(rows[..6].iter().map(|r| r.1).collect::<Vec<_>>(), [10, 45, 50, 60, 70, 80], "each row carries its payload's time");
+    }
+
+    #[test]
+    fn a_resolved_request_logs_the_return_to_work_and_a_payload_logs_its_final_state() {
+        let store = Store::in_memory();
+        store.with(|c| c.execute_batch("INSERT INTO sessions(id,name,agent,cwd,state,cols,rows,created_at) VALUES(1,'test','codex','scratch','running',100,30,0); INSERT INTO runs(id,session_id,program,args,started_at) VALUES(1,1,'test','[]',0);")).unwrap();
+        let mut r = Recorder::new(1, 1, "server", Arc::new(vec![]), Arc::new(vec![]));
+        r.record(&store, "test", &json!({}), &[
+            AgentEvent::TurnStarted { turn: Some("t".into()), prompt: None },
+            AgentEvent::QuestionAsked { turn: Some("t".into()), ask: Some("r1".into()), question: "Which?".into() },
+        ], 5);
+        r.resolved_request(&store, "r1");
+        r.resolved_request(&store, "r1");
+        let rows: Vec<(String, i64)> = store.with(|c| c.prepare("SELECT activity, at FROM activity_log ORDER BY id")?
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect()).unwrap();
+        assert_eq!(rows.iter().map(|(a, _)| a.as_str()).collect::<Vec<_>>(), ["needs-answer", "working"]);
+        assert_eq!(rows[0].1, 5);
+    }
+
+    #[test]
+    fn a_final_question_is_logged_as_a_guess_and_a_real_one_replaces_it() {
+        let store = Store::in_memory();
+        store.with(|c| c.execute_batch("INSERT INTO sessions(id,name,agent,cwd,state,cols,rows,created_at) VALUES(1,'test','claude','scratch','running',100,30,0); INSERT INTO runs(id,session_id,program,args,started_at) VALUES(1,1,'test','[]',0);")).unwrap();
+        let mut r = Recorder::new(1, 1, "hook", Arc::new(vec![]), Arc::new(vec![]));
+        let feed = |r: &mut Recorder, v: Value, t: i64| r.record(&store, "test", &v, &from_claude_hook(&v), t);
+        feed(&mut r, json!({"hook_event_name":"UserPromptSubmit","prompt_id":"p","prompt":"go"}), 10);
+        feed(&mut r, json!({"hook_event_name":"Stop","prompt_id":"p","last_assistant_message":"Shall I commit it?"}), 20);
+        feed(&mut r, json!({"hook_event_name":"Notification","message":"Claude is waiting for your input"}), 30);
+        r.record(&store, "test", &json!({}), &[AgentEvent::QuestionAsked { turn: None, ask: Some("q".into()), question: "Which?".into() }], 40);
+        let rows: Vec<(String, bool, i64)> = store.with(|c| c.prepare("SELECT activity, guessed, at FROM activity_log ORDER BY id")?
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect()).unwrap();
+        let rows: Vec<(&str, bool, i64)> = rows.iter().map(|(a, g, t)| (a.as_str(), *g, *t)).collect();
+        assert_eq!(rows, [("working", false, 10), ("needs-answer", true, 20), ("needs-answer", false, 40)], "the idle notice changes nothing");
     }
 
     #[test]

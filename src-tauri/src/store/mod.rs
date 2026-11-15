@@ -4,6 +4,7 @@
 //! `chorus_core::migrate`). Typed queries for each area live in the submodules.
 
 pub mod credentials;
+pub mod activity_log;
 pub mod attention;
 pub mod notifications;
 pub mod narrator;
@@ -56,6 +57,7 @@ const MIGRATION_FILES: &[(&str, &str)] = &[
     ("0023_p15_loop.sql", include_str!("../../migrations/0023_p15_loop.sql")),
     ("0024_relay_sessions.sql", include_str!("../../migrations/0024_relay_sessions.sql")),
     ("0025_turn_usage.sql", include_str!("../../migrations/0025_turn_usage.sql")),
+    ("0026_activity_log.sql", include_str!("../../migrations/0026_activity_log.sql")),
 ];
 
 pub struct Store {

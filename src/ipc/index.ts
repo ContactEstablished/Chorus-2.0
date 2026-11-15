@@ -152,6 +152,7 @@ export type {
   SkillUse,
   StepStatus,
   TimedStep,
+  TimeSplit,
   ToolGroup,
   ToolKind,
 } from './bindings'

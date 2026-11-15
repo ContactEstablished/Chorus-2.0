@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import type { SessionProgress, TimedStep, ToolGroup } from '../../ipc'
-import { elapsedLabel, emptyLine, liveSecs, nowNext, skillChip, stepDuration, stepTime, stopped, toolGroupLabel, toolSummary } from './progress'
+import type { SessionProgress, TimeSplit, TimedStep, ToolGroup } from '../../ipc'
+import { elapsedLabel, emptyLine, liveSecs, nowNext, skillChip, splitAria, splitLegend, splitNote, spokenDuration, stepDuration, stepTime, stopped, toolGroupLabel, toolSummary } from './progress'
 
 const step = (over: Partial<TimedStep> = {}): TimedStep => ({
   kind: 'step', text: 'Build', status: 'completed', startedAtSecs: 100, secs: 300, runningSinceSecs: null, timed: true, skills: [], ...over,
@@ -76,7 +76,7 @@ describe('skill chips', () => {
 describe('nowNext and emptyLine', () => {
   const p = (over: Partial<SessionProgress> = {}): SessionProgress => ({
     steps: [step({ text: 'A' }), step({ text: 'B', status: 'in-progress', secs: 0, runningSinceSecs: 100 }), step({ text: 'C', status: 'pending', startedAtSecs: null, secs: 0 })],
-    current: 1, next: 2, done: 1, total: 3, currentTools: [], planAtSecs: 100, capped: false, ...over,
+    current: 1, next: 2, done: 1, total: 3, currentTools: [], planAtSecs: 100, capped: false, split: null, ...over,
   })
   it('names the current and next steps', () => {
     expect(nowNext(p(), 400)).toEqual({ now: 'B', nowSecs: '5 min', next: 'C', done: false })
@@ -85,5 +85,41 @@ describe('nowNext and emptyLine', () => {
   it('is honest about opencode', () => {
     expect(emptyLine('opencode')).toContain("doesn't read opencode's checklist")
     expect(emptyLine('claude')).toContain('No plan yet')
+  })
+})
+
+describe('the time split', () => {
+  const split = (over: Partial<TimeSplit> = {}): TimeSplit => ({
+    notSplit: null, workingSecs: 47 * 60, youSecs: 13 * 60, approvalSecs: 4 * 60, idleSecs: 20 * 60,
+    startedAtSecs: 1000, endedAtSecs: null, turns: 7, ...over,
+  })
+  it('lists four parts in order with rounded figures', () => {
+    const odd = split({ workingSecs: 47 * 60 + 29, youSecs: 12 * 60 + 31, approvalSecs: 4 * 60 - 20, idleSecs: 20 * 60 + 10 })
+    expect(splitLegend(odd).map((p) => [p.key, p.label, stepDuration(p.secs)])).toEqual([
+      ['working', 'Agent working', '47 min'],
+      ['you', 'Waiting on you', '13 min'],
+      ['approval', 'Waiting on approval', '4 min'],
+      ['idle', 'Idle', '20 min'],
+    ])
+  })
+  it('drops empty parts', () => {
+    expect(splitLegend(split({ approvalSecs: 0, idleSecs: 0 })).map((p) => p.key)).toEqual(['working', 'you'])
+  })
+  it('reads the bar aloud', () => {
+    expect(splitAria(split())).toBe('Agent working 47 minutes, waiting on you 13 minutes, waiting on approval 4 minutes, idle 20 minutes')
+    expect(splitAria(split({ workingSecs: 0, youSecs: 1, approvalSecs: 0, idleSecs: 5400 }))).toBe('Waiting on you 1 second, idle 1.5 hours')
+    expect(spokenDuration(0)).toBe('under a second')
+    expect(spokenDuration(60)).toBe('1 minute')
+  })
+  it('says why when not split, and has no bar', () => {
+    const old = split({ notSplit: 'Recorded before Chorus kept state changes.' })
+    expect(splitLegend(old)).toEqual([])
+    expect(splitNote(old)).toBe('Where the time went: not split. Recorded before Chorus kept state changes.')
+    expect(splitNote(split())).toBeNull()
+    const silent = split({ notSplit: 'No events from the agent yet.', youSecs: 0 })
+    expect(splitNote(silent)).toBe('Where the time went: not split. No events from the agent yet.')
+  })
+  it('says so when every part rounds to nothing', () => {
+    expect(splitNote(split({ workingSecs: 0, youSecs: 0, approvalSecs: 0, idleSecs: 0 }))).toBe('Where the time went: nothing recorded yet.')
   })
 })

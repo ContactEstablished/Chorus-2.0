@@ -2,7 +2,7 @@
  * Wording for the Progress panel (P16). Every number comes from `chorus_core::step_times`; this only
  * words it and adds the ticking part of a step that is still running (K5).
  */
-import type { AgentKind, SessionProgress, TimedStep, ToolGroup } from '../../ipc'
+import type { AgentKind, SessionProgress, TimeSplit, TimedStep, ToolGroup } from '../../ipc'
 
 /** A step's rounded duration: "40 sec", "5 min", "1.5 h", "12 h". */
 export function stepDuration(secs: number): string {
@@ -95,4 +95,39 @@ export function emptyLine(agent: AgentKind): string {
   return agent === 'opencode'
     ? "Chorus doesn't read opencode's checklist yet, so there is no plan here."
     : 'No plan yet. Steps appear when the agent writes a checklist or runs a skill.'
+}
+
+export type SplitKey = 'working' | 'you' | 'approval' | 'idle'
+export type SplitPart = { key: SplitKey; label: string; secs: number }
+
+/** "Where the time went", in legend order, with empty parts left out (16-2, K6). None when not split. */
+export function splitLegend(s: TimeSplit): SplitPart[] {
+  if (s.notSplit !== null) return []
+  const all: SplitPart[] = [
+    { key: 'working', label: 'Agent working', secs: s.workingSecs },
+    { key: 'you', label: 'Waiting on you', secs: s.youSecs },
+    { key: 'approval', label: 'Waiting on approval', secs: s.approvalSecs },
+    { key: 'idle', label: 'Idle', secs: s.idleSecs },
+  ]
+  return all.filter((p) => p.secs > 0)
+}
+
+/** The one line shown instead of the bar, or null when there is a bar. */
+export function splitNote(s: TimeSplit): string | null {
+  if (s.notSplit !== null) return `Where the time went: not split. ${s.notSplit}`
+  return splitLegend(s).length ? null : 'Where the time went: nothing recorded yet.'
+}
+
+/** A duration read aloud: "47 minutes", "1.5 hours", "under a second". */
+export function spokenDuration(secs: number): string {
+  const short = stepDuration(secs)
+  if (short === '<1 sec') return 'under a second'
+  const [n, unit] = short.split(' ')
+  const word = unit === 'sec' ? 'second' : unit === 'min' ? 'minute' : 'hour'
+  return `${n} ${n === '1' ? word : `${word}s`}`
+}
+
+/** The split bar's accessible label: "Agent working 47 minutes, waiting on you 13 minutes". */
+export function splitAria(s: TimeSplit): string {
+  return splitLegend(s).map((p, i) => `${i === 0 ? p.label : p.label.toLowerCase()} ${spokenDuration(p.secs)}`).join(', ')
 }

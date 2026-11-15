@@ -69,6 +69,8 @@ pub struct SessionProgress {
     pub plan_at_secs: Option<u32>,
     /// A turn reached the 500-row cap, so later plan updates in it weren't stored.
     pub capped: bool,
+    /// Where the newest run's time went (16-2). `None` when the session never ran.
+    pub split: Option<crate::time_split::TimeSplit>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -336,6 +338,7 @@ pub fn compute(snapshots: &[PlanSnapshot], runs: &[RunSpan], live_run: Option<u3
         current_tools: Vec::new(),
         plan_at_secs: w.newest_at.map(at_secs),
         capped: false,
+        split: None,
         steps,
     };
     (progress, window)

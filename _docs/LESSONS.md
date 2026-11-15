@@ -613,3 +613,10 @@ transcript, so `tool_target` reads `skill` and the panel's skill chip shows the 
 checkout, `npm run typecheck` and `npm test` return 1 there while `npx vue-tsc --noEmit` and
 `npx vitest run` pass. `npm run check` from PowerShell exits 0. Run the checks from PowerShell, or
 call the tools through `npx`, before deciding a check failed.
+
+**L78 — Editing Rust while `tauri dev` runs restarts the app, and that ends every live run (P16).**
+The dev watcher rebuilds on any change under `src-tauri` or `crates`, kills the running app and
+starts it again. Chorus records each live run as `chorus-crashed` and relaunches the session as a
+new run, so a real-app check that spans a long wait (the 17-minute Idle check) starts over. Finish
+every code change, including tests, before starting a long check, or run it in a build that isn't
+watched.

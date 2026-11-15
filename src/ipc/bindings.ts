@@ -1775,6 +1775,8 @@ export type SessionProgress = {
 	planAtSecs: number | null,
 	/**  A turn reached the 500-row cap, so later plan updates in it weren't stored. */
 	capped: boolean,
+	/**  Where the newest run's time went (16-2). `None` when the session never ran. */
+	split: TimeSplit | null,
 };
 
 export type SessionStatus = "running" | "exited" | "closed";
@@ -2136,6 +2138,18 @@ export type TiersView_Serialize = {
 	problem: string | null,
 	/**  Seconds before Refresh may run again for this model. */
 	retryInSecs: number,
+};
+
+export type TimeSplit = {
+	/**  Why there is no split ("not split"); `None` when the figures below are real. */
+	notSplit: string | null,
+	workingSecs: number,
+	youSecs: number,
+	approvalSecs: number,
+	idleSecs: number,
+	startedAtSecs: number,
+	endedAtSecs: number | null,
+	turns: number,
 };
 
 export type TimedStep = {

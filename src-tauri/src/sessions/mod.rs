@@ -1257,6 +1257,10 @@ impl SessionManager {
                 resumed,
             },
         )?;
+        // The run's first state, so its split starts here; a run with no rows predates P16 (D119).
+        if let Err(e) = crate::store::activity_log::record(&self.store, row.id, run_id, chorus_core::activity::Activity::Unknown, false, crate::store::now_ms()) {
+            eprintln!("chorus: activity log for session {}: {e}", row.id);
+        }
         notes.extend(crate::instructions::record(&self.store, row.id, run_id, &p8, codex_bridge.as_ref()));
         if let Some(cid) = row.credential_id {
             let _ = credentials::touch(&self.store, cid);

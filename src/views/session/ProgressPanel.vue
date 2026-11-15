@@ -2,15 +2,15 @@
 /**
  * The Progress panel pinned at the top of Friendly (P16, D115, D120): the session's plan across its
  * turns, each step's status and rounded time, skill chips (estimates), "not timed" where Chorus never
- * saw a step in progress, and the current step's tool calls. Numbers come from the back end; this
- * only words them and ticks the running step.
+ * saw a step in progress, the current step's tool calls, and where the newest run's time went (16-2).
+ * Numbers come from the back end; this only words them and ticks the running step.
  */
 import { computed, ref } from 'vue'
 import type { SessionProgress, SessionSummary } from '../../ipc'
 import { useNow } from '../../shell/now'
 import { ATTENTION } from '../../shell/status'
 import { timeLabel } from './conversation'
-import { elapsedLabel, emptyLine, liveSecs, nowNext, skillChip, skillTitle, stepDuration, stepTime, stopped, toolGroupLabel, toolSummary } from './progress'
+import { elapsedLabel, emptyLine, liveSecs, nowNext, skillChip, skillTitle, splitAria, splitLegend, splitNote, stepDuration, stepTime, stopped, toolGroupLabel, toolSummary } from './progress'
 
 const props = defineProps<{ session: SessionSummary; progress: SessionProgress | null; error: string }>()
 const now = useNow(1000)
@@ -34,6 +34,18 @@ const working = computed(() => props.session.attention === 'working')
 const thin = computed(() => rows.value.length > 30)
 const tools = computed(() => p.value?.currentTools ?? [])
 const toolsLabel = computed(() => toolSummary(tools.value))
+const split = computed(() => p.value?.split ?? null)
+const showSplit = computed(() => split.value !== null && open.value)
+const canHide = computed(() => hasRows.value || split.value !== null)
+const note = computed(() => (split.value ? splitNote(split.value) : null))
+const splitParts = computed(() => (split.value ? splitLegend(split.value) : []))
+const splitLabel = computed(() => (split.value ? splitAria(split.value) : ''))
+const splitSince = computed(() => {
+  const x = split.value
+  if (!x) return ''
+  const started = `Started ${timeLabel(x.startedAtSecs)}`
+  return x.turns > 0 ? `${started} · turn ${x.turns}` : started
+})
 </script>
 
 <template>
@@ -48,7 +60,7 @@ const toolsLabel = computed(() => toolSummary(tools.value))
         <span v-if="elapsed" class="elapsed">{{ elapsed }}</span>
         <span v-if="countLabel" class="count" :title="planTitle">{{ countLabel }}</span>
       </div>
-      <button v-if="hasRows" class="toggle" :aria-expanded="open" @click="open = !open">{{ open ? 'Hide' : 'Show' }}</button>
+      <button v-if="canHide" class="toggle" :aria-expanded="open" @click="open = !open">{{ open ? 'Hide' : 'Show' }}</button>
     </div>
 
     <div v-if="hasRows" class="segments" :class="{ thin }" aria-hidden="true">
@@ -113,6 +125,26 @@ const toolsLabel = computed(() => toolSummary(tools.value))
     </div>
 
     <div v-if="!hasRows && !error" class="closed empty">{{ emptyLine(session.agent) }}</div>
+
+    <footer v-if="showSplit && split" class="split">
+      <p v-if="note" class="split-none">{{ note }}</p>
+      <template v-else>
+        <div class="split-head">
+          <h3 class="split-title">Where the time went</h3>
+          <span class="split-since">{{ splitSince }}</span>
+        </div>
+        <div class="split-bar" role="img" :aria-label="splitLabel">
+          <span v-for="part in splitParts" :key="part.key" class="part" :class="part.key" :style="{ flex: part.secs }" />
+        </div>
+        <ul class="legend">
+          <li v-for="part in splitParts" :key="part.key" :class="part.key">
+            <span class="swatch" :class="part.key" aria-hidden="true" />
+            <span>{{ part.label }}</span>
+            <span class="figure">{{ stepDuration(part.secs) }}</span>
+          </li>
+        </ul>
+      </template>
+    </footer>
     <p v-if="error" class="err" role="alert">Progress could not refresh: {{ error }}</p>
   </section>
 </template>
@@ -178,6 +210,24 @@ h2 { margin: 0; font-family: var(--font-heading); font-size: 19px; font-weight: 
 .muted { color: var(--text-2); }
 .mono { font-family: var(--font-mono); font-size: 12px; color: var(--text-2); }
 .err { margin: 0; padding: 10px 20px 14px; font-size: 13px; color: var(--status-failed); }
+
+.split { display: flex; flex-direction: column; gap: 10px; padding: 14px 20px 18px; border-top: 1px solid var(--border); }
+.split-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 16px; }
+.split-title { margin: 0; font-family: inherit; font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-2); }
+.split-since { font-size: 12px; color: var(--text-2); }
+.split-bar { display: flex; gap: 2px; height: 12px; border-radius: 6px; overflow: hidden; }
+.part { min-width: 3px; }
+.part.working, .swatch.working { background: var(--status-working); }
+.part.you, .swatch.you { background: var(--status-needs); }
+.part.approval { background: repeating-linear-gradient(135deg, var(--status-approval) 0 4px, color-mix(in srgb, var(--status-approval) 40%, transparent) 4px 8px); }
+.swatch.approval { background: repeating-linear-gradient(135deg, var(--status-approval) 0 3px, color-mix(in srgb, var(--status-approval) 40%, transparent) 3px 6px); }
+.part.idle, .swatch.idle { background: var(--text-muted); }
+.legend { display: flex; flex-wrap: wrap; gap: 8px 22px; margin: 0; padding: 0; list-style: none; font-size: 13px; }
+.legend li { display: inline-flex; align-items: center; gap: 7px; }
+.legend li.idle { color: var(--text-muted); }
+.swatch { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+.figure { font-family: var(--font-mono); font-weight: 500; }
+.split-none { margin: 0; font-size: 13px; color: var(--text-muted); }
 
 .pulse { animation: progress-pulse 1.6s ease-in-out infinite; }
 @keyframes progress-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
