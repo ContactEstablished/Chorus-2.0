@@ -1,7 +1,7 @@
 # Roadmap: P16 Progress panel and P17 Goal mode
 
-Written 2026-11-14 from D115–D118. P16 is next. P17 is provisional until its own kickoff. P16's task
-docs are in [P16/](P16/Phase-16-Overview.md), from its kickoff on 2026-11-15.
+Written 2026-11-14 from D115–D118. P16 is done (2026-11-15); P17 is next and provisional until its
+own kickoff. P16's task docs are in [P16/](P16/Phase-16-Overview.md), from its kickoff on 2026-11-15.
 
 ## 1. Purpose
 
@@ -71,7 +71,7 @@ Re-check a fact before relying on it; the code moves.
 
 ### P16 — Progress panel
 
-**Status: next; kicked off 2026-11-15.** Task docs in [P16/](P16/Phase-16-Overview.md). Q1–Q6 were settled at kickoff (D119–D122).
+**Status: done 2026-11-15** on `feature/progress-and-goals`, not yet merged to `main`. Task docs in [P16/](P16/Phase-16-Overview.md). Q1–Q6 were settled at kickoff (D119–D122). Each slice's exit criterion was seen in the real app (isolated `p16` instance, Claude Code 2.1.316, Glacier and Dusk): 16.1 the pinned panel (`26c72f0`), 16.2 where the time went (`d3d2832`), 16.3 the Overview card bar (`31ddd3b`) and 16.4 usual-time markers (`d019c78`). Implementation choices made on the way are D124–D127. Not checked: Codex, which isn't installed here.
 
 Display rules for every slice:
 
