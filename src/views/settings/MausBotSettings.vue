@@ -61,14 +61,15 @@ const access = computed(() => (status.value?.canChooseFolder ? 'full access' : '
 
       <form v-else class="pair" @submit.prevent="pair">
         <label>
-          <span>Pairing code from MausBot</span>
-          <input v-model="input" type="password" autocomplete="off" spellcheck="false" placeholder="7KQ2-M9XD-H4TP" :disabled="busy" />
+          <span>Pairing code or link from MausBot</span>
+          <input v-model="input" type="password" autocomplete="off" spellcheck="false" placeholder="7KQ2-M9XD-H4TP or its link" :disabled="busy" />
         </label>
         <button class="primary" type="submit" :disabled="busy || !input.trim()">{{ busy ? 'Pairing…' : 'Pair' }}</button>
       </form>
       <p v-if="!status.paired" class="muted">
-        In MausBot, open Settings → Phone & devices and make a pairing code (with full access, if it asks), then enter it here.
-        Chorus keeps the key it gets, encrypted, and never shows it again. An <code>omb_sess_…</code> token works here too.
+        In MausBot, open Settings → Phone & devices. Under Your other computers, leave Full access chosen and click Pair a
+        computer, then paste its link here (Copy link) or type its code. A code works once, for a few minutes. Chorus keeps
+        the key it gets, encrypted, and never shows it again. An <code>omb_sess_…</code> token works here too.
       </p>
     </template>
     <p v-if="error" class="warn" role="alert">{{ error }}</p>
@@ -87,6 +88,6 @@ p { margin: 0; }
 .warn { color: var(--status-needs); font-size: 12.5px; overflow-wrap: anywhere; }
 .pair { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; }
 .pair label { display: grid; gap: 4px; font-size: 12.5px; color: var(--text-muted); }
-.pair input { width: 220px; font-family: var(--font-mono); }
+.pair input { width: 260px; max-width: 100%; font-family: var(--font-mono); }
 code { font-family: var(--font-mono); font-size: 12px; }
 </style>

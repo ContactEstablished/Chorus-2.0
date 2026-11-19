@@ -403,7 +403,18 @@ mod tests {
         let names: Vec<_> = builtin_patterns().into_iter().map(|p| p.name).collect();
         assert_eq!(
             names,
-            ["anthropic", "openrouter", "openai-project", "openai-classic", "github", "aws-access-key-id", "google-api-key", "telegram-bot-token", "openmausbot-session-token"]
+            [
+                "anthropic",
+                "openrouter",
+                "openai-project",
+                "openai-classic",
+                "github",
+                "aws-access-key-id",
+                "google-api-key",
+                "telegram-bot-token",
+                "openmausbot-session-token",
+                "openmausbot-pairing-credential",
+            ]
         );
     }
 
@@ -415,6 +426,13 @@ mod tests {
         let out = String::from_utf8(scrub_all(format!("Authorization: Bearer {token} sent").as_bytes(), &[], &p)).unwrap();
         assert_eq!(out, "Authorization: Bearer [REDACTED-CREDENTIAL] sent");
         let plain = "an omb_sess_short word";
+        assert_eq!(String::from_utf8(scrub_all(plain.as_bytes(), &[], &p)).unwrap(), plain);
+        // A one-time pairing credential, as a pairing link carries it.
+        let credential = fake("omb_pair_", 43);
+        let link = format!("openmausbot://pair?token={credential}&name=Desk");
+        let out = String::from_utf8(scrub_all(link.as_bytes(), &[], &p)).unwrap();
+        assert_eq!(out, "openmausbot://pair?token=[REDACTED-CREDENTIAL]&name=Desk");
+        let plain = "an omb_pair_short word";
         assert_eq!(String::from_utf8(scrub_all(plain.as_bytes(), &[], &p)).unwrap(), plain);
     }
 

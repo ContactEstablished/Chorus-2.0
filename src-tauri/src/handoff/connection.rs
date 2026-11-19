@@ -71,17 +71,21 @@ pub fn status(m: &SessionManager) -> Result<MausStatus, String> {
     })
 }
 
-/// Pairs with a code from MausBot, or takes an `omb_sess_` token, and keeps the token.
+/// Pairs with a code from MausBot, or the link it copies, or takes an `omb_sess_` token, and keeps
+/// the token. Only the code (or the link's code or credential) is sent to MausBot.
 pub fn pair(m: &SessionManager, input: &str) -> Result<MausStatus, String> {
     let input = input.trim();
     let s = Scrubber::new(m)?;
     let (token, facts) = if maus::is_token(input) {
         let facts = client::check(input).map_err(|f| s.clean(&f.text()))?;
         (input.to_owned(), facts)
-    } else if maus::is_pairing_code(input) {
-        client::pair(input).map_err(|f| s.clean(&f.text()))?
+    } else if let Some(code) = maus::pairing_secret(input) {
+        client::pair(&code).map_err(|f| s.clean(&f.text()))?
     } else {
-        return Err("Enter the pairing code from MausBot (Settings → Phone & devices), like 7KQ2-M9XD-H4TP.".into());
+        return Err(
+            "That isn't a MausBot pairing code or link. In MausBot, open Settings → Phone & devices, use Pair a computer, then paste its link or type its code (like 7KQ2-M9XD-H4TP)."
+                .into(),
+        );
     };
     // The vault's labels are unique and can't be renamed, so the old key goes first. Storing the
     // new one only fails if the vault itself does, and then this says so.

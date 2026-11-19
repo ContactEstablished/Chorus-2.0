@@ -121,6 +121,35 @@ pub fn is_pairing_code(s: &str) -> bool {
     kept.len() == 12 && kept.iter().all(char::is_ascii_alphanumeric)
 }
 
+/// A one-time pairing credential, as MausBot's pairing links carry it: `omb_pair_` and 43 URL-safe
+/// base64 characters. The scrubber's `openmausbot-pairing-credential` pattern redacts the shape.
+pub fn is_pairing_credential(s: &str) -> bool {
+    s.strip_prefix("omb_pair_").is_some_and(|rest| rest.len() == 43 && rest.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-'))
+}
+
+/// What Chorus sends MausBot's pairing route for what was entered in Settings → MausBot: a pairing
+/// code, a pairing credential, or either one taken out of a link MausBot copies
+/// (`https://…/pair#code=…` from Pair a computer, `openmausbot://pair?…&token=…`). MausBot 0.1.170
+/// reads a link the same way: `token`, then `code`, from the query, then `code` from the fragment.
+/// Only the code or credential goes on, never the rest of the link. `None` for anything else.
+pub fn pairing_secret(input: &str) -> Option<String> {
+    let input = input.trim();
+    let carried = if input.contains("://") { link_value(input)?.trim() } else { input };
+    (is_pairing_credential(carried) || is_pairing_code(carried)).then(|| carried.to_owned())
+}
+
+fn link_value(link: &str) -> Option<&str> {
+    let (rest, fragment) = link.split_once('#').unwrap_or((link, ""));
+    let query = rest.split_once('?').map_or("", |(_, q)| q);
+    param(query, "token").or_else(|| param(query, "code")).or_else(|| param(fragment, "code"))
+}
+
+/// One `key=value` from a query or fragment, as written: MausBot's codes and credentials are
+/// URL-safe, so nothing in them is encoded.
+fn param<'a>(params: &'a str, key: &str) -> Option<&'a str> {
+    params.split('&').find_map(|pair| pair.split_once('=').filter(|(k, _)| *k == key).map(|(_, v)| v))
+}
+
 /// The task made safe for a branch: lowercase letters and digits, `-` between words, at most 32
 /// characters. Nothing usable gives "handoff".
 pub fn slug(task: &str) -> String {
@@ -391,6 +420,31 @@ mod tests {
         assert!(!is_token("omb_sess_short") && !is_token(&format!("omb_sess_{}", "a b".repeat(10))));
         assert!(is_pairing_code("7KQ2-M9XD-H4TP") && is_pairing_code("7kq2 m9xd h4tp"));
         assert!(!is_pairing_code("7KQ2-M9XD") && !is_pairing_code("7KQ2-M9XD-H4T!"));
+        let credential = format!("omb_pair_{}", "c_9-".repeat(10) + "abc");
+        assert!(is_pairing_credential(&credential));
+        assert!(!is_pairing_credential("omb_pair_short") && !is_pairing_credential(&format!("{credential}d")) && !is_pairing_credential(&token));
+    }
+
+    #[test]
+    fn a_pairing_code_is_taken_alone_or_out_of_the_link_mausbot_copies() {
+        // Typed, with its spacing kept as MausBot reads it.
+        assert_eq!(pairing_secret("  7KQ2-M9XD-H4TP \n").as_deref(), Some("7KQ2-M9XD-H4TP"));
+        // Pair a computer's Copy link: the code is in the fragment.
+        assert_eq!(pairing_secret("https://ironman.example.ts.net/pair#code=7KQ2-M9XD-H4TP").as_deref(), Some("7KQ2-M9XD-H4TP"));
+        assert_eq!(pairing_secret("http://100.64.0.1:8799/pair?code=7KQ2M9XDH4TP").as_deref(), Some("7KQ2M9XDH4TP"));
+        // A phone link carries a credential as `token`, and only that goes on.
+        let credential = format!("omb_pair_{}", "A".repeat(43));
+        let phone = format!("openmausbot://pair?address=http%3A%2F%2F192.168.1.2%3A8810&token={credential}&name=Desk&e2e=v1.xyz");
+        assert_eq!(pairing_secret(&phone), Some(credential.clone()));
+        assert_eq!(pairing_secret(&credential), Some(credential));
+        // `token` before `code`, as MausBot reads it.
+        let both = format!("openmausbot://pair?code=7KQ2-M9XD-H4TP&token=omb_pair_{}", "B".repeat(43));
+        assert_eq!(pairing_secret(&both), Some(format!("omb_pair_{}", "B".repeat(43))));
+        // Nothing to pair with: a link without one, a bad code, a session token, words.
+        for wrong in ["https://ironman.example.ts.net/pair", "https://x/pair#code=7KQ2", "omb_pair_short", "12345678", "pair me", ""] {
+            assert_eq!(pairing_secret(wrong), None, "{wrong}");
+        }
+        assert_eq!(pairing_secret(&format!("omb_sess_{}", "a".repeat(43))), None);
     }
 
     #[test]

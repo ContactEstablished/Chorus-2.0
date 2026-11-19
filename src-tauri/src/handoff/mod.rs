@@ -322,12 +322,14 @@ pub async fn mausbot_status(state: Manager<'_>) -> Result<connection::MausStatus
     blocking(&state, move |m| connection::status(&m)).await
 }
 
-/// Pairs with a code from MausBot (or takes an `omb_sess_` token). The key never comes back.
+/// Pairs with a code or link from MausBot (or takes an `omb_sess_` token). The key never comes
+/// back.
 #[tauri::command]
 #[specta::specta]
 pub async fn mausbot_pair(state: Manager<'_>, input: String) -> Result<connection::MausStatus, String> {
-    if input.len() > 1024 {
-        return Err("That's too long to be a pairing code.".into());
+    // A phone link carries its addresses and keys as well as the credential, so it can run long.
+    if input.len() > 4096 {
+        return Err("That's too long to be a pairing code or link.".into());
     }
     blocking(&state, move |m| connection::pair(&m, &input)).await
 }

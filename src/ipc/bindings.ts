@@ -249,7 +249,10 @@ export const commands = {
 	handoffOpenNote: (projectId: number) => typedError<null, string>(__TAURI_INVOKE("handoff_open_note", { projectId })),
 	/**  18-2: Chorus's pairing with MausBot, for Settings → MausBot. */
 	mausbotStatus: () => typedError<MausStatus, string>(__TAURI_INVOKE("mausbot_status")),
-	/**  Pairs with a code from MausBot (or takes an `omb_sess_` token). The key never comes back. */
+	/**
+	 *  Pairs with a code or link from MausBot (or takes an `omb_sess_` token). The key never comes
+	 *  back.
+	 */
 	mausbotPair: (input: string) => typedError<MausStatus, string>(__TAURI_INVOKE("mausbot_pair", { input })),
 	mausbotForget: () => typedError<MausStatus, string>(__TAURI_INVOKE("mausbot_forget")),
 	/**  MausBot's bots, for the Hand to MausBot picker. */
