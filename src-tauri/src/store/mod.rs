@@ -13,6 +13,7 @@ pub mod composer;
 pub mod images;
 pub mod replies;
 pub mod history;
+pub mod handoff;
 pub mod profiles;
 pub mod progress;
 pub mod projects;

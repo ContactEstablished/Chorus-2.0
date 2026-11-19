@@ -9,6 +9,7 @@ import { useInboxStore } from '../stores/inbox'
 import { inboxKey } from '../shell/inbox'
 import Icon from '../components/Icon.vue'
 import SessionCard from './SessionCard.vue'
+import ProjectHandoff from './handoff/ProjectHandoff.vue'
 import type { GroupBy } from '../ipc'
 import { useSessionsStore } from '../stores/sessions'
 import { useProjectsStore } from '../stores/projects'
@@ -128,6 +129,9 @@ function groupTone(key: string): string {
         </button>
       </div>
     </header>
+
+    <!-- P18: the chosen project's hand-off note, baton and branches. -->
+    <ProjectHandoff v-if="chosenProject" :project="chosenProject" />
 
     <div class="toolbar">
       <!-- Opened from a project in the rail, the page is already that project: no project chips.

@@ -241,6 +241,12 @@ export const commands = {
 	relaySetDigest: (at: string | null) => typedError<RelayView, string>(__TAURI_INVOKE("relay_set_digest", { at })),
 	/**  Whether a project's sessions send the phone full text, or status only (D101). */
 	relaySetFullText: (projectId: number, full: boolean) => typedError<RelayView, string>(__TAURI_INVOKE("relay_set_full_text", { projectId, full })),
+	/**  The project's note, as the card shows it. */
+	handoffView: (projectId: number) => typedError<HandoffView, string>(__TAURI_INVOKE("handoff_view", { projectId })),
+	/**  Rewrites the note's "latest work" entry now, from the project's session that worked last. */
+	handoffRefresh: (projectId: number) => typedError<HandoffView, string>(__TAURI_INVOKE("handoff_refresh", { projectId })),
+	/**  Opens the note in its default app. */
+	handoffOpenNote: (projectId: number) => typedError<null, string>(__TAURI_INVOKE("handoff_open_note", { projectId })),
 };
 
 /** Events */
@@ -250,6 +256,7 @@ export const events = {
 	fleetClick: makeEvent<FleetClick>("fleet-click"),
 	fleetRosterChanged: makeEvent<FleetRosterChanged>("fleet-roster-changed"),
 	fleetShown: makeEvent<FleetShown>("fleet-shown"),
+	handoffChanged: makeEvent<HandoffChanged>("handoff-changed"),
 	loopUpdated: makeEvent<LoopUpdated>("loop-updated"),
 	notificationAdded: makeEvent<NotificationAdded>("notification-added"),
 	prefsChanged: makeEvent<PrefsChanged>("prefs-changed"),
@@ -378,6 +385,9 @@ export type AttentionNavigate = {
 	sessionId: number | null,
 };
 
+/**  Who wrote an entry, from its heading. */
+export type Author = "chorus" | "mausbot" | "other";
+
 export type Automation = {
 	id: number,
 	name: string,
@@ -434,6 +444,9 @@ export type BackendPulse = {
 	seq: number,
 	uptimeSecs: number,
 };
+
+/**  Who is working on the project now. */
+export type Baton = "chorus" | "mausbot" | "nobody";
 
 export type Bot = {
 	id: number,
@@ -758,6 +771,18 @@ export type EffortChoice = {
 	args: string,
 };
 
+/**  One entry, scrubbed, for the project card. */
+export type EntryView = {
+	heading: string,
+	author: Author,
+	latestWork: boolean,
+	done: string | null,
+	state: string | null,
+	open: string | null,
+	next: string | null,
+	other: string[],
+};
+
 export type ExportResult = {
 	path: string,
 	turns: number,
@@ -857,6 +882,30 @@ export type GitFolder = {
 };
 
 export type GroupBy = "status" | "project" | "none";
+
+/**  A project's note changed (or couldn't be written): its card reads the view again. */
+export type HandoffChanged = {
+	projectId: number,
+};
+
+/**  A project's hand-off, as its card shows it. */
+export type HandoffView = {
+	projectId: number,
+	hasFolder: boolean,
+	/**  The note's full path, for a tooltip only. */
+	notePath: string | null,
+	exists: boolean,
+	problem: string | null,
+	ignored: IgnoreState | null,
+	baton: Baton,
+	updated: string | null,
+	entries: EntryView[],
+};
+
+/**  Whether git ignores the note in this folder. */
+export type IgnoreState = "ignored" | 
+/**  In a repository whose exclude file doesn't list the note yet (before the first write). */
+"not-ignored" | "not-a-repo";
 
 /**  How each agent takes instructions, for Settings → Agents (D19: an unsupported one says why). */
 export type InstructionSupport = {

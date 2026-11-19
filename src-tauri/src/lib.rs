@@ -8,6 +8,7 @@ mod export;
 mod fleet;
 mod fleet_registry;
 mod git;
+mod handoff;
 mod ipc;
 mod lock;
 mod narrator;
@@ -93,6 +94,8 @@ pub fn run() {
                     watching.observe(&session);
                     // P15 slice 4: the phone relay's own subscription (it only queues the summary).
                     relay::sessions::observe(&session);
+                    // P18: the hand-off note's own subscription (it only queues).
+                    handoff::observe(&session);
                 }),
             );
             attention.bind(&manager);
@@ -136,6 +139,8 @@ pub fn run() {
             run_loop::start(&manager);
             // P15: the Telegram relay, for the loop's questions and stops.
             relay::start(&manager)?;
+            // P18: refreshes each project's hand-off note after its sessions' turns.
+            handoff::start(&manager, app.handle().clone())?;
             // Look for the agent CLIs without holding up the window. Runs relaunched before this
             // finishes get their CLI version filled in afterwards.
             let detecting = manager.clone();

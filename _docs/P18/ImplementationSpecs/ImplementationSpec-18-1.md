@@ -44,7 +44,7 @@ Last reply (14:04): Migration added. Next I'll write the store and its tests.
 - **Unknown keys** are kept, in their order, after the known ones.
 - **Errors,** each with its own sentence:
   - no first `---`
-  - no closing `---`
+  - no closing `---` (a heading line before the closing `---` also reads as this)
   - a line without `:`
   - a key given twice
   - a `baton` value other than the three
@@ -54,9 +54,10 @@ Last reply (14:04): Migration added. Next I'll write the store and its tests.
   `## `.
 - An **entry** runs from a `## ` line up to the next one. The text is kept as written.
 - **Fields** are read for display only:
-  - `Done:`, `State:`, `Open:` and `Next:` lines (case-insensitive label), each taking the following
-    lines that start with no label, up to a blank line.
-  - Every other non-empty line goes in `other`.
+  - `Done:`, `State:`, `Open:` and `Next:` lines (case-insensitive label). A value continues
+    only on the following *indented* lines, up to a blank line or an unindented line.
+  - Every other non-empty line goes in `other`, so a bot's plain sentence after `Next:` isn't
+    swallowed into it.
 - **Author:**
   - `chorus`: the heading has `路 Chorus 路` or `路 Chorus 鈫抈.
   - `mausbot`: the heading has `路 MausBot` before any `鈫抈, and isn't `(from git)`.
@@ -151,8 +152,12 @@ pub fn one_line(s: &str, max_chars: usize) -> String;      // whitespace runs 鈫
   the same arithmetic as `providers::iso_utc_secs`. `updated` uses `providers::iso_utc_secs`.
 
 ### Tests (`#[cfg(test)]` in the module)
-- Round trip: a note with unknown keys, a `#` comment, a MausBot entry, CRLF-free text and a
-  trailing blank line renders exactly as it was read.
+- Round trip:
+  - A note already in Chorus's form, with unknown keys and a MausBot entry, renders exactly as it
+    was read.
+  - A note with a `# comment` or blank lines in its front matter keeps its body byte for byte, and
+    gets its front matter in Chorus's form.
+  - Rendering what was read changes nothing.
 - Errors: each malformed case gives its reason.
 - Latest work: twice in a row gives one entry. After a hand-off entry, a new one goes on top.
 - Bound: 25 entries keep 20, and move 5 in order. A 70 KiB note moves the oldest until it fits,

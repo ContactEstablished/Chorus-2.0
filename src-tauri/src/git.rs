@@ -147,6 +147,21 @@ pub fn rev(dir: &Path, rev: &str) -> Result<Option<String>, String> {
     Ok(r.ok.then(|| r.stdout.trim().to_owned()).filter(|s| !s.is_empty()))
 }
 
+/// P18: the repository's `info/exclude` file for `dir`, or none outside a repository. It is the
+/// common git directory's, so every worktree of the repository shares it.
+pub fn exclude_file(dir: &Path) -> Result<Option<std::path::PathBuf>, String> {
+    let r = run(dir, &["rev-parse", "--git-path", "info/exclude"], QUICK)?;
+    if !r.ok {
+        return if r.stderr.contains("not a git repository") { Ok(None) } else { Err(format!("git: {}", complaint(&r.stderr))) };
+    }
+    let answer = r.stdout.trim();
+    if answer.is_empty() {
+        return Err("git didn't say where its exclude file is.".into());
+    }
+    let path = Path::new(answer);
+    Ok(Some(if path.is_absolute() { path.to_owned() } else { dir.join(path) }))
+}
+
 /// P15: stages every change in the working tree and commits it, with the repository's own hooks
 /// and identity. Returns the new commit, or none when there was nothing to commit.
 pub fn commit_all(dir: &Path, message: &str) -> Result<Option<String>, String> {
