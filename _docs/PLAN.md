@@ -92,13 +92,13 @@ does not close those phases.
 | P9 | Voice | Removed; separate dictation app (D22); Chorus retains compatibility (D23) |
 | P10 | Council | Priority work (D102). Built once inside P15, for the loop (D97) |
 | P12 | Routing inspector | Built. Launch routing in P4 (D57); Settings → Routing with its settings, observer status and history in the P12 run (T1–T13). Budget, Balanced, Fast and Nitro launches, Restart and the Anthropic/OpenAI refusal seen working on opencode 2.1.4, 2026-10-26 ([review](HANDOFF-OPENCODE-COMPLETE.md)) |
-| P13 | Phone relay | Built once inside P15, for the loop, from [its design](HANDOFF-P13-telegram.md) (D97); P6 has since built the reply channels P13b needed |
+| P13 | Phone relay | Built once inside P15, for the loop, from [its design](HANDOFF-P13-telegram.md) (D97); P6 has since built the reply channels P13b needed. Switched off since P18 (D129): the phone route is OpenMausBot |
 | P14 | More agents and ship | **On hold until further notice (D102); at the end, before P11.** Partly built: Gemini, Aider, Ollama, CI, installer polish and Q28–Q30 fixes; complete real turns, DeepSeek spike/adapter, signing, updates and eventual name migration remain for a future Chorus 2 real-world test |
 | P11 | Measurement, made visible | **On hold until further notice (D102); last priority.** Tokens, costs, attention and Usage UI remain for a future Chorus 2 real-world test; forecasts remain gated on data completeness |
-| P15 | Autonomous phase loop | Resumes after P16 (D97, D115): slices 1–4 done, 5–9 remain. [plan](HANDOFF-P15-loop.md). Runs a roadmap phase after phase, stopping at milestones or real blockers; includes Council (P10) and the phone relay, which now goes through OpenMausBot instead of Telegram (D132) |
+| P15 | Autonomous phase loop | Resumes after P16 (D97, D115): slices 1–4 done, 5–9 remain. [plan](HANDOFF-P15-loop.md). Runs a roadmap phase after phase, stopping at milestones or real blockers; includes Council (P10) and the phone relay: the built Telegram relay is switched off (D129), and the loop's remote channel is to go through OpenMausBot (D132), designed in its remaining slices |
 | P16 | Progress panel | Next (D115–D116): [roadmap](HANDOFF-P16-P17-progress-goals.md). A pinned panel in Friendly with step and skill times, then a time split, an Overview card bar and "usual time" markers |
 | P17 | Goal mode | Provisional, after P16 (D117–D118): [roadmap](HANDOFF-P16-P17-progress-goals.md). A standing goal per session that keeps the agent working, with guards that pause; a Stop-hook spike first |
-| P18 | Working alongside OpenMausBot | Planned 2026-11-18 (D128–D131): [plan](HANDOFF-P18-mausbot.md). A per-project hand-off note, a baton that gives MausBot its own `maus/…` worktree, branch-cleanup notices, and an optional local MCP server so MausBot can read and prompt sessions. **Next** (D132), before P17 and P15's remaining slices. First pass 18.0–18.3 and 18.5; the MCP level (18.4) is deferred |
+| P18 | Working alongside OpenMausBot | Planned 2026-11-18 (D128–D131): [plan](HANDOFF-P18-mausbot.md). A per-project hand-off note, a baton that gives MausBot its own `maus/…` worktree, branch-cleanup notices, and an optional local MCP server so MausBot can read and prompt sessions. **First pass built** 2026-11-18 on `feature/mausbot-handoff` (18.0–18.3 and 18.5, D133), not yet merged; MausBot starting a hand-off by itself awaits a full-access pairing (D134). The MCP level (18.4) is deferred (D132) |
 
 **Execution order agreed 2026-10-22:** roadmap consolidation, Q28–Q30 and P5 are complete. Build P6
 and P7 for M2, then finish the remaining capability and release phases for M3. P6 began with the
@@ -453,10 +453,11 @@ pause, never stop, and name their reason. Claude Code's Stop hook is spiked firs
 never changes a session's permissions.
 
 ### P18 — Working alongside OpenMausBot
-Next (D132). Chorus and OpenMausBot stay separate apps (D129): a hand-off note per project
-(D128), a baton that gives MausBot its own branch in a Chorus-made worktree (D130), notices that keep
-branches clean (D131). A loopback MCP server so MausBot can read and prompt sessions is deferred (D132).
-Planned in [HANDOFF-P18-mausbot.md](HANDOFF-P18-mausbot.md).
+First pass built 2026-11-18 (D133). Chorus and OpenMausBot stay separate apps (D129): a hand-off
+note per project (D128), a baton that gives MausBot its own branch in a Chorus-made worktree (D130),
+notices that keep branches clean (D131), and the Telegram relay switched off. A loopback MCP server so
+MausBot can read and prompt sessions is deferred (D132). Planned in
+[HANDOFF-P18-mausbot.md](HANDOFF-P18-mausbot.md).
 
 ## 5. Ways of working
 

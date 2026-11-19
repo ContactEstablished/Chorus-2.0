@@ -63,6 +63,7 @@ const MIGRATION_FILES: &[(&str, &str)] = &[
     ("0027_step_runs.sql", include_str!("../../migrations/0027_step_runs.sql")),
     ("0028_p18_handoffs.sql", include_str!("../../migrations/0028_p18_handoffs.sql")),
     ("0029_p18_project_notices.sql", include_str!("../../migrations/0029_p18_project_notices.sql")),
+    ("0030_p18_telegram_off.sql", include_str!("../../migrations/0030_p18_telegram_off.sql")),
 ];
 
 pub struct Store {
@@ -259,6 +260,21 @@ mod tests {
         assert!(violations.is_empty(), "{violations:?}");
         assert!(store.with(|c| c.execute("INSERT INTO branch_snoozes (project_id, branch, until_at) VALUES (99, 'x', 1)", [])).is_err(), "snoozes belong to a project");
         assert!(store.with(|c| c.execute("INSERT INTO branch_flags (project_id, branch, spell) VALUES (99, 'x', 'k')", [])).is_err(), "so do flags");
+    }
+
+    #[test]
+    fn the_telegram_relay_is_switched_off_and_keeps_its_setup() {
+        let conn = database_at_version(29);
+        conn.execute_batch("UPDATE relay_config SET enabled = 1, bot_name = 'chorus_bot', poll_offset = 42;").unwrap();
+        let store = Store::init(conn).unwrap();
+        let (enabled, bot, offset, version): (bool, Option<String>, i64, u32) = store
+            .with(|c| {
+                let version = c.pragma_query_value(None, "user_version", |r| r.get(0))?;
+                c.query_row("SELECT enabled, bot_name, poll_offset FROM relay_config", [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, version)))
+            })
+            .unwrap();
+        assert_eq!((enabled, bot.as_deref(), offset), (false, Some("chorus_bot"), 42), "off, with its bot and place kept");
+        assert!(version >= 30);
     }
 
     #[test]

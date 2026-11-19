@@ -1,7 +1,9 @@
 # Plan: P18 — Working alongside OpenMausBot
 
-Status: **in progress**, kicked off 2026-11-18. The task and spec files are in
-[P18/](P18/Phase-18-Overview.md). Decisions D128–D132.
+Status: **first pass built** on `feature/mausbot-handoff`, 2026-11-18: 18.0–18.3 and 18.5, each
+seen in the isolated `p18` instance. Not yet seen: MausBot starting a hand-off by itself, which needs
+Chorus paired with a full-access code (D134). 18.4 (MCP) is deferred (D132). The task and spec files
+are in [P18/](P18/Phase-18-Overview.md). Decisions D128–D134.
 
 ## 1. Goal
 
