@@ -61,6 +61,7 @@ const MIGRATION_FILES: &[(&str, &str)] = &[
     ("0025_turn_usage.sql", include_str!("../../migrations/0025_turn_usage.sql")),
     ("0026_activity_log.sql", include_str!("../../migrations/0026_activity_log.sql")),
     ("0027_step_runs.sql", include_str!("../../migrations/0027_step_runs.sql")),
+    ("0028_p18_handoffs.sql", include_str!("../../migrations/0028_p18_handoffs.sql")),
 ];
 
 pub struct Store {

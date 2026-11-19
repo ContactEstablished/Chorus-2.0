@@ -9,6 +9,7 @@ export const SECTIONS: { key: SettingsSection; label: string; icon: IconName }[]
   { key: 'routing', label: 'Routing', icon: 'shuffle' },
   { key: 'narrator', label: 'Narrator', icon: 'agents' },
   { key: 'phone', label: 'Phone', icon: 'bell' },
+  { key: 'mausbot', label: 'MausBot', icon: 'agents' },
   { key: 'keys', label: 'Keys and lock', icon: 'key' },
   { key: 'agents', label: 'Agents', icon: 'agents' },
 ]

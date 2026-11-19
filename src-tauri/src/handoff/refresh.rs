@@ -3,12 +3,17 @@
 //! note Chorus can't read is never overwritten (K4).
 
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use chorus_core::handoff::{self, GitLine, WorkFacts};
 use chorus_core::progress::PlanStep;
 use chorus_core::scrub;
 
 use super::note::{self, IgnoreState};
+
+/// One writer at a time for every project's note: the refresh, the baton's start, its return and
+/// Dismiss each read, change and write a note, and two at once could lose one's change.
+static NOTE_LOCK: Mutex<()> = Mutex::new(());
 use crate::git;
 use crate::sessions::SessionManager;
 use crate::store;
@@ -56,11 +61,10 @@ pub(super) fn project_folder(m: &SessionManager, project_id: u32) -> Result<(Str
 pub fn refresh(m: &SessionManager, project_id: u32, session_id: Option<u32>) -> Result<Option<IgnoreState>, String> {
     let (project, folder) = project_folder(m, project_id)?;
     let Some(folder) = folder else { return Ok(None) };
-    let path = note::note_path(&folder);
-    let current = match note::read(&path)? {
-        None => None,
-        Some(text) => Some(handoff::parse(&text).map_err(|e| format!("Chorus left the note as it is: {e}"))?),
-    };
+    // A broken note is reported before any git work, and checked again under the lock.
+    if let Some(text) = note::read(&note::note_path(&folder))? {
+        handoff::parse(&text).map_err(|e| format!("Chorus left the note as it is: {e}"))?;
+    }
     let store = m.store();
     let session = match session_id {
         Some(s) => s,
@@ -89,15 +93,32 @@ pub fn refresh(m: &SessionManager, project_id: u32, session_id: Option<u32>) -> 
         git: checkout.as_ref().map(|(branch, head, dirty)| GitLine { branch: branch.as_deref(), head: head.as_deref(), dirty_files: *dirty }),
     };
     let entry = scrubber.clean(&handoff::latest_work_entry(&facts));
-    let mut note = handoff::with_latest_work(current.unwrap_or_else(|| handoff::new_note(&project)), entry);
-    note.meta.project = scrubber.clean(&project);
-    note.meta.updated = Some(chorus_core::providers::iso_utc_secs(now));
-    write_note(&folder, note).map(Some)
+    let project = scrubber.clean(&project);
+    update_note(&folder, |current| {
+        let mut note = handoff::with_latest_work(current.unwrap_or_else(|| handoff::new_note(&project)), entry);
+        note.meta.project = project.clone();
+        note.meta.updated = Some(chorus_core::providers::iso_utc_secs(now));
+        Ok((note, ()))
+    })
+    .map(|((), ignore)| Some(ignore))
+}
+
+/// Reads the project's note, lets `change` make the new one, and writes it, holding the note lock
+/// throughout. A note that won't parse is never written (K4).
+pub(super) fn update_note<T>(folder: &Path, change: impl FnOnce(Option<handoff::Note>) -> Result<(handoff::Note, T), String>) -> Result<(T, IgnoreState), String> {
+    let _one_writer = NOTE_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let current = match note::read(&note::note_path(folder))? {
+        None => None,
+        Some(text) => Some(handoff::parse(&text).map_err(|e| format!("Chorus left the note as it is: {e}"))?),
+    };
+    let (note, out) = change(current)?;
+    Ok((out, write_note(folder, note)?))
 }
 
 /// Writes a note: git learns to ignore it first, then entries past the limit move to the archive,
-/// then the note itself.
-pub(super) fn write_note(folder: &Path, note: handoff::Note) -> Result<IgnoreState, String> {
+/// then the note itself. A failed note write can leave moved entries in both files, never in
+/// neither.
+fn write_note(folder: &Path, note: handoff::Note) -> Result<IgnoreState, String> {
     let ignore = note::ensure_excluded(folder)?;
     let (note, moved) = handoff::bound(note);
     if !moved.is_empty() {

@@ -373,3 +373,44 @@ For the newest returned (not closed) hand-off.
    broken project note.
 9. **Themes:** screenshots of the banner and the card, in Glacier and Dusk.
 10. **Waits on the pairing:** the automatic start with "Chorus test" (ImplementationSpec-18-0).
+
+## 6. Changes after the code review (2026-11-18)
+
+A review of this slice before it was committed found these gaps; the code does the following, and
+the sections above should be read with it.
+
+- **`handoffs.returned_entries`.** Migration 0028 has this extra column: the scrubbed entries a
+  return brought back, as a JSON array.
+  - The return card and Continue from here read the entries from the row, not the project's note.
+  - So MausBot's words survive a project folder that's gone, or a note that couldn't take them.
+    The card then says why.
+- **The return claims first.**
+  - `set_returned` only updates an active row, and reports whether it did. The watch and Take back
+    can't both return a hand-off; a second Take back says "MausBot handed it back already".
+  - The entries are stored on the row, then added to the note.
+- **One note writer at a time.** Every read-change-write of a project's note (the refresh, start,
+  return and Dismiss) goes through `refresh::update_note`, under one lock. The refresh gathers its
+  git facts before taking it.
+- **Start writes the worktree's copy first,** then the project's note, inside that lock. On any
+  failure the row, the worktree and its branch are removed, and the project's note is untouched.
+  A new hand-off also puts away the project's older return cards.
+- **`baton: chorus` exactly.** A blank or missing `baton:` reads as nobody, which is MausBot still
+  working; only `chorus` returns it.
+- **Entries after a changed heading.** `new_entries` falls back to the first `→ MausBot` heading,
+  then to Chorus's own first entry, then to every entry. At most 20 come back.
+- **Git that can't read the branch** gives an entry that says so (`from_git_failure_entry`), never
+  "No commits". The card shows git's complaint.
+- **Errors are shown:**
+  - A failed return is on the banner, and tried again on the next pass.
+  - Merged/ahead errors are on the card.
+  - A vault problem shows on the card instead of failing it.
+- **Timeouts are their own failure.** A conversation or message that timed out "may have been made
+  anyway", so the banner says to check MausBot before starting or pasting again.
+- **The listener is checked.** Before a pairing code or token is sent, `GET /api/health` must answer
+  as OpenMausBot.
+- **The task is scrubbed** before it reaches the note, the database or MausBot.
+- **Small UI fixes:**
+  - one event listener however many cards mount
+  - a busy count per project
+  - the panel closes when the project page is left, or once a hand-off starts
+- **`connection.rs`** (new) holds the pairing, status and bot list, apart from `baton.rs`.

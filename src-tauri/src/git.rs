@@ -162,6 +162,63 @@ pub fn exclude_file(dir: &Path) -> Result<Option<std::path::PathBuf>, String> {
     Ok(Some(if path.is_absolute() { path.to_owned() } else { dir.join(path) }))
 }
 
+/// P18: the commits in `from..to`, newest first, as (short sha, subject): the first `limit`, and
+/// how many more there are.
+pub fn log_range(dir: &Path, from: &str, to: &str, limit: usize) -> Result<(Vec<(String, String)>, u32), String> {
+    let range = format!("{from}..{to}");
+    let r = run(dir, &["log", "--format=%h%x00%s", &range, "--"], QUICK)?;
+    if !r.ok {
+        return Err(format!("git log: {}", complaint(&r.stderr)));
+    }
+    let all: Vec<(String, String)> = r
+        .stdout
+        .lines()
+        .filter_map(|l| l.split_once('\0').map(|(sha, subject)| (sha.to_owned(), subject.to_owned())))
+        .collect();
+    let more = all.len().saturating_sub(limit) as u32;
+    Ok((all.into_iter().take(limit).collect(), more))
+}
+
+/// A changed file: its path, and lines added and removed (`None` for a binary file).
+pub type FileStat = (String, Option<u32>, Option<u32>);
+
+/// P18: the files `to` changed since it left `from` (`from...to`).
+pub fn numstat(dir: &Path, from: &str, to: &str) -> Result<Vec<FileStat>, String> {
+    let range = format!("{from}...{to}");
+    let r = run(dir, &["diff", "--numstat", &range, "--"], QUICK)?;
+    if !r.ok {
+        return Err(format!("git diff: {}", complaint(&r.stderr)));
+    }
+    Ok(r
+        .stdout
+        .lines()
+        .filter_map(|l| {
+            let mut parts = l.splitn(3, '\t');
+            let (added, removed, path) = (parts.next()?, parts.next()?, parts.next()?);
+            Some((path.to_owned(), added.parse().ok(), removed.parse().ok()))
+        })
+        .collect())
+}
+
+/// P18: whether commit `a` is in `b`'s history (merged into it).
+pub fn is_ancestor(dir: &Path, a: &str, b: &str) -> Result<bool, String> {
+    let r = run(dir, &["merge-base", "--is-ancestor", a, b], QUICK)?;
+    if r.ok {
+        return Ok(true);
+    }
+    if r.stderr.trim().is_empty() { Ok(false) } else { Err(format!("git merge-base: {}", complaint(&r.stderr))) }
+}
+
+/// P18: how many commits `to` has that `from` doesn't.
+pub fn count_range(dir: &Path, from: &str, to: &str) -> Result<u32, String> {
+    let range = format!("{from}..{to}");
+    let r = run(dir, &["rev-list", "--count", &range, "--"], QUICK)?;
+    if !r.ok {
+        return Err(format!("git rev-list: {}", complaint(&r.stderr)));
+    }
+    r.stdout.trim().parse().map_err(|_| "git's commit count couldn't be read.".to_owned())
+}
+
 /// P15: stages every change in the working tree and commits it, with the repository's own hooks
 /// and identity. Returns the new commit, or none when there was nothing to commit.
 pub fn commit_all(dir: &Path, message: &str) -> Result<Option<String>, String> {

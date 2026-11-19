@@ -16,7 +16,7 @@ const showAll = ref(false)
 
 const newest = computed(() => props.view.entries[0] ?? null)
 const older = computed(() => props.view.entries.slice(1))
-const meta = computed(() => [props.view.updated ? updatedLabel(props.view.updated, now.value) : null, ignoreLabel(props.view.ignored)].filter(Boolean).join(' · '))
+const meta = computed(() => [props.view.updated ? updatedLabel(props.view.updated, now.value) : null, props.view.exists ? ignoreLabel(props.view.ignored) : null].filter(Boolean).join(' · '))
 const busy = computed(() => store.busy.has(props.view.projectId))
 
 async function open(): Promise<void> {

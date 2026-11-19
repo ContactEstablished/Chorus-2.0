@@ -368,7 +368,16 @@ pub fn prepend(mut note: Note, entries: Vec<String>) -> Note {
 /// never moved. Returns the moved entries, newest first.
 pub fn bound(mut note: Note) -> (Note, Vec<Entry>) {
     let mut moved = Vec::new();
-    while note.entries.len() > 1 && (note.entries.len() > MAX_ENTRIES || render(&note).len() > MAX_NOTE_BYTES) {
+    // The size is measured once and reduced as entries leave, then checked exactly at the end, so
+    // a note of thousands of entries isn't rendered once per entry.
+    let mut size = render(&note).len();
+    while note.entries.len() > 1 && (note.entries.len() > MAX_ENTRIES || size > MAX_NOTE_BYTES) {
+        if let Some(e) = note.entries.pop() {
+            size = size.saturating_sub(e.raw.len());
+            moved.push(e);
+        }
+    }
+    while note.entries.len() > 1 && render(&note).len() > MAX_NOTE_BYTES {
         if let Some(e) = note.entries.pop() {
             moved.push(e);
         }

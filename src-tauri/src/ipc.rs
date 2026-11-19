@@ -162,6 +162,14 @@ pub fn builder() -> Builder<tauri::Wry> {
             handoff::handoff_view,
             handoff::handoff_refresh,
             handoff::handoff_open_note,
+            handoff::mausbot_status,
+            handoff::mausbot_pair,
+            handoff::mausbot_forget,
+            handoff::mausbot_bots,
+            handoff::handoff_start,
+            handoff::handoff_take_back,
+            handoff::handoff_dismiss,
+            handoff::handoff_continue_text,
         ])
         .events(collect_events![
             app::BackendPulse,

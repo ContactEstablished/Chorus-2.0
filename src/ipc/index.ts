@@ -161,9 +161,17 @@ export type {
 
 // P18: working alongside OpenMausBot.
 export type {
+  ActiveView as HandoffActive,
+  ActivityView as MausActivity,
   Author as HandoffAuthor,
   Baton,
+  BotView as MausBotChoice,
+  BotsView as MausBots,
+  CommitView as HandoffCommit,
   EntryView as HandoffEntry,
+  FileView as HandoffFile,
   HandoffView,
   IgnoreState,
+  MausStatus,
+  ReturnView as HandoffReturn,
 } from './bindings'

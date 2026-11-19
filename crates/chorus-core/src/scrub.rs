@@ -403,8 +403,19 @@ mod tests {
         let names: Vec<_> = builtin_patterns().into_iter().map(|p| p.name).collect();
         assert_eq!(
             names,
-            ["anthropic", "openrouter", "openai-project", "openai-classic", "github", "aws-access-key-id", "google-api-key", "telegram-bot-token"]
+            ["anthropic", "openrouter", "openai-project", "openai-classic", "github", "aws-access-key-id", "google-api-key", "telegram-bot-token", "openmausbot-session-token"]
         );
+    }
+
+    #[test]
+    fn an_openmausbot_token_is_redacted_and_a_short_lookalike_is_not() {
+        let p = builtin_patterns();
+        // P18: `omb_sess_` and 43 URL-safe base64 characters (32 random bytes).
+        let token = fake("omb_sess_", 43);
+        let out = String::from_utf8(scrub_all(format!("Authorization: Bearer {token} sent").as_bytes(), &[], &p)).unwrap();
+        assert_eq!(out, "Authorization: Bearer [REDACTED-CREDENTIAL] sent");
+        let plain = "an omb_sess_short word";
+        assert_eq!(String::from_utf8(scrub_all(plain.as_bytes(), &[], &p)).unwrap(), plain);
     }
 
     #[test]
