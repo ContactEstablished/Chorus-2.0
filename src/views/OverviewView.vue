@@ -130,8 +130,10 @@ function groupTone(key: string): string {
     </header>
 
     <div class="toolbar">
-      <span class="tl">Project</span>
-      <div class="chips">
+      <!-- Opened from a project in the rail, the page is already that project: no project chips.
+           Overview in the rail shows every project again. -->
+      <span v-if="!chosenProject" class="tl">Project</span>
+      <div v-if="!chosenProject" class="chips">
         <button class="chip" :class="{ on: view.projectFilter === null }" @click="view.projectFilter = null">
           <span class="sq neutral" />All <span class="n">{{ sessions.list.length }}</span>
         </button>
