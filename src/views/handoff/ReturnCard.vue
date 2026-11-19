@@ -23,6 +23,15 @@ const busy = computed(() => store.busy.has(props.project.id))
 const targets = computed(() => sessions.list.filter((s) => s.projectId === props.project.id && s.status !== 'closed').slice().sort((a, b) => b.latestAtSecs - a.latestAtSecs))
 const choosing = ref(false)
 const target = ref<number | null>(null)
+const deleting = ref(false)
+const deleteError = ref('')
+
+/** Delete branch: only offered when it's merged, so nothing is lost; the back end checks again. */
+async function deleteBranch(): Promise<void> {
+  deleting.value = true
+  deleteError.value = (await store.deleteBranch(props.project.id, props.returned.branch, null, false)) ?? ''
+  deleting.value = false
+}
 
 function choose(): void {
   target.value = targets.value[0]?.id ?? null
@@ -78,6 +87,7 @@ async function continueIn(): Promise<void> {
     </div>
     <p v-if="returned.problem" class="warn">{{ returned.problem }}</p>
     <p v-if="!returned.worktreeExists" class="muted">The worktree folder is gone; the branch is still there.</p>
+    <p v-if="deleteError" class="warn" role="alert">{{ deleteError }}</p>
 
     <div class="actions">
       <template v-if="choosing">
@@ -89,6 +99,7 @@ async function continueIn(): Promise<void> {
         <button class="quiet" @click="choosing = false">Cancel</button>
       </template>
       <button v-else class="primary" @click="choose">Continue from here</button>
+      <button v-if="returned.merged" class="quiet" :disabled="busy || deleting" @click="deleteBranch">Delete branch</button>
       <slot name="actions" />
     </div>
   </section>

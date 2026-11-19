@@ -13,6 +13,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
+use chorus_core::branch_hygiene::{HandoffEvent, handoff_notice};
 use chorus_core::handoff::{self, Baton, Entry, MAX_ENTRIES};
 use chorus_core::maus::{self, Commit, FileChange, HandoffFacts};
 use serde::{Deserialize, Serialize};
@@ -35,6 +36,13 @@ const TASK_CHARS: usize = 200;
 static NOTE_PROBLEMS: Mutex<Option<HashMap<u32, String>>> = Mutex::new(None);
 /// What MausBot last said about each hand-off's conversation, by hand-off id.
 static ACTIVITY: Mutex<Option<HashMap<u32, ActivityView>>> = Mutex::new(None);
+
+/// Tests share the process, and every test database numbers its hand-offs from 1.
+#[cfg(test)]
+pub(super) fn forget_all() {
+    *NOTE_PROBLEMS.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+    *ACTIVITY.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+}
 
 fn note_problem(id: u32) -> Option<String> {
     NOTE_PROBLEMS.lock().unwrap_or_else(std::sync::PoisonError::into_inner).as_ref().and_then(|m| m.get(&id).cloned())
@@ -213,6 +221,7 @@ pub fn start(m: &SessionManager, project_id: u32, bot_id: Option<String>, task: 
     let message = maus::message(&hf);
     let (thread, problem) = start_mausbot(m, &scrubber, id, bot_id.as_deref(), &plan.path, &maus::task_title(&project, &task), &message);
     rows::set_started(store, id, bot_id.as_deref(), bot_name.as_deref(), thread.as_deref(), problem.as_deref())?;
+    super::notify_project(m, project_id, handoff_notice(id, &project, HandoffEvent::Started { branch: &plan.branch }));
     Ok(id)
 }
 
@@ -326,6 +335,11 @@ fn return_(m: &SessionManager, h: &HandoffRow, by: &str) -> Result<bool, String>
         .map(|e| format!("MausBot's entries are on the return card, but Chorus couldn't add them to the note: {e}")),
     };
     super::set_problem(h.project_id, problem);
+    // The return has happened: nothing after this may fail it.
+    let project = refresh::project_folder(m, h.project_id).map(|(p, _)| p).unwrap_or_default();
+    let commits = git::count_range(&git_dir(m, h), &h.base_sha, &h.branch).unwrap_or(0);
+    let notice = handoff_notice(h.id, &scrubber.clean(&project), HandoffEvent::Returned { branch: &h.branch, commits, by_bot: by == "mausbot" });
+    super::notify_project(m, h.project_id, notice);
     Ok(true)
 }
 

@@ -200,3 +200,62 @@ update.
    the branch and its worktree.
 8. **A session notice** (an approval in a Claude session) still opens its session.
 9. **Themes:** screenshots in Glacier and Dusk.
+
+## 6. Changes made while building (2026-11-18)
+
+- **Which branches are protected.** §2's rule skipped any branch checked out in any worktree. But
+  MausBot's branches stay checked out in their `.chorus2` worktrees, so they would never be flagged.
+  Now:
+  - **Protected** (never flagged, never deleted): the default branch, the branch checked out in the
+    project's own folder, branches checked out in worktrees Chorus didn't make (outside
+    `.chorus2`), and any branch an open session or an active hand-off is using.
+  - **Otherwise eligible:** a branch in one of Chorus's own worktrees. Deleting it removes the
+    worktree first, and only when it's clean.
+- **A merged `maus/…` branch** also shows Delete branch on the return card (§4).
+- **Deleting a branch** closes any hand-off on it and marks its notices read; Keep marks them read
+  too.
+- **The unmerged confirmation is asked by the card,** with the same words as `delete_mode`'s
+  refusal. The back end still refuses without `confirmed`.
+- **Ahead counts** are only computed for branches that can show (stale ones and MausBot's): one
+  git call per branch.
+
+### After the second review (2026-11-18)
+
+An independent review of Delete found real ways to lose work. Each is fixed and tested
+(`handoff/tests.rs`: `stale_branches_are_flagged_once_kept_and_deleted_with_care`,
+`a_maus_branch_goes_with_its_worktree_only_when_nothing_there_would_be_lost`,
+`branches_in_use_anywhere_are_left_alone`), and seen in the app.
+
+- **Ignored files.** `git status --porcelain` leaves out ignored files, and `git worktree remove`
+  without `--force` deletes them, so a "clean" worktree could take its `.env` with it. Now
+  `git::status_paths` runs `status --porcelain -z --ignored=matching`, and Delete refuses while
+  anything is listed, naming the first three paths. Chorus's own copy of the note
+  (`.chorus/handoff.md`, `.chorus/handoff-archive.md`) doesn't count: the return already brought
+  its entries back (`branch_hygiene::would_lose`).
+- **In use, anywhere.** Another project's active hand-off on the same repository, a loop run that
+  isn't done or stopped (`loop_runs.run_branch`, `worktree_path`), and an open session whose folder
+  is in the worktree all count. Matching is by folder as well as by name, so a session that
+  switched branches is still seen.
+- **Every project's folder.** A worktree holding any project's folder is never removed, and its
+  branch is never flagged, not only the folder of the project whose card is open.
+- **Only what the user saw.** `BranchView` carries `tip`, the branch's full commit, and
+  `branch_delete(project_id, branch, tip: Option<String>, confirmed)` refuses when the branch has
+  moved ("has changed since Chorus showed it to you"); the card then reloads. With no `tip` (the
+  return card), only a merged branch goes. The ref is deleted with `update-ref -d
+  refs/heads/{branch} {sha}`, which checks the commit in the same step, and Chorus decides
+  "merged" itself against the default branch (`git branch -d` checks HEAD or the upstream
+  instead). The branch's `branch.{name}` settings are removed after, as `branch -d` would.
+- **Only what the card lists.** The back end refuses a branch that is neither stale nor MausBot's.
+- **An unknown count.** `ahead` is `Option<u32>`. A count git couldn't give reads "not merged, and
+  Chorus couldn't count its commits", the card offers no Delete, and the back end refuses one. A
+  repository with no default branch shows why on the card and flags nothing.
+- **Once a spell, for good.** Notices are pruned after 30 days, which took their dedupe keys with
+  them. Migration 0029 adds `branch_flags (project_id, branch, spell)`, holding the last notice's
+  dedupe key. The key gains `:kept-{until}` when a Keep has run out, so the branch is flagged
+  again once after a Keep, as Keep promises.
+- **One at a time.** The sweep, Keep and Delete share a lock, so a sweep never flags a branch a
+  Delete is removing.
+- **Smaller ones.** A name the scrubber hides can't be acted on, and the card says so. Each card
+  shows its own action's error beside it (the Branches card, or the return card's Delete branch),
+  not at the foot of the hand-off block. Delete's reasons are scrubbed. A notice that can't be
+  stored no longer stops the rest of the sweep. The return's notice can't fail the return.

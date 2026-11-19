@@ -1,5 +1,5 @@
 /** Wording for the project page's hand-off cards (P18). Pure, so it is unit-tested. */
-import type { HandoffEntry, HandoffFile, HandoffReturn, IgnoreState, MausActivity } from '../../ipc'
+import type { BranchView, HandoffEntry, HandoffFile, HandoffReturn, IgnoreState, MausActivity } from '../../ipc'
 
 /** "Updated 3 min ago", from the note's UTC `updated:` line. */
 export function updatedLabel(iso: string | null, nowMs: number): string {
@@ -96,4 +96,26 @@ export function moreLabel(n: number, one: string, many: string): string | null {
 /** The local time a hand-off started or came back. */
 export function clockLabel(ms: number | null): string {
   return ms === null ? '' : new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+}
+
+/** A branch's line on the Branches card. */
+export function branchLine(b: Pick<BranchView, 'days' | 'merged' | 'ahead' | 'stale'>, base: string | null): string {
+  const where = base ?? 'the default branch'
+  const state = b.merged
+    ? `merged into ${where}`
+    : b.ahead === null
+      ? 'not merged, and Chorus couldn’t count its commits'
+      : `${b.ahead} ${b.ahead === 1 ? 'commit' : 'commits'} not merged`
+  return b.stale ? `${b.days} days unused · ${state}` : state
+}
+
+/** Whether the card offers Delete: never for a branch whose commits couldn't be counted. */
+export function canDelete(b: Pick<BranchView, 'merged' | 'ahead' | 'redacted'>): boolean {
+  return !b.redacted && (b.merged || b.ahead !== null)
+}
+
+/** The second confirmation's question for an unmerged branch. */
+export function deleteQuestion(b: { name: string; ahead: number }, base: string | null): string {
+  const one = b.ahead === 1
+  return `${b.ahead} ${one ? 'commit' : 'commits'} on ${b.name} ${one ? 'isn’t' : 'aren’t'} merged into ${base ?? 'the default branch'}. Delete ${one ? 'it' : 'them'} for good?`
 }

@@ -170,6 +170,10 @@ pub fn builder() -> Builder<tauri::Wry> {
             handoff::handoff_take_back,
             handoff::handoff_dismiss,
             handoff::handoff_continue_text,
+            handoff::branch_report,
+            handoff::branch_keep,
+            handoff::branch_delete,
+            handoff::branch_check_now,
         ])
         .events(collect_events![
             app::BackendPulse,

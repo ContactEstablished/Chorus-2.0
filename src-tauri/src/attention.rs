@@ -158,6 +158,21 @@ impl Attention {
             Err(e) => eprintln!("notifications: {e}"),
         }
     }
+
+    /// P18: a project's notice (a branch unused for 30 days, the baton passing). Scrubbed as a
+    /// session's is, stored once per dedupe key, and added to the notification centre.
+    pub fn add_project_notice(&self, store: &crate::store::Store, project_id: u32, mut notice: chorus_core::inbox::Notice) -> Result<(), String> {
+        let (keys, _) = crate::vault::all_for_scrubbing(store);
+        let patterns = chorus_core::scrub::builtin_patterns();
+        let scrub = |t: &str| String::from_utf8_lossy(&chorus_core::scrub::scrub_all(t.as_bytes(), &keys, &patterns)).into_owned();
+        notice.title = scrub(&notice.title);
+        notice.body = scrub(&notice.body);
+        if let Some(notification) = notifications::insert_for_project(store, project_id, &notice, now_ms())? {
+            let unread = notifications::unread(store).unwrap_or(0);
+            let _ = NotificationAdded { notification, unread }.emit(&self.app);
+        }
+        Ok(())
+    }
 }
 
 /// Shows the main window, on a session or on the Overview's Needs you.

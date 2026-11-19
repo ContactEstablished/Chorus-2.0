@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { HandoffEntry } from '../../ipc'
-import { activityLabel, authorLabel, branchState, earlierLabel, entryRows, fileStat, ignoreLabel, moreLabel, returnTitle, updatedLabel } from './handoff'
+import { activityLabel, authorLabel, branchLine, branchState, canDelete, deleteQuestion, earlierLabel, entryRows, fileStat, ignoreLabel, moreLabel, returnTitle, updatedLabel } from './handoff'
 
 const NOW = Date.parse('2026-11-18T14:05:00Z')
 
@@ -63,5 +63,24 @@ describe('baton wording', () => {
     expect(moreLabel(0, 'file', 'files')).toBeNull()
     expect(moreLabel(1, 'file', 'files')).toBe('and 1 more file')
     expect(moreLabel(3, 'commit', 'commits')).toBe('and 3 more commits')
+  })
+})
+
+describe('branch wording', () => {
+  it('says how long a branch has sat and where it stands', () => {
+    expect(branchLine({ days: 45, merged: true, ahead: 0, stale: true }, 'main')).toBe('45 days unused · merged into main')
+    expect(branchLine({ days: 60, merged: false, ahead: 2, stale: true }, 'main')).toBe('60 days unused · 2 commits not merged')
+    expect(branchLine({ days: 3, merged: false, ahead: 1, stale: false }, null)).toBe('1 commit not merged')
+    expect(branchLine({ days: 40, merged: false, ahead: null, stale: true }, 'main')).toBe('40 days unused · not merged, and Chorus couldn’t count its commits')
+  })
+  it('never offers Delete for a count it doesn’t know or a hidden name', () => {
+    expect(canDelete({ merged: true, ahead: 0, redacted: false })).toBe(true)
+    expect(canDelete({ merged: false, ahead: 2, redacted: false })).toBe(true)
+    expect(canDelete({ merged: false, ahead: null, redacted: false })).toBe(false)
+    expect(canDelete({ merged: true, ahead: 0, redacted: true })).toBe(false)
+  })
+  it('asks before unmerged commits go', () => {
+    expect(deleteQuestion({ name: 'old-open', ahead: 2 }, 'main')).toBe('2 commits on old-open aren’t merged into main. Delete them for good?')
+    expect(deleteQuestion({ name: 'x', ahead: 1 }, null)).toBe('1 commit on x isn’t merged into the default branch. Delete it for good?')
   })
 })

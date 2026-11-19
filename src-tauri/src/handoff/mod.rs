@@ -10,6 +10,7 @@
 //! with MausBot; `maus_client` is MausBot's local API.
 
 pub mod baton;
+pub mod branches;
 pub mod connection;
 pub mod maus_client;
 pub mod note;
@@ -61,6 +62,17 @@ fn emit(project_id: u32) {
     }
 }
 
+/// 18-3: a project's notice in the notification centre (the baton passing). Without the app (in
+/// tests) it does nothing.
+fn notify_project(m: &SessionManager, project_id: u32, notice: chorus_core::inbox::Notice) {
+    use tauri::Manager as _;
+    if let Some(app) = APP.get()
+        && let Err(e) = app.state::<Arc<crate::attention::Attention>>().add_project_notice(m.store(), project_id, notice)
+    {
+        eprintln!("notifications: {e}");
+    }
+}
+
 fn set_problem(project_id: u32, problem: Option<String>) {
     let mut guard = PROBLEMS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let map = guard.get_or_insert_with(HashMap::new);
@@ -72,6 +84,15 @@ fn set_problem(project_id: u32, problem: Option<String>) {
             map.remove(&project_id);
         }
     }
+}
+
+/// Tests share the process, and every test database numbers its projects and sessions from 1:
+/// each test starts with nothing remembered.
+#[cfg(test)]
+fn forget_all() {
+    *PROBLEMS.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+    *LAST.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+    baton::forget_all();
 }
 
 fn problem_of(project_id: u32) -> Option<String> {
@@ -107,12 +128,13 @@ fn triggers(before: Option<(bool, bool)>, now: (bool, bool)) -> bool {
 }
 
 pub fn start(m: &Arc<SessionManager>, app: tauri::AppHandle) -> Result<(), String> {
-    let _ = APP.set(app);
+    let _ = APP.set(app.clone());
     let (tx, rx) = channel();
     let _ = QUEUE.set(Mutex::new(tx));
     let worker = m.clone();
     std::thread::Builder::new().name("handoff".into()).spawn(move || run(&worker, &rx)).map_err(|e| e.to_string())?;
-    Ok(())
+    // 18-3: the daily sweep for branches unused for 30 days.
+    branches::start(m, app)
 }
 
 fn run(m: &Arc<SessionManager>, rx: &Receiver<(u32, u32)>) {
@@ -364,6 +386,56 @@ pub async fn handoff_dismiss(state: Manager<'_>, project_id: u32) -> Result<Hand
 #[specta::specta]
 pub async fn handoff_continue_text(state: Manager<'_>, project_id: u32) -> Result<String, String> {
     blocking(&state, move |m| baton::continue_text(&m, project_id)).await
+}
+
+/// 18-3: the project's Branches card.
+#[tauri::command]
+#[specta::specta]
+pub async fn branch_report(state: Manager<'_>, project_id: u32) -> Result<branches::BranchReport, String> {
+    blocking(&state, move |m| branches::report(&m, project_id)).await
+}
+
+/// Keep: the branch isn't flagged again for 30 days.
+#[tauri::command]
+#[specta::specta]
+pub async fn branch_keep(state: Manager<'_>, project_id: u32, branch: String) -> Result<branches::BranchReport, String> {
+    blocking(&state, move |m| {
+        branches::keep(&m, project_id, &branch)?;
+        branches::report(&m, project_id)
+    })
+    .await
+}
+
+/// Deletes a branch (and its worktree, when nothing there would be lost), if it's still at `tip`,
+/// the commit the card showed; with no `tip`, only a merged branch. An unmerged one needs
+/// `confirmed`.
+#[tauri::command]
+#[specta::specta]
+pub async fn branch_delete(
+    state: Manager<'_>,
+    project_id: u32,
+    branch: String,
+    tip: Option<String>,
+    confirmed: bool,
+) -> Result<branches::BranchReport, String> {
+    blocking(&state, move |m| {
+        branches::delete(&m, project_id, &branch, tip.as_deref(), confirmed)?;
+        emit(project_id);
+        branches::report(&m, project_id)
+    })
+    .await
+}
+
+/// Runs the project's part of the sweep now: a notice for each stale branch not yet flagged.
+#[tauri::command]
+#[specta::specta]
+pub async fn branch_check_now(app: tauri::AppHandle, state: Manager<'_>, project_id: u32) -> Result<branches::BranchReport, String> {
+    blocking(&state, move |m| {
+        let (name, _) = refresh::project_folder(&m, project_id)?;
+        branches::sweep_project(&m, &app, project_id, &name)?;
+        branches::report(&m, project_id)
+    })
+    .await
 }
 
 #[cfg(test)]

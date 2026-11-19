@@ -163,6 +163,8 @@ export type {
 export type {
   ActiveView as HandoffActive,
   ActivityView as MausActivity,
+  BranchReport,
+  BranchView,
   Author as HandoffAuthor,
   Baton,
   BotView as MausBotChoice,

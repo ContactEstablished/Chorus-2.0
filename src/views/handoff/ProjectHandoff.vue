@@ -5,6 +5,7 @@ import { computed, onBeforeUnmount, onMounted, watch } from 'vue'
 import type { Project } from '../../ipc'
 import { useHandoffStore } from '../../stores/handoff'
 import BatonBanner from './BatonBanner.vue'
+import BranchesCard from './BranchesCard.vue'
 import HandoffNote from './HandoffNote.vue'
 import HandToMausBot from './HandToMausBot.vue'
 import ReturnCard from './ReturnCard.vue'
@@ -42,6 +43,7 @@ watch(
         </template>
       </HandoffNote>
       <HandToMausBot v-if="handOpen && !view.active" :project="project" @close="store.openHandTo = null" />
+      <BranchesCard v-if="view.hasFolder" :project-id="project.id" />
     </template>
     <p v-if="error && view && !handOpen" class="warn" role="alert">{{ error }}</p>
   </div>

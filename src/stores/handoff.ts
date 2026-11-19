@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { commands, events, unwrap, type HandoffView, type MausBots } from '../ipc'
+import { commands, events, unwrap, type BranchReport, type HandoffView, type MausBots } from '../ipc'
 
 function message(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
@@ -81,11 +81,56 @@ export const useHandoffStore = defineStore('handoff', () => {
     return unwrap(commands.mausbotBots(projectId))
   }
 
+  // 18-3: the project's Branches card. Each change answers with the new report, or with the
+  // reason it failed, which the card that asked shows beside its buttons.
+  const branchReports = ref(new Map<number, BranchReport>())
+  async function branches(projectId: number, run: () => Promise<BranchReport>): Promise<string | null> {
+    try {
+      branchReports.value.set(projectId, await run())
+      return null
+    } catch (e) {
+      return message(e)
+    }
+  }
+  const loadBranches = (projectId: number) => branches(projectId, () => unwrap(commands.branchReport(projectId)))
+  const checkBranches = (projectId: number) => branches(projectId, () => unwrap(commands.branchCheckNow(projectId)))
+  const keepBranch = (projectId: number, branch: string) => branches(projectId, () => unwrap(commands.branchKeep(projectId, branch)))
+  /**
+   * Deletes a branch if it's still at `tip`, the commit the card showed (none: only a merged one).
+   * After a refusal the card reads the branches again, since one may have changed.
+   */
+  async function deleteBranch(projectId: number, branch: string, tip: string | null, confirmed: boolean): Promise<string | null> {
+    const error = await branches(projectId, () => unwrap(commands.branchDelete(projectId, branch, tip, confirmed)))
+    if (error) await loadBranches(projectId)
+    else if (views.value.has(projectId)) await load(projectId)
+    return error
+  }
+
   function dispose(): void {
     unlisten?.()
     unlisten = null
     listening = null
   }
 
-  return { views, errors, busy, openHandTo, init, load, refresh, start, takeBack, dismiss, openNote, continueText, bots, dispose }
+  return {
+    views,
+    errors,
+    busy,
+    openHandTo,
+    branchReports,
+    init,
+    load,
+    refresh,
+    start,
+    takeBack,
+    dismiss,
+    openNote,
+    continueText,
+    bots,
+    loadBranches,
+    checkBranches,
+    keepBranch,
+    deleteBranch,
+    dispose,
+  }
 })

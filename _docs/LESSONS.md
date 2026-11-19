@@ -626,3 +626,13 @@ watched.
 `work_state_write` tool, because that plugin's SessionStart hook tells agents to use it instead of
 the built-in to-do tools. Chorus correctly showed no plan. When a live check needs a plan, name
 Claude Code's `TaskCreate` and `TaskUpdate` tools in the prompt.
+
+**L80 — `git worktree remove` deletes ignored files without a word, and `git branch -d` doesn't
+check the branch you think (git 2.50, 2026-11-18).** Without `--force`, `worktree remove` refuses
+modified and untracked files but deletes ignored ones (`.env`, `target/`): check first with
+`git status --porcelain -z --ignored=matching`. Plain `--ignored` collapses a folder that holds only
+ignored files to `dir/`, so a file Chorus owns there can't be told apart; `matching` lists the paths
+that matched. `git branch -d` checks "merged" against HEAD (or the branch's upstream), not the
+default branch, and deletes whatever the branch points at by then. To delete only the commit a
+person was shown, use `git update-ref -d refs/heads/<branch> <sha>`, which refuses if the branch
+moved, then `git config --remove-section branch.<branch>` for its settings.

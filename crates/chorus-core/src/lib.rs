@@ -50,6 +50,7 @@ pub mod attachments;
 pub mod progress;
 pub mod handoff;
 pub mod maus;
+pub mod branch_hygiene;
 pub mod step_times;
 pub mod time_split;
 pub mod usual_time;

@@ -138,6 +138,70 @@ pub fn all_active(store: &Store) -> Result<Vec<HandoffRow>, String> {
     })
 }
 
+/// 18-3: a hand-off on a branch that hasn't been put away (active or returned).
+pub fn open_on_branch(store: &Store, project_id: u32, branch: &str) -> Result<Option<HandoffRow>, String> {
+    one(store, "WHERE project_id = ?1 AND branch = ?2 AND state != 'closed' ORDER BY id DESC LIMIT 1", params![project_id, branch])
+}
+
+/// 18-3: the project's kept branches and when each keep ends (migration 0029).
+pub fn snoozes(store: &Store, project_id: u32) -> Result<Vec<(String, i64)>, String> {
+    store.with(|c| {
+        c.prepare("SELECT branch, until_at FROM branch_snoozes WHERE project_id = ?1")?
+            .query_map([project_id], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect()
+    })
+}
+
+/// 18-3: Keep: the branch isn't flagged again until `until`.
+pub fn snooze(store: &Store, project_id: u32, branch: &str, until: i64) -> Result<(), String> {
+    store.with(|c| {
+        c.execute(
+            "INSERT INTO branch_snoozes (project_id, branch, until_at) VALUES (?1, ?2, ?3)
+             ON CONFLICT (project_id, branch) DO UPDATE SET until_at = excluded.until_at",
+            params![project_id, branch, until],
+        )
+        .map(|_| ())
+    })
+}
+
+pub fn unsnooze(store: &Store, project_id: u32, branch: &str) -> Result<(), String> {
+    store.with(|c| c.execute("DELETE FROM branch_snoozes WHERE project_id = ?1 AND branch = ?2", params![project_id, branch]).map(|_| ()))
+}
+
+/// 18-3: the spell a branch was last flagged for (its notice's dedupe key), so a spell is flagged
+/// once even after its notice is pruned.
+pub fn flagged(store: &Store, project_id: u32, branch: &str) -> Result<Option<String>, String> {
+    store.with(|c| {
+        c.query_row("SELECT spell FROM branch_flags WHERE project_id = ?1 AND branch = ?2", params![project_id, branch], |r| r.get(0))
+            .optional()
+    })
+}
+
+pub fn set_flagged(store: &Store, project_id: u32, branch: &str, spell: &str) -> Result<(), String> {
+    store.with(|c| {
+        c.execute(
+            "INSERT INTO branch_flags (project_id, branch, spell) VALUES (?1, ?2, ?3)
+             ON CONFLICT (project_id, branch) DO UPDATE SET spell = excluded.spell",
+            params![project_id, branch, spell],
+        )
+        .map(|_| ())
+    })
+}
+
+pub fn clear_flagged(store: &Store, project_id: u32, branch: &str) -> Result<(), String> {
+    store.with(|c| c.execute("DELETE FROM branch_flags WHERE project_id = ?1 AND branch = ?2", params![project_id, branch]).map(|_| ()))
+}
+
+/// 18-3: the branches and worktrees of loop runs still going (not done or stopped). A run waiting
+/// weeks for a milestone review is still using its branch.
+pub fn live_loop_runs(store: &Store) -> Result<Vec<(String, Option<String>)>, String> {
+    store.with(|c| {
+        c.prepare("SELECT run_branch, worktree_path FROM loop_runs WHERE state NOT IN ('done', 'stopped')")?
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect()
+    })
+}
+
 /// The bot used last for a project, to offer it first.
 pub fn last_bot(store: &Store, project_id: u32) -> Result<Option<String>, String> {
     store.with(|c| {

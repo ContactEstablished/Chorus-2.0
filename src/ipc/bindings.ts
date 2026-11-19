@@ -262,6 +262,18 @@ export const commands = {
 	handoffDismiss: (projectId: number) => typedError<HandoffView, string>(__TAURI_INVOKE("handoff_dismiss", { projectId })),
 	/**  What Continue from here puts in a session's composer (the front end adds it; nothing is sent). */
 	handoffContinueText: (projectId: number) => typedError<string, string>(__TAURI_INVOKE("handoff_continue_text", { projectId })),
+	/**  18-3: the project's Branches card. */
+	branchReport: (projectId: number) => typedError<BranchReport, string>(__TAURI_INVOKE("branch_report", { projectId })),
+	/**  Keep: the branch isn't flagged again for 30 days. */
+	branchKeep: (projectId: number, branch: string) => typedError<BranchReport, string>(__TAURI_INVOKE("branch_keep", { projectId, branch })),
+	/**
+	 *  Deletes a branch (and its worktree, when nothing there would be lost), if it's still at `tip`,
+	 *  the commit the card showed; with no `tip`, only a merged branch. An unmerged one needs
+	 *  `confirmed`.
+	 */
+	branchDelete: (projectId: number, branch: string, tip: string | null, confirmed: boolean) => typedError<BranchReport, string>(__TAURI_INVOKE("branch_delete", { projectId, branch, tip, confirmed })),
+	/**  Runs the project's part of the sweep now: a notice for each stale branch not yet flagged. */
+	branchCheckNow: (projectId: number) => typedError<BranchReport, string>(__TAURI_INVOKE("branch_check_now", { projectId })),
 };
 
 /** Events */
@@ -541,6 +553,34 @@ export type BotsView = {
 	defaultId: string | null,
 	paired: boolean,
 	canChooseFolder: boolean,
+};
+
+export type BranchReport = {
+	problem: string | null,
+	/**  The branch the others are compared with. */
+	base: string | null,
+	/**  Stale branches (oldest first), then MausBot's branches. */
+	branches: BranchView[],
+};
+
+/**  One branch on the project's Branches card. */
+export type BranchView = {
+	name: string,
+	/**  Its commit when Chorus looked. Delete acts only while it's still there. */
+	tip: string,
+	lastCommitMs: number | null,
+	days: number,
+	merged: boolean,
+	/**  Commits the default branch doesn't have; none when git couldn't count them. */
+	ahead: number | null,
+	/**  Unused for 30 days and not kept. */
+	stale: boolean,
+	snoozedUntilMs: number | null,
+	/**  The worktree it's checked out in, if any. */
+	worktree: string | null,
+	maus: boolean,
+	/**  Its name looked like a secret and is hidden, so the card can't act on it. */
+	redacted: boolean,
 };
 
 /**  A candidate's blended price at the profile's token mix, in USD per million tokens. */
@@ -1211,8 +1251,11 @@ export type NoteSave = {
 
 export type Notification = {
 	id: number,
-	sessionId: number,
-	/**  `approval`, `input` or `failed`. */
+	/**  The session it's about; none for a project's notice (P18: branches and the baton). */
+	sessionId: number | null,
+	/**  P18: the project a project's notice is about. */
+	projectId: number | null,
+	/**  `approval`, `input` or `failed`; P18 adds `branch` and `handoff`. */
 	kind: string,
 	title: string,
 	body: string,

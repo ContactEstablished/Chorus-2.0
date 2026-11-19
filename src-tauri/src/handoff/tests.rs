@@ -14,11 +14,13 @@ use crate::store::sessions::{self as rows, NewSession};
 use crate::store::{self, Store};
 
 /// The hand-off module keeps problems in process-wide maps keyed by project and hand-off id, which
-/// every test database starts at 1: these tests run one at a time.
+/// every test database starts at 1: these tests run one at a time, each with the maps cleared.
 static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 fn serial() -> std::sync::MutexGuard<'static, ()> {
-    SERIAL.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    let one = SERIAL.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    super::forget_all();
+    one
 }
 
 fn git(dir: &Path, args: &[&str]) -> String {
@@ -84,7 +86,7 @@ fn a_refresh_writes_an_ignored_note_and_replaces_its_own_entry() {
     let again = std::fs::read_to_string(note::note_path(&work)).unwrap();
     assert_eq!(again.matches("latest work").count(), 1, "the entry is replaced, not stacked");
     let v = view(&r.manager, r.project).unwrap();
-    assert_eq!((v.exists, v.problem.is_none(), v.entries.len()), (true, true, 1));
+    assert_eq!((v.exists, v.problem.is_none(), v.entries.len()), (true, true, 1), "{:?}", v.problem);
     assert_eq!(v.ignored, Some(note::IgnoreState::Ignored));
     let _ = std::fs::remove_dir_all(&r.dir);
 }
@@ -265,5 +267,189 @@ fn a_branch_git_cant_read_gets_an_entry_that_says_so() {
     assert!(back.entries[0].done.as_deref().is_some_and(|d| d.starts_with("Chorus couldn't read")), "{:?}", back.entries[0].done);
     assert!(back.problem.is_some(), "the card says git couldn't read it");
     assert!(baton::take_back(&r.manager, r.project).unwrap_err().contains("isn't with MausBot"));
+    let _ = std::fs::remove_dir_all(&r.dir);
+}
+
+/// A commit dated `days_ago` days back (author and committer), with `file` changed.
+fn commit_dated(dir: &Path, file: &str, message: &str, days_ago: i64) {
+    std::fs::write(dir.join(file), format!("{message}\n")).unwrap();
+    git(dir, &["add", file]);
+    let when = format!("@{} +0000", (store::now_ms() / 1000) - days_ago * 86_400);
+    let out = std::process::Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(["commit", "-q", "-m", message])
+        .env("GIT_AUTHOR_DATE", &when)
+        .env("GIT_COMMITTER_DATE", &when)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+}
+
+/// The commit a branch on the card points at, as the card shows it.
+fn tip(r: &Repo, project: u32, branch: &str) -> String {
+    super::branches::report(&r.manager, project).unwrap().branches.into_iter().find(|b| b.name == branch).expect("listed").tip
+}
+
+#[test]
+fn stale_branches_are_flagged_once_kept_and_deleted_with_care() {
+    use super::branches;
+    let _one = serial();
+    let r = repo("branches");
+    let work = r.dir.join("work");
+    commit_dated(&work, "a.txt", "old base", 50);
+    git(&work, &["branch", "old-kept"]);
+    commit_dated(&work, "b.txt", "older base", 45);
+    git(&work, &["branch", "old-merged"]);
+    git(&work, &["checkout", "-q", "-b", "old-open"]);
+    commit_dated(&work, "c.txt", "open one", 60);
+    commit_dated(&work, "d.txt", "open two", 60);
+    git(&work, &["checkout", "-q", "main"]);
+    commit_dated(&work, "e.txt", "main moves on", 0);
+    git(&work, &["branch", "fresh"]);
+
+    let report = branches::report(&r.manager, r.project).unwrap();
+    assert_eq!(report.base.as_deref(), Some("main"));
+    let flagged: Vec<(&str, bool, Option<u32>)> = report.branches.iter().filter(|b| b.stale).map(|b| (b.name.as_str(), b.merged, b.ahead)).collect();
+    assert_eq!(flagged, [("old-open", false, Some(2)), ("old-kept", true, Some(0)), ("old-merged", true, Some(0))], "oldest first; fresh and main never");
+
+    // Flagged once a spell, even after the notices themselves are pruned.
+    let now = store::now_ms();
+    let due = branches::due(&r.manager, r.project, "Atlas", now).unwrap();
+    assert_eq!(due.len(), 3);
+    for (branch, notice) in &due {
+        store::handoff::set_flagged(r.manager.store(), r.project, branch, &notice.dedupe_key).unwrap();
+    }
+    assert!(branches::due(&r.manager, r.project, "Atlas", now).unwrap().is_empty());
+    r.manager.store().with(|c| c.execute("DELETE FROM notifications", [])).unwrap();
+    assert!(branches::due(&r.manager, r.project, "Atlas", now).unwrap().is_empty(), "pruned notices aren't raised again");
+
+    // Keep hides one for 30 days; Delete won't touch what the card doesn't list.
+    let kept_tip = tip(&r, r.project, "old-kept");
+    branches::keep(&r.manager, r.project, "old-kept").unwrap();
+    let names: Vec<String> = branches::report(&r.manager, r.project).unwrap().branches.into_iter().map(|b| b.name).collect();
+    assert_eq!(names, ["old-open", "old-merged"], "kept for 30 days");
+    let refused = branches::delete(&r.manager, r.project, "old-kept", Some(&kept_tip), false).unwrap_err();
+    assert!(refused.contains("only deletes the branches it lists"), "{refused}");
+    // When the Keep runs out, the branch is flagged again, once.
+    r.manager.store().with(|c| c.execute("UPDATE branch_snoozes SET until_at = ?1", [now - 1])).unwrap();
+    let again = branches::due(&r.manager, r.project, "Atlas", now).unwrap();
+    assert_eq!(again.len(), 1);
+    assert_eq!(again[0].0, "old-kept");
+    assert!(again[0].1.dedupe_key.ends_with(&format!(":kept-{}", now - 1)), "{}", again[0].1.dedupe_key);
+
+    branches::delete(&r.manager, r.project, "old-merged", None, false).unwrap();
+    assert_eq!(git(&work, &["branch", "--list", "old-merged"]).trim(), "");
+
+    // Unmerged commits: asked about first, and only the commits the user was shown.
+    let shown = tip(&r, r.project, "old-open");
+    let refused = branches::delete(&r.manager, r.project, "old-open", Some(&shown), false).unwrap_err();
+    assert!(refused.contains("2 commits") && refused.contains("for good"), "{refused}");
+    assert!(branches::delete(&r.manager, r.project, "old-open", None, true).unwrap_err().contains("aren't merged"), "no tip, no unmerged delete");
+    git(&work, &["checkout", "-q", "old-open"]);
+    commit_dated(&work, "f.txt", "open three", 60);
+    git(&work, &["checkout", "-q", "main"]);
+    let refused = branches::delete(&r.manager, r.project, "old-open", Some(&shown), true).unwrap_err();
+    assert!(refused.contains("has changed since"), "{refused}");
+    assert_eq!(git(&work, &["branch", "--list", "old-open"]).trim(), "old-open", "a commit the user wasn't shown keeps it");
+    let report = branches::report(&r.manager, r.project).unwrap();
+    assert_eq!(report.branches.iter().find(|b| b.name == "old-open").unwrap().ahead, Some(3));
+    branches::delete(&r.manager, r.project, "old-open", Some(&tip(&r, r.project, "old-open")), true).unwrap();
+    assert_eq!(git(&work, &["branch", "--list", "old-open"]).trim(), "");
+
+    assert!(branches::delete(&r.manager, r.project, "main", None, true).unwrap_err().contains("default branch"));
+    assert!(branches::delete(&r.manager, r.project, "-D", None, true).unwrap_err().contains("isn't a branch name"));
+    assert!(branches::delete(&r.manager, r.project, "fresh", None, true).unwrap_err().contains("only deletes the branches it lists"));
+    let _ = std::fs::remove_dir_all(&r.dir);
+}
+
+#[test]
+fn a_maus_branch_goes_with_its_worktree_only_when_nothing_there_would_be_lost() {
+    use super::{baton, branches};
+    let _one = serial();
+    let r = repo("mausdelete");
+    baton::start(&r.manager, r.project, None, "Tidy").unwrap();
+    let a = view(&r.manager, r.project).unwrap().active.unwrap();
+    assert!(branches::report(&r.manager, r.project).unwrap().branches.iter().all(|b| b.name != a.branch), "the banner shows it");
+    assert!(branches::delete(&r.manager, r.project, &a.branch, None, true).unwrap_err().contains("using"), "an active hand-off is in use");
+    baton::take_back(&r.manager, r.project).unwrap();
+    let report = branches::report(&r.manager, r.project).unwrap();
+    let maus = report.branches.iter().find(|b| b.name == a.branch).expect("listed");
+    assert!(maus.maus && maus.merged && maus.worktree.is_some());
+    let wt = PathBuf::from(&a.worktree);
+    assert!(wt.join(".chorus").join("handoff.md").is_file(), "MausBot's copy of the note is there, and doesn't count");
+
+    std::fs::write(wt.join("scratch.txt"), "dirty\n").unwrap();
+    let refused = branches::delete(&r.manager, r.project, &a.branch, None, false).unwrap_err();
+    assert!(refused.contains("would lose (scratch.txt)"), "{refused}");
+    std::fs::remove_file(wt.join("scratch.txt")).unwrap();
+    // An ignored file too: `git worktree remove` would take it without a word.
+    let exclude = r.dir.join("work").join(".git").join("info").join("exclude");
+    let mut lines = std::fs::read_to_string(&exclude).unwrap();
+    lines.push_str("\n.env\n");
+    std::fs::write(&exclude, lines).unwrap();
+    std::fs::write(wt.join(".env"), "TOKEN=x\n").unwrap();
+    let refused = branches::delete(&r.manager, r.project, &a.branch, None, false).unwrap_err();
+    assert!(refused.contains("would lose (.env)"), "{refused}");
+    assert!(wt.join(".env").is_file());
+    std::fs::remove_file(wt.join(".env")).unwrap();
+
+    branches::delete(&r.manager, r.project, &a.branch, None, false).unwrap();
+    assert!(!wt.exists(), "the worktree goes first");
+    assert_eq!(git(&r.dir.join("work"), &["branch", "--list", &a.branch]).trim(), "");
+    assert!(view(&r.manager, r.project).unwrap().returned.is_none(), "its return card is put away");
+    let _ = std::fs::remove_dir_all(&r.dir);
+}
+
+#[test]
+fn branches_in_use_anywhere_are_left_alone() {
+    use super::{baton, branches};
+    let _one = serial();
+    let r = repo("inuse");
+    let work = r.dir.join("work");
+    let store = r.manager.store();
+    // A second project on the same repository, in a folder inside it.
+    std::fs::create_dir_all(work.join("app")).unwrap();
+    let app_folder = work.join("app").display().to_string();
+    let other = projects::insert(store, &NewProject { name: "Atlas app", folder: Some(&app_folder), colour: "#336699" }).unwrap();
+
+    // Another project's active hand-off.
+    baton::start(&r.manager, r.project, None, "Tidy").unwrap();
+    let a = view(&r.manager, r.project).unwrap().active.unwrap();
+    assert!(branches::report(&r.manager, other).unwrap().branches.iter().all(|b| b.name != a.branch));
+    let refused = branches::delete(&r.manager, other, &a.branch, None, true).unwrap_err();
+    assert!(refused.contains("using"), "{refused}");
+    baton::take_back(&r.manager, r.project).unwrap();
+
+    // A loop run waiting weeks for its milestone review.
+    commit_dated(&work, "l.txt", "loop work", 40);
+    git(&work, &["branch", "run-1"]);
+    commit_dated(&work, "m.txt", "main moves on", 0);
+    let now = store::now_ms();
+    store
+        .with(|c| {
+            c.execute(
+                "INSERT INTO loop_runs (name, repo_root, base_branch, run_branch, config, state, created_at, updated_at)
+                 VALUES ('run', 'x', 'main', 'run-1', '{}', 'waiting', ?1, ?1)",
+                [now],
+            )
+        })
+        .unwrap();
+    assert!(branches::report(&r.manager, r.project).unwrap().branches.iter().all(|b| b.name != "run-1"));
+    assert!(branches::delete(&r.manager, r.project, "run-1", None, false).unwrap_err().contains("using"));
+    store.with(|c| c.execute("UPDATE loop_runs SET state = 'done'", [])).unwrap();
+    assert!(branches::report(&r.manager, r.project).unwrap().branches.iter().any(|b| b.name == "run-1" && b.stale));
+
+    // A worktree that is a project's folder: its branch is that project's own.
+    let side = r.dir.join(".chorus2").join("work").join("side");
+    git(&work, &["worktree", "add", "-q", "-b", "side", &side.display().to_string(), "run-1"]);
+    let side_folder = side.display().to_string();
+    let side_project = projects::insert(store, &NewProject { name: "Side", folder: Some(&side_folder), colour: "#336699" }).unwrap();
+    assert!(branches::report(&r.manager, r.project).unwrap().branches.iter().all(|b| b.name != "side"));
+    for project in [r.project, side_project] {
+        let refused = branches::delete(&r.manager, project, "side", None, true).unwrap_err();
+        assert!(refused.contains("a project's folder"), "{refused}");
+    }
+    assert!(side.is_dir());
     let _ = std::fs::remove_dir_all(&r.dir);
 }

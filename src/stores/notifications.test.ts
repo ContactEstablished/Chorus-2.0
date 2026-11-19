@@ -34,7 +34,7 @@ vi.mock('../ipc', async (importOriginal) => {
 const { useNotificationsStore } = await import('./notifications')
 
 function note(id: number, over: Partial<Notification> = {}): Notification {
-  return { id, sessionId: 1, kind: 'approval', title: `N${id}`, body: '', createdAt: id * 1000, readAt: null, ...over }
+  return { id, sessionId: 1, projectId: null, kind: 'approval', title: `N${id}`, body: '', createdAt: id * 1000, readAt: null, ...over }
 }
 
 describe('notification centre store', () => {
