@@ -25,6 +25,7 @@ import {
   type WorktreeEntry,
 } from '../../ipc'
 import RoutingTiers from './RoutingTiers.vue'
+import { asError, canRecheck, failure } from './folderCheck'
 import ButtonGroup from '../../components/ButtonGroup.vue'
 import TagInput from '../../components/TagInput.vue'
 import ProjectPicker from '../../components/ProjectPicker.vue'
@@ -191,10 +192,11 @@ const presetText = computed(() => {
 const chosenProject = computed(() => (projectId.value === null ? null : (projects.byId.get(projectId.value) ?? null)))
 const cwd = computed(() => chosenProject.value?.folder ?? '')
 
-// The folder is the chosen project's: checked when the project changes.
+// The folder is the chosen project's: checked when the form opens with one (a project's Overview
+// passes it in) and whenever it changes, and again on "Check again".
 let checkTimer: ReturnType<typeof setTimeout> | undefined
 let checkSeq = 0
-watch(cwd, (folder) => {
+function checkFolder(folder: string): void {
   clearTimeout(checkTimer)
   const seq = ++checkSeq
   check.value = null
@@ -207,19 +209,21 @@ watch(cwd, (folder) => {
     return
   }
   checkTimer = setTimeout(async () => {
-    const r = await commands.folderCheck(folder.trim()).catch(() => null)
+    const r = await commands.folderCheck(folder.trim()).catch(asError)
     if (seq !== checkSeq) return
-    if (r?.status === 'ok') check.value = r.data
-    else retainedProblem.value = r?.status === 'error' ? r.error : 'Could not check the folder.'
+    if (!(r instanceof Error) && r.status === 'ok') check.value = r.data
+    else retainedProblem.value = failure(r, 'the folder')
     if (check.value?.git) {
-      const trees = await commands.worktreesList(folder.trim()).catch(() => null)
+      const trees = await commands.worktreesList(folder.trim()).catch(asError)
       if (seq !== checkSeq) return
-      if (trees?.status === 'ok') retained.value = trees.data
-      else retainedProblem.value = trees?.status === 'error' ? trees.error : 'Could not check retained worktrees.'
+      if (!(trees instanceof Error) && trees.status === 'ok') retained.value = trees.data
+      else retainedProblem.value = failure(trees, 'retained worktrees')
     }
     folderPending.value = false
   }, 250)
-})
+}
+watch(cwd, checkFolder, { immediate: true })
+const recheck = computed(() => canRecheck(cwd.value, folderPending.value, check.value, retainedProblem.value))
 onUnmounted(() => { clearTimeout(checkTimer); ++checkSeq })
 const git = computed(() => check.value?.git ?? null)
 const canWorktree = computed(() => !!git.value && !git.value.worktreeProblem)
@@ -382,7 +386,7 @@ const blocker = computed(() => {
   if (!chosenProject.value) return 'Choose a project.'
   if (!cwd.value.trim()) return `${chosenProject.value.name} has no folder. Set one in the project's settings.`
   if (folderPending.value) return 'Checking folder and worktrees…'
-  if (!check.value) return retainedProblem.value ?? 'Could not check the folder.'
+  if (!check.value) return retainedProblem.value ?? 'The folder has not been checked. Choose Check again.'
   if (check.value?.problem) return check.value.problem
   if (preset.value !== 'swarm' && workspace.value === 'existing') {
     if (!chosenWorktree.value) return 'Choose an existing worktree.'
@@ -470,6 +474,9 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
         <p v-else-if="check?.gitNote" class="hint warn">{{ check.gitNote }}</p>
         <p v-else-if="check && !git" class="hint">Not a git repository: sessions work in the folder itself.</p>
         <p v-if="retainedProblem" class="hint warn">{{ retainedProblem }}</p>
+        <p v-if="recheck" class="recheck">
+          <button type="button" @click="checkFolder(cwd)">Check again</button>
+        </p>
         <template v-if="git && preset !== 'swarm'">
           <ButtonGroup :model-value="workspace" :options="workspaceOptions" label="Work in" variant="chips" @update:model-value="chooseWorkspace" />
           <template v-if="workspace === 'existing'">
@@ -731,6 +738,9 @@ em {
 }
 .hint.bad {
   color: var(--status-failed);
+}
+.recheck {
+  margin: 0;
 }
 .mono {
   font-family: var(--font-mono);

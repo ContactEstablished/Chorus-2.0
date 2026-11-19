@@ -7,7 +7,8 @@ import { useNoticesStore } from '../stores/notices'
 import LinkedImages from './LinkedImages.vue'
 
 /** `plain` drops the label and Copy/Source toolbar: for a note inside a larger card. */
-const props = defineProps<{ text: string; plain?: boolean; sessionId?: number }>()
+/** `compact` drops the label row: Copy/Source float in the card's corner (the sender is shown elsewhere). */
+const props = defineProps<{ text: string; plain?: boolean; compact?: boolean; sessionId?: number }>()
 const html = computed(() => renderMessage(props.text))
 const notices = useNoticesStore()
 const source = ref(false)
@@ -75,8 +76,8 @@ function followLink(event: MouseEvent): void {
 
 <template>
   <div class="message-reader">
-    <header v-if="!plain" class="message-toolbar">
-      <div class="message-label"><slot /></div>
+    <header v-if="!plain" class="message-toolbar" :class="{ compact }">
+      <div v-if="!compact" class="message-label"><slot /></div>
       <div class="message-actions">
         <button class="quiet" title="Copy original message" @click="copy(text, 'Message')">Copy</button>
         <button class="quiet" :aria-pressed="source" :title="source ? 'Show formatted message' : 'Show original message'" @click="source = !source">{{ source ? 'Formatted' : 'Source' }}</button>
@@ -92,6 +93,7 @@ function followLink(event: MouseEvent): void {
 <style scoped>
 .message-reader { min-width: 0; }
 .message-toolbar { display: flex; gap: 12px; align-items: center; justify-content: space-between; margin: -4px 0 14px; }
+.message-toolbar.compact { position: absolute; top: 6px; right: 8px; margin: 0; z-index: 1; }
 .message-label { font-size: 12px; letter-spacing: 0.04em; font-weight: 600; }
 .message-actions { display: flex; gap: 4px; }
 .message-actions button { font-size: 11px; padding: 3px 7px; color: var(--text-muted); }

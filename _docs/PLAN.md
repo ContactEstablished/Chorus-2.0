@@ -71,7 +71,7 @@ these held items later as a real-world test; this is not authorization to start 
 Keep completed work and phase identifiers. M3's full scope remains, with no completion date while
 these phases are held. This override takes precedence over the historical execution order below.
 
-There are **17 active phases**: P0–P17 with P9 removed; P11 and P14 are now on hold (D102).
+There are **18 active phases**: P0–P18 with P9 removed; P11 and P14 are now on hold (D102).
 Keep these identifiers: scope and decisions
 already refer to them. P0–P5 are closed; P4's full-day acceptance check was explicitly waived on
 2026-10-22, not performed (D72). P5's remaining work passed its app checks on 2026-10-22.
@@ -95,9 +95,10 @@ does not close those phases.
 | P13 | Phone relay | Built once inside P15, for the loop, from [its design](HANDOFF-P13-telegram.md) (D97); P6 has since built the reply channels P13b needed |
 | P14 | More agents and ship | **On hold until further notice (D102); at the end, before P11.** Partly built: Gemini, Aider, Ollama, CI, installer polish and Q28–Q30 fixes; complete real turns, DeepSeek spike/adapter, signing, updates and eventual name migration remain for a future Chorus 2 real-world test |
 | P11 | Measurement, made visible | **On hold until further notice (D102); last priority.** Tokens, costs, attention and Usage UI remain for a future Chorus 2 real-world test; forecasts remain gated on data completeness |
-| P15 | Autonomous phase loop | Resumes after P16 (D97, D115): slices 1–4 done, 5–9 remain. [plan](HANDOFF-P15-loop.md). Runs a roadmap phase after phase, stopping at milestones or real blockers; includes Council (P10) and the Telegram relay (P13) |
+| P15 | Autonomous phase loop | Resumes after P16 (D97, D115): slices 1–4 done, 5–9 remain. [plan](HANDOFF-P15-loop.md). Runs a roadmap phase after phase, stopping at milestones or real blockers; includes Council (P10) and the phone relay, which now goes through OpenMausBot instead of Telegram (D132) |
 | P16 | Progress panel | Next (D115–D116): [roadmap](HANDOFF-P16-P17-progress-goals.md). A pinned panel in Friendly with step and skill times, then a time split, an Overview card bar and "usual time" markers |
 | P17 | Goal mode | Provisional, after P16 (D117–D118): [roadmap](HANDOFF-P16-P17-progress-goals.md). A standing goal per session that keeps the agent working, with guards that pause; a Stop-hook spike first |
+| P18 | Working alongside OpenMausBot | Planned 2026-11-18 (D128–D131): [plan](HANDOFF-P18-mausbot.md). A per-project hand-off note, a baton that gives MausBot its own `maus/…` worktree, branch-cleanup notices, and an optional local MCP server so MausBot can read and prompt sessions. **Next** (D132), before P17 and P15's remaining slices. First pass 18.0–18.3 and 18.5; the MCP level (18.4) is deferred |
 
 **Execution order agreed 2026-10-22:** roadmap consolidation, Q28–Q30 and P5 are complete. Build P6
 and P7 for M2, then finish the remaining capability and release phases for M3. P6 began with the
@@ -450,6 +451,12 @@ Provisional until its own kickoff. A session can carry a standing goal; after ea
 decides whether to send a continue message, from the agent's verdict on a Chorus tool (D117). Guards
 pause, never stop, and name their reason. Claude Code's Stop hook is spiked first (D118). Goal mode
 never changes a session's permissions.
+
+### P18 — Working alongside OpenMausBot
+Next (D132). Chorus and OpenMausBot stay separate apps (D129): a hand-off note per project
+(D128), a baton that gives MausBot its own branch in a Chorus-made worktree (D130), notices that keep
+branches clean (D131). A loopback MCP server so MausBot can read and prompt sessions is deferred (D132).
+Planned in [HANDOFF-P18-mausbot.md](HANDOFF-P18-mausbot.md).
 
 ## 5. Ways of working
 

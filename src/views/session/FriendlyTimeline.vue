@@ -161,9 +161,13 @@ onBeforeUnmount(() => { disposed = true; generation++; clearTimeout(timer); resi
               </div>
               <div v-else class="sent-row">
                 <article class="sent" :class="{ folded: isLongPrompt(turn.prompt) && !expanded.has(turn.id) }">
-                  <MessageContent :session-id="session.id" :text="turn.prompt ?? 'Prompt was not observed.'">You<small v-if="sourceBadge(turn.promptSource)">{{ sourceBadge(turn.promptSource) }}</small></MessageContent>
+                  <MessageContent compact :session-id="session.id" :text="turn.prompt ?? 'Prompt was not observed.'" />
                   <button v-if="isLongPrompt(turn.prompt)" class="quiet fold" @click="toggle(turn.id)">{{ expanded.has(turn.id) ? 'Show less' : 'Show the full prompt' }}</button>
                 </article>
+                <span class="avatar user-chip" :title="sourceBadge(turn.promptSource) ? `You · ${sourceBadge(turn.promptSource)}` : 'You'">
+                  <svg width="18" height="18" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="7" r="3.5" fill="currentColor" /><path d="M3 18c0-3.9 3.1-6 7-6s7 2.1 7 6z" fill="currentColor" /></svg>
+                  <span class="sr-only">You</span>
+                </span>
               </div>
 
               <!-- What the agent did: open while it works, folded once it has replied. -->
@@ -206,11 +210,11 @@ onBeforeUnmount(() => { disposed = true; generation++; clearTimeout(timer); resi
 
               <!-- What it replied. -->
               <div v-if="turn.finalMessage" class="reply-row">
-                <span class="avatar agent-chip" :class="`agent-${session.agent}`" :title="agentLabel">
+                <span class="avatar agent-chip" :class="`agent-${session.agent}`" :title="turn.endedAtSecs ? `${agentLabel} · ${timeLabel(turn.endedAtSecs)}` : agentLabel">
                   <img :src="AGENT_LOGOS[session.agent]" :alt="agentLabel" />
                 </span>
                 <article class="reply">
-                  <MessageContent :session-id="session.id" :text="turn.finalMessage">{{ agentLabel }}<small v-if="turn.endedAtSecs">{{ timeLabel(turn.endedAtSecs) }}</small></MessageContent>
+                  <MessageContent compact :session-id="session.id" :text="turn.finalMessage" />
                 </article>
               </div>
               <p v-else-if="turn.endReason && turn.endReason !== 'done'" class="noreply">The turn {{ endLabel(turn).label.toLowerCase() }} without a reply.</p>
@@ -242,7 +246,9 @@ onBeforeUnmount(() => { disposed = true; generation++; clearTimeout(timer); resi
 .thread { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .pinned { flex: none; padding: 14px clamp(18px, 3vw, 40px) 0; }
 .pinned > * { max-width: 920px; margin: 0 auto; }
-.conversation { flex: 1; min-height: 0; padding: 18px clamp(18px, 3vw, 40px) 16px; }
+/* Positioned, so anything absolute inside a message (a screen-reader label) scrolls with it
+   instead of hanging below the thread and making the whole page scroll. */
+.conversation { position: relative; flex: 1; min-height: 0; padding: 18px clamp(18px, 3vw, 40px) 16px; }
 .content { max-width: 920px; margin: 0 auto; }
 .empty, .error { font-size: 13px; color: var(--text-muted); line-height: 1.6; }
 .error { color: var(--status-failed); }
@@ -266,7 +272,10 @@ onBeforeUnmount(() => { disposed = true; generation++; clearTimeout(timer); resi
 .end.open { color: var(--status-working); }
 
 /* Sent: on the right, in the accent, as a message you wrote. */
-.sent-row { display: flex; justify-content: flex-end; }
+.sent-row { display: flex; justify-content: flex-end; align-items: flex-start; gap: 12px; }
+.sent-row .avatar { order: 2; margin-top: 0; }
+.user-chip { display: inline-flex; align-items: center; justify-content: center; flex: none; background: color-mix(in srgb, var(--accent) 16%, var(--surface-raised)); color: var(--accent); border: 1px solid var(--accent-line); }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .sent { position: relative; max-width: min(78%, 680px); min-width: 0; padding: 14px 18px 12px; background: color-mix(in srgb, var(--accent) 9%, var(--surface-raised)); border: 1px solid var(--accent-line); border-radius: 16px 16px 4px 16px; }
 .sent :deep(.message-label) { color: var(--text-2); }
 .sent :deep(.message-toolbar) { margin-bottom: 8px; }
