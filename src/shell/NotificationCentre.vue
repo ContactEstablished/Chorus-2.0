@@ -9,6 +9,7 @@ import Icon from '../components/Icon.vue'
 import type { Notification } from '../ipc'
 import { useNotificationsStore } from '../stores/notifications'
 import { useNoticesStore } from '../stores/notices'
+import { useProjectsStore } from '../stores/projects'
 import { useSessionsStore } from '../stores/sessions'
 import { useViewStore } from '../stores/view'
 import { useNow } from './now'
@@ -16,6 +17,7 @@ import { ago } from './status'
 
 const store = useNotificationsStore()
 const sessions = useSessionsStore()
+const projects = useProjectsStore()
 const view = useViewStore()
 const notices = useNoticesStore()
 const now = useNow()
@@ -32,7 +34,7 @@ watch(open, async (isOpen) => {
 })
 
 const badge = computed(() => (store.unread > 99 ? '99+' : String(store.unread)))
-const KIND_LABEL: Record<string, string> = { approval: 'Approval', input: 'Question', failed: 'Failed' }
+const KIND_LABEL: Record<string, string> = { approval: 'Approval', input: 'Question', failed: 'Failed', branch: 'Branch', handoff: 'MausBot' }
 
 async function choose(n: Notification): Promise<void> {
   open.value = false
@@ -41,7 +43,14 @@ async function choose(n: Notification): Promise<void> {
   } catch (e) {
     notices.error('Could not mark the notification read.', e)
   }
-  if (sessions.list.some((s) => s.id === n.sessionId)) view.openSession(n.sessionId)
+  // P18: a project's notice (a branch, the baton) opens the project's page.
+  if (n.sessionId === null) {
+    if (n.projectId !== null && projects.byId.has(n.projectId)) view.openProject(n.projectId)
+    else notices.info('That project has been deleted.')
+    return
+  }
+  const sessionId = n.sessionId
+  if (sessions.list.some((s) => s.id === sessionId)) view.openSession(sessionId)
   else notices.info('That session has been closed.')
 }
 
@@ -105,7 +114,7 @@ onUnmounted(() => {
             <span class="text">
               <span class="title">{{ n.title }}</span>
               <span v-if="n.body" class="body">{{ n.body }}</span>
-              <span class="meta">{{ KIND_LABEL[n.kind] ?? n.kind }} · {{ ago(Math.floor((n.createdAt ?? 0) / 1000), now) }}</span>
+              <span class="meta">{{ KIND_LABEL[n.kind] ?? n.kind }}<template v-if="n.projectId !== null && projects.byId.get(n.projectId)"> · {{ projects.byId.get(n.projectId)?.name }}</template> · {{ ago(Math.floor((n.createdAt ?? 0) / 1000), now) }}</span>
             </span>
           </button>
         </li>

@@ -147,6 +147,134 @@ pub fn rev(dir: &Path, rev: &str) -> Result<Option<String>, String> {
     Ok(r.ok.then(|| r.stdout.trim().to_owned()).filter(|s| !s.is_empty()))
 }
 
+/// P18: the repository's `info/exclude` file for `dir`, or none outside a repository. It is the
+/// common git directory's, so every worktree of the repository shares it.
+pub fn exclude_file(dir: &Path) -> Result<Option<std::path::PathBuf>, String> {
+    let r = run(dir, &["rev-parse", "--git-path", "info/exclude"], QUICK)?;
+    if !r.ok {
+        return if r.stderr.contains("not a git repository") { Ok(None) } else { Err(format!("git: {}", complaint(&r.stderr))) };
+    }
+    let answer = r.stdout.trim();
+    if answer.is_empty() {
+        return Err("git didn't say where its exclude file is.".into());
+    }
+    let path = Path::new(answer);
+    Ok(Some(if path.is_absolute() { path.to_owned() } else { dir.join(path) }))
+}
+
+/// P18: the commits in `from..to`, newest first, as (short sha, subject): the first `limit`, and
+/// how many more there are.
+pub fn log_range(dir: &Path, from: &str, to: &str, limit: usize) -> Result<(Vec<(String, String)>, u32), String> {
+    let range = format!("{from}..{to}");
+    let r = run(dir, &["log", "--format=%h%x00%s", &range, "--"], QUICK)?;
+    if !r.ok {
+        return Err(format!("git log: {}", complaint(&r.stderr)));
+    }
+    let all: Vec<(String, String)> = r
+        .stdout
+        .lines()
+        .filter_map(|l| l.split_once('\0').map(|(sha, subject)| (sha.to_owned(), subject.to_owned())))
+        .collect();
+    let more = all.len().saturating_sub(limit) as u32;
+    Ok((all.into_iter().take(limit).collect(), more))
+}
+
+/// A changed file: its path, and lines added and removed (`None` for a binary file).
+pub type FileStat = (String, Option<u32>, Option<u32>);
+
+/// P18: the files `to` changed since it left `from` (`from...to`).
+pub fn numstat(dir: &Path, from: &str, to: &str) -> Result<Vec<FileStat>, String> {
+    let range = format!("{from}...{to}");
+    let r = run(dir, &["diff", "--numstat", &range, "--"], QUICK)?;
+    if !r.ok {
+        return Err(format!("git diff: {}", complaint(&r.stderr)));
+    }
+    Ok(r
+        .stdout
+        .lines()
+        .filter_map(|l| {
+            let mut parts = l.splitn(3, '\t');
+            let (added, removed, path) = (parts.next()?, parts.next()?, parts.next()?);
+            Some((path.to_owned(), added.parse().ok(), removed.parse().ok()))
+        })
+        .collect())
+}
+
+/// P18: whether commit `a` is in `b`'s history (merged into it).
+pub fn is_ancestor(dir: &Path, a: &str, b: &str) -> Result<bool, String> {
+    let r = run(dir, &["merge-base", "--is-ancestor", a, b], QUICK)?;
+    if r.ok {
+        return Ok(true);
+    }
+    if r.stderr.trim().is_empty() { Ok(false) } else { Err(format!("git merge-base: {}", complaint(&r.stderr))) }
+}
+
+/// P18: how many commits `to` has that `from` doesn't.
+pub fn count_range(dir: &Path, from: &str, to: &str) -> Result<u32, String> {
+    let range = format!("{from}..{to}");
+    let r = run(dir, &["rev-list", "--count", &range, "--"], QUICK)?;
+    if !r.ok {
+        return Err(format!("git rev-list: {}", complaint(&r.stderr)));
+    }
+    r.stdout.trim().parse().map_err(|_| "git's commit count couldn't be read.".to_owned())
+}
+
+/// P18: every local branch, with its last commit's time (Unix seconds) and full commit.
+pub fn branches(dir: &Path) -> Result<Vec<(String, i64, String)>, String> {
+    let r = run(dir, &["for-each-ref", "--format=%(refname:short)%00%(committerdate:unix)%00%(objectname)", "refs/heads"], QUICK)?;
+    if !r.ok {
+        return Err(format!("git for-each-ref: {}", complaint(&r.stderr)));
+    }
+    Ok(r
+        .stdout
+        .lines()
+        .filter_map(|l| {
+            let mut parts = l.split('\0');
+            let (name, at, sha) = (parts.next()?, parts.next()?, parts.next()?);
+            Some((name.to_owned(), at.trim().parse().ok()?, sha.to_owned()))
+        })
+        .collect())
+}
+
+/// P18: the branch origin's HEAD points at (`origin/main`), or none.
+pub fn origin_head(dir: &Path) -> Result<Option<String>, String> {
+    let r = run(dir, &["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"], QUICK)?;
+    Ok(r.ok.then(|| r.stdout.trim().to_owned()).filter(|s| !s.is_empty()))
+}
+
+/// P18: the local branches merged into `base`.
+pub fn merged_into(dir: &Path, base: &str) -> Result<Vec<String>, String> {
+    let r = run(dir, &["branch", "--format=%(refname:short)", "--merged", base], QUICK)?;
+    if !r.ok {
+        return Err(format!("git branch --merged: {}", complaint(&r.stderr)));
+    }
+    Ok(r.stdout.lines().map(str::trim).filter(|l| !l.is_empty()).map(str::to_owned).collect())
+}
+
+/// P18: deletes a branch the user asked to, only if it still points at `expected`: `update-ref`
+/// checks that and deletes in one step, so a commit added in between is never lost. Whether it's
+/// merged, and that nothing has it checked out, are the caller's checks; so is the name.
+pub fn delete_branch_at(dir: &Path, branch: &str, expected: &str) -> Result<(), String> {
+    if branch.starts_with('-') || expected.starts_with('-') {
+        return Err("That isn't a branch.".into());
+    }
+    let r = run(dir, &["update-ref", "-d", &format!("refs/heads/{branch}"), expected], QUICK)?;
+    if !r.ok {
+        return Err(format!("{branch} changed while Chorus was deleting it, so it was left alone ({}).", complaint(&r.stderr)));
+    }
+    // What `git branch -d` also removes: the branch's settings (its upstream). A branch without
+    // any has no section, which is the usual case, so a failure here means nothing.
+    let _ = run(dir, &["config", "--remove-section", &format!("branch.{branch}")], QUICK);
+    Ok(())
+}
+
+/// P18: every path `git status` reports in a worktree: changed, untracked and *ignored* ones
+/// (`.env`, build output), which `git worktree remove` would delete without a word.
+pub fn status_paths(dir: &Path) -> Result<Vec<String>, String> {
+    let r = run(dir, &["status", "--porcelain", "-z", "--ignored=matching", "--untracked-files=normal"], QUICK)?;
+    if r.ok { Ok(chorus_core::branch_hygiene::status_paths(&r.stdout)) } else { Err(format!("git status: {}", complaint(&r.stderr))) }
+}
+
 /// P15: stages every change in the working tree and commits it, with the repository's own hooks
 /// and identity. Returns the new commit, or none when there was nothing to commit.
 pub fn commit_all(dir: &Path, message: &str) -> Result<Option<String>, String> {

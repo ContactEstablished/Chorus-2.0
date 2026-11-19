@@ -11,8 +11,11 @@ use super::Store;
 #[serde(rename_all = "camelCase")]
 pub struct Notification {
     pub id: u32,
-    pub session_id: u32,
-    /// `approval`, `input` or `failed`.
+    /// The session it's about; none for a project's notice (P18: branches and the baton).
+    pub session_id: Option<u32>,
+    /// P18: the project a project's notice is about.
+    pub project_id: Option<u32>,
+    /// `approval`, `input` or `failed`; P18 adds `branch` and `handoff`.
     pub kind: String,
     pub title: String,
     pub body: String,
@@ -21,17 +24,18 @@ pub struct Notification {
     pub read_at: Option<f64>,
 }
 
-const COLUMNS: &str = "id,session_id,kind,title,body,created_at,read_at";
+const COLUMNS: &str = "id,session_id,project_id,kind,title,body,created_at,read_at";
 
 fn from_row(r: &rusqlite::Row) -> rusqlite::Result<Notification> {
     Ok(Notification {
         id: r.get(0)?,
         session_id: r.get(1)?,
-        kind: r.get(2)?,
-        title: r.get(3)?,
-        body: r.get(4)?,
-        created_at: r.get::<_, i64>(5)? as f64,
-        read_at: r.get::<_, Option<i64>>(6)?.map(|t| t as f64),
+        project_id: r.get(2)?,
+        kind: r.get(3)?,
+        title: r.get(4)?,
+        body: r.get(5)?,
+        created_at: r.get::<_, i64>(6)? as f64,
+        read_at: r.get::<_, Option<i64>>(7)?.map(|t| t as f64),
     })
 }
 
@@ -47,6 +51,34 @@ pub fn insert(store: &Store, session: u32, notice: &Notice, now: i64) -> Result<
         }
         c.query_row(&format!("SELECT {COLUMNS} FROM notifications WHERE id=?1"), [c.last_insert_rowid()], from_row)
             .optional()
+    })
+}
+
+/// P18: a project's notice (a branch unused for 30 days, the baton passing). Stored once per
+/// dedupe key, like a session's.
+pub fn insert_for_project(store: &Store, project: u32, notice: &Notice, now: i64) -> Result<Option<Notification>, String> {
+    store.with(|c| {
+        let added = c.execute(
+            "INSERT OR IGNORE INTO notifications(project_id,kind,title,body,created_at,dedupe_key) VALUES(?1,?2,?3,?4,?5,?6)",
+            params![project, notice.kind, notice.title, notice.body, now, notice.dedupe_key],
+        )?;
+        if added == 0 {
+            return Ok(None);
+        }
+        c.query_row(&format!("SELECT {COLUMNS} FROM notifications WHERE id=?1"), [c.last_insert_rowid()], from_row)
+            .optional()
+    })
+}
+
+/// P18: marks read every unread notice whose dedupe key starts with `prefix` (one branch's).
+pub fn mark_read_by_key_prefix(store: &Store, prefix: &str, now: i64) -> Result<(), String> {
+    // A plain prefix comparison: no LIKE, so `_` and `%` in a branch name are only themselves.
+    store.with(|c| {
+        c.execute(
+            "UPDATE notifications SET read_at=?2 WHERE read_at IS NULL AND substr(dedupe_key, 1, length(?1)) = ?1",
+            params![prefix, now],
+        )
+        .map(|_| ())
     })
 }
 
@@ -131,5 +163,23 @@ mod tests {
         insert(&store, 1, &notice(Attention::Approval, 2), 1000).unwrap();
         assert_eq!(prune(&store, 500).unwrap(), 1);
         assert_eq!(list(&store, 10).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_projects_notice_needs_no_session_and_is_marked_read_by_its_key() {
+        let store = store_with_session();
+        store.with(|c| c.execute("INSERT INTO projects(id,name,folder,colour,position,created_at) VALUES(4,'Atlas','D:/p','#336699',0,1)", [])).unwrap();
+        let n = Notice { kind: "branch", title: "old unused for 45 days".into(), body: "Atlas: merged into main.".into(), dedupe_key: "branch:4:old_1:123".into() };
+        let added = insert_for_project(&store, 4, &n, 100).unwrap().unwrap();
+        assert_eq!((added.session_id, added.project_id, added.kind.as_str()), (None, Some(4), "branch"));
+        assert!(insert_for_project(&store, 4, &n, 200).unwrap().is_none(), "once per spell");
+        let other = Notice { dedupe_key: "branch:4:old_10:5".into(), ..n.clone() };
+        insert_for_project(&store, 4, &other, 300).unwrap().unwrap();
+        mark_read_by_key_prefix(&store, "branch:4:old_1:", 400).unwrap();
+        let unread_keys: Vec<Option<f64>> = list(&store, 10).unwrap().iter().map(|x| x.read_at).collect();
+        assert_eq!(unread_keys, [None, Some(400.0)], "old_10 isn't old_1, and _ is only itself");
+        let session = insert(&store, 1, &notice(Attention::Approval, 1), 500).unwrap().unwrap();
+        assert_eq!((session.session_id, session.project_id), (Some(1), None));
+        assert!(store.with(|c| c.execute("INSERT INTO notifications(kind,title,body,created_at,dedupe_key) VALUES('x','t','b',1,'k')", [])).is_err(), "a notice belongs to something");
     }
 }

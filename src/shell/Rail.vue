@@ -12,6 +12,7 @@ import type { IconName } from '../components/icons'
 import { useSessionsStore } from '../stores/sessions'
 import { useProjectsStore } from '../stores/projects'
 import { useViewStore, type ViewName } from '../stores/view'
+import { useHandoffStore } from '../stores/handoff'
 import { useLayoutStore } from '../stores/layout'
 import { counts, needsYou } from './status'
 import { moveTo } from './projectOrder'
@@ -19,6 +20,7 @@ import { moveTo } from './projectOrder'
 const emit = defineEmits<{ newProject: []; editProject: [id: number]; deleteProject: [id: number] }>()
 
 const view = useViewStore()
+const handoff = useHandoffStore()
 const layout = useLayoutStore()
 const sessions = useSessionsStore()
 const projects = useProjectsStore()
@@ -97,7 +99,7 @@ const menuEl = ref<HTMLElement | null>(null)
 const menuProject = computed(() => (menu.value ? projects.byId.get(menu.value.id) ?? null : null))
 const menuIndex = computed(() => shown.value.findIndex((p) => p.id === menu.value?.id))
 const MENU_W = 200
-const MENU_H = 176
+const MENU_H = 208
 async function openMenu(x: number, y: number, id: number): Promise<void> {
   menu.value = {
     id,
@@ -128,6 +130,14 @@ function menuEdit(): void {
   const id = menu.value?.id
   closeMenu()
   if (id !== undefined) emit('editProject', id)
+}
+// P18: opens the project's page with its Hand to MausBot panel.
+function menuHandTo(): void {
+  const id = menu.value?.id
+  closeMenu()
+  if (id === undefined) return
+  view.openProject(id)
+  handoff.openHandTo = id
 }
 function menuDelete(): void {
   const id = menu.value?.id
@@ -262,6 +272,7 @@ function onMenuKey(e: KeyboardEvent): void {
         @contextmenu.prevent
       >
         <button role="menuitem" @click="menuEdit">Edit project…</button>
+        <button role="menuitem" @click="menuHandTo">Hand to MausBot…</button>
         <button role="menuitem" @click="menuHide">{{ menuProject.state === 'active' ? 'Hide from sidebar' : 'Show in sidebar' }}</button>
         <button role="menuitem" :disabled="menuIndex <= 0" @click="menuMove(-1)">Move up</button>
         <button role="menuitem" :disabled="menuIndex < 0 || menuIndex >= shown.length - 1" @click="menuMove(1)">Move down</button>

@@ -16,7 +16,8 @@ and written up in `S<n>.md`; raw evidence stays in `_verify/`, which is never co
 | S9 | DeepSeek Harness (`dsh`) on Windows: interfaces, events, key, sessions, cost (D59, Q21) | Planned for P14 |
 
 Later phases' spikes: [P15.md](P15.md) (unattended permissions, allowances, agent tools on a loopback
-MCP endpoint, Telegram).
+MCP endpoint, Telegram); [P18.md](P18.md) (starting OpenMausBot in a folder, its MCP client, a bot's
+own hand-off entry).
 
 ## Toolchain (verified 2026-10-18)
 

@@ -626,3 +626,22 @@ watched.
 `work_state_write` tool, because that plugin's SessionStart hook tells agents to use it instead of
 the built-in to-do tools. Chorus correctly showed no plan. When a live check needs a plan, name
 Claude Code's `TaskCreate` and `TaskUpdate` tools in the prompt.
+
+**L80 — `git worktree remove` deletes ignored files without a word, and `git branch -d` doesn't
+check the branch you think (git 2.50, 2026-11-18).** Without `--force`, `worktree remove` refuses
+modified and untracked files but deletes ignored ones (`.env`, `target/`): check first with
+`git status --porcelain -z --ignored=matching`. Plain `--ignored` collapses a folder that holds only
+ignored files to `dir/`, so a file Chorus owns there can't be told apart; `matching` lists the paths
+that matched. `git branch -d` checks "merged" against HEAD (or the branch's upstream), not the
+default branch, and deletes whatever the branch points at by then. To delete only the commit a
+person was shown, use `git update-ref -d refs/heads/<branch> <sha>`, which refuses if the branch
+moved, then `git config --remove-section branch.<branch>` for its settings.
+
+**L81 — OpenMausBot 0.1.170: a desktop pairing code with full access comes from Pair a computer,
+not Pair a phone (2026-11-19).** Pair a phone shows only a QR code and an end-to-end encrypted link
+for the phone app, with no code and no choice of access. Settings → Phone & devices → Your other
+computers → Pair a computer shows a 12-character code, a Full access choice and a Copy link
+(`https://<address>/pair#code=<code>`). `POST /api/auth/pair` accepts the code, an `omb_pair_`
+credential, or a link carrying either. Wrong codes from loopback share one bucket: five in five
+minutes lock pairing and cancel every open code, so never retry a pairing automatically. Sessions
+last 30 days, renewed while used, up to 180 days.

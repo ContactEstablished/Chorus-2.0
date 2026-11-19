@@ -158,3 +158,22 @@ export type {
   ToolKind,
   UsualMarker,
 } from './bindings'
+
+// P18: working alongside OpenMausBot.
+export type {
+  ActiveView as HandoffActive,
+  ActivityView as MausActivity,
+  BranchReport,
+  BranchView,
+  Author as HandoffAuthor,
+  Baton,
+  BotView as MausBotChoice,
+  BotsView as MausBots,
+  CommitView as HandoffCommit,
+  EntryView as HandoffEntry,
+  FileView as HandoffFile,
+  HandoffView,
+  IgnoreState,
+  MausStatus,
+  ReturnView as HandoffReturn,
+} from './bindings'

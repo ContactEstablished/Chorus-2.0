@@ -38,6 +38,8 @@ fn pairing_questions_and_replies_without_the_network() {
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let m: Arc<SessionManager> = SessionManager::new(Store::open(&dir.join("chorus.db")).unwrap(), dir.clone(), Box::new(|_| {}));
+    // The relay starts off since P18 (migration 0030, D129): these are its ways when it's on.
+    db::set_enabled(m.store(), true).unwrap();
     // A token in memory only; nothing here sends it anywhere.
     state().token = Some(format!("{}:{}", "123456789", "A".repeat(35)));
     state().pairing = Some(Pairing { code: "123456".into(), expires_ms: now_ms() + 60_000, wrong: 0 });

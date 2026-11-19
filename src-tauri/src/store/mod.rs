@@ -13,6 +13,7 @@ pub mod composer;
 pub mod images;
 pub mod replies;
 pub mod history;
+pub mod handoff;
 pub mod profiles;
 pub mod progress;
 pub mod projects;
@@ -60,6 +61,9 @@ const MIGRATION_FILES: &[(&str, &str)] = &[
     ("0025_turn_usage.sql", include_str!("../../migrations/0025_turn_usage.sql")),
     ("0026_activity_log.sql", include_str!("../../migrations/0026_activity_log.sql")),
     ("0027_step_runs.sql", include_str!("../../migrations/0027_step_runs.sql")),
+    ("0028_p18_handoffs.sql", include_str!("../../migrations/0028_p18_handoffs.sql")),
+    ("0029_p18_project_notices.sql", include_str!("../../migrations/0029_p18_project_notices.sql")),
+    ("0030_p18_telegram_off.sql", include_str!("../../migrations/0030_p18_telegram_off.sql")),
 ];
 
 pub struct Store {
@@ -215,15 +219,62 @@ mod tests {
 
     /// A database as P4 leaves it: every migration up to 10 applied, foreign keys on.
     fn database_at_version_10() -> Connection {
+        database_at_version(10)
+    }
+
+    fn database_at_version(version: u32) -> Connection {
         use chorus_core::migrate::{from_files, pending};
         let conn = Connection::open_in_memory().unwrap();
         conn.pragma_update(None, "foreign_keys", "ON").unwrap();
         let all = from_files(MIGRATION_FILES).unwrap();
-        for m in pending(0, &all).unwrap().into_iter().filter(|m| m.version <= 10) {
+        for m in pending(0, &all).unwrap().into_iter().filter(|m| m.version <= version) {
             conn.execute_batch(m.sql).unwrap();
             conn.pragma_update(None, "user_version", m.version).unwrap();
         }
         conn
+    }
+
+    #[test]
+    fn project_notices_rebuild_the_notifications_and_keep_every_row() {
+        let conn = database_at_version(28);
+        conn.execute_batch(
+            "INSERT INTO sessions (id, name, agent, cwd, state, cols, rows, created_at) VALUES (7, 'Ada', 'shell', '.', 'running', 80, 24, 1);
+             INSERT INTO notifications (id, session_id, kind, title, body, created_at, read_at, dedupe_key)
+             VALUES (12, 7, 'approval', 'Ada needs an approval', 'Edit a.rs', 100, 200, '7:approval:1');",
+        )
+        .unwrap();
+        let store = Store::init(conn).unwrap();
+        type NoticeRow = (u32, Option<u32>, Option<u32>, String, i64, Option<i64>, String);
+        let (row, violations): (NoticeRow, Vec<String>) = store
+            .with(|c| {
+                let row = c.query_row(
+                    "SELECT id, session_id, project_id, title, created_at, read_at, dedupe_key FROM notifications",
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?)),
+                )?;
+                let violations = c.prepare("PRAGMA foreign_key_check")?.query_map([], |r| r.get::<_, String>(0))?.collect::<rusqlite::Result<_>>()?;
+                Ok((row, violations))
+            })
+            .unwrap();
+        assert_eq!(row, (12, Some(7), None, "Ada needs an approval".into(), 100, Some(200), "7:approval:1".into()));
+        assert!(violations.is_empty(), "{violations:?}");
+        assert!(store.with(|c| c.execute("INSERT INTO branch_snoozes (project_id, branch, until_at) VALUES (99, 'x', 1)", [])).is_err(), "snoozes belong to a project");
+        assert!(store.with(|c| c.execute("INSERT INTO branch_flags (project_id, branch, spell) VALUES (99, 'x', 'k')", [])).is_err(), "so do flags");
+    }
+
+    #[test]
+    fn the_telegram_relay_is_switched_off_and_keeps_its_setup() {
+        let conn = database_at_version(29);
+        conn.execute_batch("UPDATE relay_config SET enabled = 1, bot_name = 'chorus_bot', poll_offset = 42;").unwrap();
+        let store = Store::init(conn).unwrap();
+        let (enabled, bot, offset, version): (bool, Option<String>, i64, u32) = store
+            .with(|c| {
+                let version = c.pragma_query_value(None, "user_version", |r| r.get(0))?;
+                c.query_row("SELECT enabled, bot_name, poll_offset FROM relay_config", [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, version)))
+            })
+            .unwrap();
+        assert_eq!((enabled, bot.as_deref(), offset), (false, Some("chorus_bot"), 42), "off, with its bot and place kept");
+        assert!(version >= 30);
     }
 
     #[test]

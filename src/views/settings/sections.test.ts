@@ -18,10 +18,12 @@ describe('the Settings sections', () => {
       { key: 'narrator', label: 'Narrator', icon: 'agents' },
       // Phone came from p15/loop and sits where it did there: after Narrator, before Keys and lock.
       { key: 'phone', label: 'Phone', icon: 'bell' },
+      // P18: MausBot sits beside Phone, the other way in from a phone.
+      { key: 'mausbot', label: 'MausBot', icon: 'agents' },
       { key: 'keys', label: 'Keys and lock', icon: 'key' },
       { key: 'agents', label: 'Agents', icon: 'agents' },
     ])
-    expect(SECTIONS).toHaveLength(8)
+    expect(SECTIONS).toHaveLength(9)
   })
 
   it('uses icons that are drawn', () => {
@@ -47,6 +49,7 @@ describe('SettingsView.vue', () => {
       ['ProvidersPanel', 'providers'],
       ['NarratorSettings', 'narrator'],
       ['PhoneSettings', 'phone'],
+      ['MausBotSettings', 'mausbot'],
       ['KeysPanel', 'keys'],
     ] as const)
       expect(settingsView).toMatch(new RegExp(`<${component} v-(else-)?if="view\\.settingsSection === '${key}'" />`))

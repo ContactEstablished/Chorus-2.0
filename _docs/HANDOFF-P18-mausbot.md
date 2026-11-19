@@ -1,7 +1,10 @@
 # Plan: P18 — Working alongside OpenMausBot
 
-Status: **next, not started** (2026-11-18). Decisions D128–D132. Kick off with the phase-kickoff
-skill, which turns the slices below into `_docs/P18/` task and spec files.
+Status: **first pass built** on `feature/mausbot-handoff`, 2026-11-18: 18.0–18.3 and 18.5, each
+seen in the isolated `p18` instance. On 2026-11-19 Chorus was paired with full access (D134) and a
+whole hand-off ran live: Chorus started the "Chorus test" bot in its `maus/…` worktree, the bot
+committed, wrote its own entry and handed back. 18.4 (MCP) is deferred (D132). The task and spec files
+are in [P18/](P18/Phase-18-Overview.md). Decisions D128–D134.
 
 ## 1. Goal
 
@@ -104,10 +107,10 @@ block holds the facts Chorus acts on:
 
 ```markdown
 ---
-project: EventNation
+project: Atlas
 baton: mausbot            # chorus | mausbot | nobody
 branch: maus/2026-11-18-checkout-fix
-worktree: C:\Projects\EventNation.worktrees\maus-2026-11-18-checkout-fix
+worktree: D:\work\.chorus2tlas\maus-2026-11-18-checkout-fix
 base: main @ 1a2b3c4
 updated: 2026-11-18T14:05:00Z
 ---
@@ -155,7 +158,7 @@ and mirrors them into the note.
 3. Write the hand-off entry, then point MausBot at the worktree. Spike S1 decides how: the API's
    `create_task` with a folder if it takes one, otherwise `send` to a chosen bot with the folder in
    the message.
-4. Show a notice: "EventNation is with MausBot on `maus/2026-11-18-checkout-fix`."
+4. Show a notice: "Atlas is with MausBot on `maus/2026-11-18-checkout-fix`."
 
 While MausBot has the baton:
 - Chorus's own sessions keep working in the main checkout. The worktree keeps the two apart, so

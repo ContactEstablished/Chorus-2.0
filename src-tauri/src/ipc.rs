@@ -10,6 +10,7 @@ use tauri_specta::{Builder, collect_commands, collect_events};
 
 use crate::{agents, app, attention, export, fleet, fleet_registry, lock, narrator, prefs, projects, providers, routing, sessions, splash, vault};
 use crate::{automations, bots, documents, instructions, notes, relay, run_loop};
+use crate::handoff;
 
 /// Where the generated bindings live, relative to this crate.
 #[cfg_attr(not(debug_assertions), allow(dead_code, reason = "debug builds and tests regenerate the bindings"))]
@@ -157,6 +158,22 @@ pub fn builder() -> Builder<tauri::Wry> {
             relay::relay_test,
             relay::relay_set_digest,
             relay::relay_set_full_text,
+            // p18: the hand-off note, the baton and branch hygiene.
+            handoff::handoff_view,
+            handoff::handoff_refresh,
+            handoff::handoff_open_note,
+            handoff::mausbot_status,
+            handoff::mausbot_pair,
+            handoff::mausbot_forget,
+            handoff::mausbot_bots,
+            handoff::handoff_start,
+            handoff::handoff_take_back,
+            handoff::handoff_dismiss,
+            handoff::handoff_continue_text,
+            handoff::branch_report,
+            handoff::branch_keep,
+            handoff::branch_delete,
+            handoff::branch_check_now,
         ])
         .events(collect_events![
             app::BackendPulse,
@@ -170,6 +187,8 @@ pub fn builder() -> Builder<tauri::Wry> {
             prefs::PrefsChanged,
             // p15
             run_loop::LoopUpdated,
+            // p18
+            handoff::HandoffChanged,
         ])
 }
 

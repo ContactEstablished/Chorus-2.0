@@ -1,7 +1,8 @@
 <script setup lang="ts">
 /**
- * Settings → Phone (P15 slice 4): the Telegram bot that carries the loop's questions, stops and
+ * Settings → Phone (P15 slice 4): the Telegram bot that can carry the loop's questions, stops and
  * milestones. The token goes in once and is never shown back; pairing is a code sent from the phone.
+ * Switched off since P18 (D129): the phone route is OpenMausBot, and the switch stays here.
  */
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { commands, unwrap, type RelayView } from '../../ipc'
@@ -97,9 +98,9 @@ const minutesLeft = computed(() => {
   <section class="phone-settings">
     <h2>Phone</h2>
     <p>
-      A Telegram bot of your own carries the loop's questions to your phone, with buttons to answer, and tells you when a run stops, reaches a
-      milestone or finishes. It also tells you when a session needs you, and takes prompts for sessions. Chorus reads the bot by long polling:
-      nothing listens on a port.
+      A Telegram bot of your own can carry the loop's questions to your phone, with buttons to answer, and tell you when a run stops, reaches a
+      milestone or finishes. It can also tell you when a session needs you, and take prompts for sessions. Chorus reads the bot by long polling:
+      nothing listens on a port. Your phone route is OpenMausBot now (Settings → MausBot).
     </p>
     <p class="muted">
       Bot chats aren't end-to-end encrypted. Loop messages carry question text, options and short titles, never code, diffs, files or paths, and a
@@ -137,6 +138,7 @@ const minutesLeft = computed(() => {
         <input type="checkbox" :checked="relay.enabled" :disabled="busy" @change="toggle" />
         Relay on
       </label>
+      <p v-if="!relay.enabled" class="muted">Off, so Chorus doesn't read Telegram. Switch it on to use Telegram again.</p>
 
       <template v-if="relay.hasToken">
         <h3>Paired phones</h3>

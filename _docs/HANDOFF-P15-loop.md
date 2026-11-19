@@ -6,6 +6,10 @@ review-file rules this plan relies on. Label `p15`, Vite port 1437, review file
 (2026-10-24). It stays local and untracked in the main checkout's `_docs/Automation Loop/`
 (decision 10), so this plan never quotes it at length. This plan says how Chorus builds it.
 
+> **Since 2026-11-18 (D129, D132):** the loop's remote channel becomes OpenMausBot. The Telegram
+> relay described below is built but switched off, and P15's remaining slices design the bridge to
+> MausBot (sending to the phone and hearing the answer, through MausBot's local API).
+
 ## 1. Goal
 
 The loop runs a multi-phase roadmap phase after phase without Matthew, and stops only at planned

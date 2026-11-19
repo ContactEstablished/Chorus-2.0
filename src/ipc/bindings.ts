@@ -241,6 +241,42 @@ export const commands = {
 	relaySetDigest: (at: string | null) => typedError<RelayView, string>(__TAURI_INVOKE("relay_set_digest", { at })),
 	/**  Whether a project's sessions send the phone full text, or status only (D101). */
 	relaySetFullText: (projectId: number, full: boolean) => typedError<RelayView, string>(__TAURI_INVOKE("relay_set_full_text", { projectId, full })),
+	/**  The project's note, as the card shows it. */
+	handoffView: (projectId: number) => typedError<HandoffView, string>(__TAURI_INVOKE("handoff_view", { projectId })),
+	/**  Rewrites the note's "latest work" entry now, from the project's session that worked last. */
+	handoffRefresh: (projectId: number) => typedError<HandoffView, string>(__TAURI_INVOKE("handoff_refresh", { projectId })),
+	/**  Opens the note in its default app. */
+	handoffOpenNote: (projectId: number) => typedError<null, string>(__TAURI_INVOKE("handoff_open_note", { projectId })),
+	/**  18-2: Chorus's pairing with MausBot, for Settings → MausBot. */
+	mausbotStatus: () => typedError<MausStatus, string>(__TAURI_INVOKE("mausbot_status")),
+	/**
+	 *  Pairs with a code or link from MausBot (or takes an `omb_sess_` token). The key never comes
+	 *  back.
+	 */
+	mausbotPair: (input: string) => typedError<MausStatus, string>(__TAURI_INVOKE("mausbot_pair", { input })),
+	mausbotForget: () => typedError<MausStatus, string>(__TAURI_INVOKE("mausbot_forget")),
+	/**  MausBot's bots, for the Hand to MausBot picker. */
+	mausbotBots: (projectId: number) => typedError<BotsView, string>(__TAURI_INVOKE("mausbot_bots", { projectId })),
+	/**  Hands the project to MausBot on its own branch. */
+	handoffStart: (projectId: number, botId: string | null, task: string) => typedError<HandoffView, string>(__TAURI_INVOKE("handoff_start", { projectId, botId, task })),
+	/**  Takes the project back from MausBot, whatever its note says. */
+	handoffTakeBack: (projectId: number) => typedError<HandoffView, string>(__TAURI_INVOKE("handoff_take_back", { projectId })),
+	/**  Puts the return card away. */
+	handoffDismiss: (projectId: number) => typedError<HandoffView, string>(__TAURI_INVOKE("handoff_dismiss", { projectId })),
+	/**  What Continue from here puts in a session's composer (the front end adds it; nothing is sent). */
+	handoffContinueText: (projectId: number) => typedError<string, string>(__TAURI_INVOKE("handoff_continue_text", { projectId })),
+	/**  18-3: the project's Branches card. */
+	branchReport: (projectId: number) => typedError<BranchReport, string>(__TAURI_INVOKE("branch_report", { projectId })),
+	/**  Keep: the branch isn't flagged again for 30 days. */
+	branchKeep: (projectId: number, branch: string) => typedError<BranchReport, string>(__TAURI_INVOKE("branch_keep", { projectId, branch })),
+	/**
+	 *  Deletes a branch (and its worktree, when nothing there would be lost), if it's still at `tip`,
+	 *  the commit the card showed; with no `tip`, only a merged branch. An unmerged one needs
+	 *  `confirmed`.
+	 */
+	branchDelete: (projectId: number, branch: string, tip: string | null, confirmed: boolean) => typedError<BranchReport, string>(__TAURI_INVOKE("branch_delete", { projectId, branch, tip, confirmed })),
+	/**  Runs the project's part of the sweep now: a notice for each stale branch not yet flagged. */
+	branchCheckNow: (projectId: number) => typedError<BranchReport, string>(__TAURI_INVOKE("branch_check_now", { projectId })),
 };
 
 /** Events */
@@ -250,6 +286,7 @@ export const events = {
 	fleetClick: makeEvent<FleetClick>("fleet-click"),
 	fleetRosterChanged: makeEvent<FleetRosterChanged>("fleet-roster-changed"),
 	fleetShown: makeEvent<FleetShown>("fleet-shown"),
+	handoffChanged: makeEvent<HandoffChanged>("handoff-changed"),
 	loopUpdated: makeEvent<LoopUpdated>("loop-updated"),
 	notificationAdded: makeEvent<NotificationAdded>("notification-added"),
 	prefsChanged: makeEvent<PrefsChanged>("prefs-changed"),
@@ -278,6 +315,23 @@ export type ActionRequest = {
 
 export type ActionResult = { kind: "prompt"; receipt: Delivered } | { kind: "reply"; receipt: ReplyReceipt };
 
+/**  An active hand-off, as the banner shows it. */
+export type ActiveView = {
+	id: number,
+	branch: string,
+	worktree: string,
+	base: string,
+	task: string,
+	botName: string | null,
+	startedAtMs: number | null,
+	startedByChorus: boolean,
+	startProblem: string | null,
+	/**  The message to paste, when Chorus didn't send it. */
+	message: string | null,
+	noteProblem: string | null,
+	activity: ActivityView | null,
+};
+
 export type Activity = 
 /**  No event yet, or the agent has no event channel (Grok, a shell). */
 "unknown" | 
@@ -291,6 +345,14 @@ export type Activity =
 "ready" | 
 /**  The turn ended in an error. */
 "failed";
+
+/**  What MausBot says about the hand-off's conversation. */
+export type ActivityView = {
+	found: boolean,
+	busy: boolean,
+	updatedAtMs: number | null,
+	problem: string | null,
+};
 
 /**
  *  What Chorus can say about a session's address: exactly three states. A collision is a cause
@@ -378,6 +440,9 @@ export type AttentionNavigate = {
 	sessionId: number | null,
 };
 
+/**  Who wrote an entry, from its heading. */
+export type Author = "chorus" | "mausbot" | "other";
+
 export type Automation = {
 	id: number,
 	name: string,
@@ -435,6 +500,9 @@ export type BackendPulse = {
 	uptimeSecs: number,
 };
 
+/**  Who is working on the project now. */
+export type Baton = "chorus" | "mausbot" | "nobody";
+
 export type Bot = {
 	id: number,
 	name: string,
@@ -470,6 +538,52 @@ export type BotSave = {
 	tags: string[],
 	skills: string[],
 	preset: Preset | null,
+};
+
+/**  One bot, for the Hand to MausBot picker. */
+export type BotView = {
+	id: string,
+	name: string,
+	title: string | null,
+	busy: boolean,
+	folderMatches: boolean,
+};
+
+export type BotsView = {
+	running: boolean,
+	problem: string | null,
+	bots: BotView[],
+	defaultId: string | null,
+	paired: boolean,
+	canChooseFolder: boolean,
+};
+
+export type BranchReport = {
+	problem: string | null,
+	/**  The branch the others are compared with. */
+	base: string | null,
+	/**  Stale branches (oldest first), then MausBot's branches. */
+	branches: BranchView[],
+};
+
+/**  One branch on the project's Branches card. */
+export type BranchView = {
+	name: string,
+	/**  Its commit when Chorus looked. Delete acts only while it's still there. */
+	tip: string,
+	lastCommitMs: number | null,
+	days: number,
+	merged: boolean,
+	/**  Commits the default branch doesn't have; none when git couldn't count them. */
+	ahead: number | null,
+	/**  Unused for 30 days and not kept. */
+	stale: boolean,
+	snoozedUntilMs: number | null,
+	/**  The worktree it's checked out in, if any. */
+	worktree: string | null,
+	maus: boolean,
+	/**  Its name looked like a secret and is hidden, so the card can't act on it. */
+	redacted: boolean,
 };
 
 /**  A candidate's blended price at the profile's token mix, in USD per million tokens. */
@@ -605,6 +719,11 @@ export type CloseReport = {
 	spared: number,
 	/**  What happened to the session's worktree, when it had one and its removal was asked for. */
 	worktreeNote: string | null,
+};
+
+export type CommitView = {
+	sha: string,
+	subject: string,
 };
 
 export type ComposerImage = {
@@ -758,6 +877,18 @@ export type EffortChoice = {
 	args: string,
 };
 
+/**  One entry, scrubbed, for the project card. */
+export type EntryView = {
+	heading: string,
+	author: Author,
+	latestWork: boolean,
+	done: string | null,
+	state: string | null,
+	open: string | null,
+	next: string | null,
+	other: string[],
+};
+
 export type ExportResult = {
 	path: string,
 	turns: number,
@@ -777,6 +908,12 @@ export type Failure = {
 export type FileLeak = {
 	path: string,
 	longest: number,
+};
+
+export type FileView = {
+	path: string,
+	added: number | null,
+	removed: number | null,
 };
 
 /**  Dev or release, as the front end sees it. */
@@ -858,6 +995,34 @@ export type GitFolder = {
 
 export type GroupBy = "status" | "project" | "none";
 
+/**  A project's note changed (or couldn't be written): its card reads the view again. */
+export type HandoffChanged = {
+	projectId: number,
+};
+
+/**  A project's hand-off, as its card shows it. */
+export type HandoffView = {
+	projectId: number,
+	hasFolder: boolean,
+	/**  The note's full path, for a tooltip only. */
+	notePath: string | null,
+	exists: boolean,
+	problem: string | null,
+	ignored: IgnoreState | null,
+	baton: Baton,
+	updated: string | null,
+	entries: EntryView[],
+	/**  18-2: the project is with MausBot. */
+	active: ActiveView | null,
+	/**  18-2: MausBot handed it back, and the card hasn't been put away. */
+	returned: ReturnView | null,
+};
+
+/**  Whether git ignores the note in this folder. */
+export type IgnoreState = "ignored" | 
+/**  In a repository whose exclude file doesn't list the note yet (before the first write). */
+"not-ignored" | "not-a-repo";
+
 /**  How each agent takes instructions, for Settings → Agents (D19: an unsupported one says why). */
 export type InstructionSupport = {
 	agent: AgentKind,
@@ -936,6 +1101,22 @@ export type LoopRole = "planner" | "plan-griller" | "builder" | "mechanic" | "re
 /**  A run changed: the Loop screen reads it again. */
 export type LoopUpdated = {
 	runId: number,
+};
+
+/**  What Settings → MausBot shows. */
+export type MausStatus = {
+	running: boolean,
+	version: string | null,
+	problem: string | null,
+	paired: boolean,
+	scopes: string[],
+	/**
+	 *  Whether the token may pin a conversation to a folder (the admin scope): without it, each
+	 *  hand-off starts by hand.
+	 */
+	canChooseFolder: boolean,
+	expiresAtMs: number | null,
+	tokenProblem: string | null,
 };
 
 export type Narration = {
@@ -1073,8 +1254,11 @@ export type NoteSave = {
 
 export type Notification = {
 	id: number,
-	sessionId: number,
-	/**  `approval`, `input` or `failed`. */
+	/**  The session it's about; none for a project's notice (P18: branches and the baton). */
+	sessionId: number | null,
+	/**  P18: the project a project's notice is about. */
+	projectId: number | null,
+	/**  `approval`, `input` or `failed`; P18 adds `branch` and `handoff`. */
 	kind: string,
 	title: string,
 	body: string,
@@ -1592,6 +1776,26 @@ export type ResumeKind =
 "discovered" | 
 /**  The conversation lives in a server Chorus runs for the session. */
 "server";
+
+/**  The newest return, as its card shows it. */
+export type ReturnView = {
+	id: number,
+	branch: string,
+	worktree: string,
+	worktreeExists: boolean,
+	base: string,
+	returnedBy: string,
+	returnedAtMs: number | null,
+	entries: EntryView[],
+	fromGit: boolean,
+	commits: CommitView[],
+	moreCommits: number,
+	files: FileView[],
+	moreFiles: number,
+	ahead: number,
+	merged: boolean,
+	problem: string | null,
+};
 
 export type Risk = 
 /**  A task a fallback model may take over when the default's allowance runs out. */
