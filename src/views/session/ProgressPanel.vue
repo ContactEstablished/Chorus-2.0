@@ -169,7 +169,7 @@ h2 { margin: 0; font-family: var(--font-heading); font-size: 18px; font-weight: 
 .segments { display: flex; gap: 4px; padding: 0 20px 12px; }
 .segments.thin { gap: 1px; }
 .seg { flex: 1; height: 8px; border-radius: 4px; background: var(--border-strong); }
-.seg.completed { background: var(--status-ready); }
+.seg.completed { background: var(--progress-fill); }
 .seg.in-progress { background: var(--accent); }
 
 .steps { list-style: none; margin: 0; padding: 6px 12px 10px; border-top: 1px solid var(--border); max-height: min(28vh, 360px); }

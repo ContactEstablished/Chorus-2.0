@@ -25,8 +25,10 @@
   --status-needs: #ffc400;
   --status-approval: #ffc400;
   --status-input: #ffc400;
-  --status-working: #4d7cff;
+  --status-working: #39ff6e;
   --status-ready: #00e676;
+  /* Progress-bar fill: a deliberately dull green so it never reads as the bright "working" chip. */
+  --progress-fill: #1b4a31;
   --status-failed: #ff3d5a;
   --status-done: #3a4a60;
   /* Running with no event channel: neutral, never "working" (ARCHITECTURE §6). */
@@ -89,8 +91,9 @@
   --status-needs: #e9b85b;
   --status-approval: #f09a86;
   --status-input: #e9b85b;
-  --status-working: #5ccfdc;
+  --status-working: #3fd870;
   --status-ready: #86d4a4;
+  --progress-fill: #3f7358;
   --status-failed: #ef7a7a;
   --status-done: #a3aabb;
   --status-running: #6f7789;
