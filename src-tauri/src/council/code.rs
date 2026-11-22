@@ -43,9 +43,11 @@ impl Code {
             if rel.is_empty() || files::blocked(&rel).is_some() || exclude.iter().any(|e| e.eq_ignore_ascii_case(&rel)) {
                 continue;
             }
-            // Listed by git but deleted in the working tree: not readable.
-            let Ok(meta) = std::fs::metadata(root.join(&rel)) else { continue };
-            if meta.is_file() {
+            // Listed by git but deleted in the working tree: not readable. A symlink is never
+            // readable: git lists it, and following it could reach a file outside the project
+            // or a blocked one under an innocent name (found by the first council, run 1).
+            let Ok(meta) = std::fs::symlink_metadata(root.join(&rel)) else { continue };
+            if meta.is_file() && !meta.file_type().is_symlink() {
                 allowed.push((rel, meta.len()));
             }
             if allowed.len() > MAX_FILES {
@@ -75,7 +77,16 @@ impl Code {
         if size > files::MAX_FILE_BYTES {
             return Err(format!("`{rel}` is {}, over the {} a council reads.", tools::bytes(size), tools::bytes(files::MAX_FILE_BYTES)));
         }
-        let bytes = std::fs::read(self.root.join(rel)).map_err(|_| format!("`{rel}` couldn't be read."))?;
+        // A folder on the way may be a link or junction: read only what really resolves inside.
+        let path = self.root.join(rel);
+        let inside = std::fs::canonicalize(&path)
+            .ok()
+            .zip(std::fs::canonicalize(&self.root).ok())
+            .is_some_and(|(p, root)| p.starts_with(root));
+        if !inside {
+            return Err(format!("`{rel}` resolves outside the project's folder, so it isn't readable."));
+        }
+        let bytes = std::fs::read(&path).map_err(|_| format!("`{rel}` couldn't be read."))?;
         if files::looks_binary(&bytes) {
             return Err(format!("`{rel}` is a binary file."));
         }
@@ -172,6 +183,23 @@ mod tests {
         assert!(!missing.ok);
         let search = code.run(&tools::Call::Search { query: "token".into(), dir: String::new(), case_sensitive: false });
         assert!(search.ok && search.text.starts_with("src/main.rs:2:") && !search.text.contains("SECRET"), "{}", search.text);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_symlink_never_leads_out_of_the_project() {
+        let dir = fixture();
+        let outside = std::env::temp_dir().join(format!("chorus-council-outside-{}.txt", crate::store::now_ms()));
+        std::fs::write(&outside, "outside the project").unwrap();
+        // Creating a symlink needs Developer Mode or elevation on Windows; without it there is
+        // nothing to test.
+        if std::os::windows::fs::symlink_file(&outside, dir.join("src/link.txt")).is_ok() {
+            let code = Code::load(&dir, &[], vec![], vec![]).unwrap();
+            assert!(!code.allowed.iter().any(|(p, _)| p == "src/link.txt"));
+            let read = code.run(&tools::Call::ReadFile { path: "src/link.txt".into(), start: 1, end: None });
+            assert!(!read.ok && !read.text.contains("outside the project"));
+        }
+        let _ = std::fs::remove_file(outside);
         let _ = std::fs::remove_dir_all(dir);
     }
 }

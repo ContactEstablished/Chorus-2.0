@@ -112,8 +112,9 @@ pub fn arbitration(state: &State, disagreement: &[QuestionDisagreement], mandate
          ## The members' critiques of each other\n\n{}\n\n\
          ## What the orchestrator MEASURED (not an opinion — a count of their verdict tokens)\n\n{}\n\n---\n\n\
          Rule on each question in turn, with your reasoning.\n\n\
-         Begin your answer with a section headed exactly \"## Verdict\", containing one line per question and nothing else, \
-         in this form:\n\nQ1: APPROVED\nQ2: APPROVED-WITH-REVISIONS\nQ3: REVISE\nQ4: REJECTED\nQ5: INSUFFICIENT-INFORMATION\n\n\
+         Begin your answer with a section headed exactly \"## Verdict\", containing one line for each of the brief's {n} \
+         question{plural} and nothing else, in this form:\n\n{form}\n\n\
+         where each RULING is exactly one of APPROVED, APPROVED-WITH-REVISIONS, REVISE, REJECTED or INSUFFICIENT-INFORMATION. \
          Use APPROVED if the proposal in the question should proceed as written; APPROVED-WITH-REVISIONS if it should \
          proceed once specific changes you name are made; REVISE if the proposal is not yet sound enough to act on; REJECTED \
          if it should not proceed; and INSUFFICIENT-INFORMATION if the council was not given enough to rule on it. Use one \
@@ -123,6 +124,11 @@ pub fn arbitration(state: &State, disagreement: &[QuestionDisagreement], mandate
         attributed(state, Phase::Positions, " — position"),
         attributed(state, Phase::Critique, " — critique"),
         vector(disagreement, &label_for),
+        // Exactly the brief's questions: a fixed five-line example made an arbiter rule on a Q4
+        // and Q5 a three-question brief didn't have (run 1).
+        n = disagreement.len(),
+        plural = if disagreement.len() == 1 { "" } else { "s" },
+        form = (1..=disagreement.len()).map(|i| format!("Q{i}: RULING")).collect::<Vec<_>>().join("\n"),
     )
 }
 

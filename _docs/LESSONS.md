@@ -661,3 +661,25 @@ with `POST /api/bots/<id>/tasks` without `cwd` pins the bot's default folder at 
 read as another config. Chorus passes it straight before `--settings`. Without
 `--strict-mcp-config`, the user's own MCP servers still load beside it, and a `permissions.allow`
 rule in the `--settings` file (`mcp__chorus__maus_send`) lets the tool run without asking.
+
+**L84 — specta refuses two exported types with the same Rust name, whatever serde renames them to
+(P10, 2026-11-21).** `bindings_are_current` panicked with "Detected multiple types with the same name"
+for Council's `Role`, `Outcome`, `Limits`, `RunView` and `Detection` against existing types. A
+container `#[serde(rename = "…")]` does not help (the check uses the Rust identifier) and
+`#[specta(rename)]` is rejected on containers in rc.25. Give a new IPC type a name no other module
+exports; check with `grep "^export type <Name> = " src/ipc/bindings.ts` before adding it.
+
+**L85 — OpenRouter's per-response `usage.cost` matches the run key's analytics (P10, 2026-11-21).**
+Council run 1 (eight turns, 583k tokens in, four models) summed `usage.cost` from each
+non-streaming response to $0.048824; the run's capped key, read from analytics after revoking it, said
+$0.048804. Chorus 1's council read the key's usage *before* revoking and reported about 60 % of the
+bill (L16). Both figures are kept and shown apart; the analytics one can still grow for a few minutes.
+
+**L86 — Council members with code access check claims, and found real bugs in their own tools
+(P10, 2026-11-21).** On a brief with a planted false claim about the path rules, all three members
+(DeepSeek v4.1 flash, Qwen 3.7 flash, GLM 5.3 flash) rejected it, citing `files.rs:5-6` and the test at
+`files.rs:76`. Unprompted, they also found that a git-tracked symlink could lead outside the project,
+that `.envrc` and `.env-local` passed the `.env` block, and that one huge line beat the 64 KB read
+cap. All fixed the same day. The arbiter (Claude Haiku 5.5) ruled on a Q4 and Q5 the brief didn't have
+because the prompt's example verdict block listed five questions; the block now lists exactly the
+brief's. DeepSeek used 26 tool calls on one turn where Qwen used 3: the per-turn limits matter.

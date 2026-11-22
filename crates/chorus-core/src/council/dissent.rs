@@ -78,7 +78,9 @@ pub fn critique_sections(content: &str) -> Vec<String> {
             current = Some(if body.is_empty() { vec![] } else { vec![body.to_owned()] });
             continue;
         }
-        if labelled(&line, &["AGREE", "CHANGED", "POSITION", "SUMMARY"]).is_some() {
+        // A heading (`## Position B`) or another label ends the section: an objection must not
+        // absorb what follows it.
+        if line.trim_start().starts_with('#') || labelled(&line, &["AGREE", "CHANGED", "POSITION", "SUMMARY"]).is_some() {
             close(&mut current, &mut sections);
             continue;
         }
@@ -227,7 +229,7 @@ mod tests {
     #[test]
     fn critique_sections_end_at_other_labels() {
         let c = "AGREE: the shape\n**DISAGREE:** the cache is unbounded\nand grows forever\nAGREE: the rest\nMISSED: None\n\
-                 OBJECTION:\nno test for CRLF\nCHANGED: no\nDISAGREEMENT is a word";
+                 OBJECTION:\nno test for CRLF\n## Position B\nmore text\nCHANGED: no\nDISAGREEMENT is a word";
         assert_eq!(critique_sections(c), vec!["the cache is unbounded and grows forever", "no test for CRLF"]);
     }
 

@@ -187,6 +187,8 @@ mod tests {
         let arb = asks(&next_action(&s));
         assert_eq!((arb[0].0, arb[0].1), (4, Phase::Arbitration));
         assert!(arb[0].2.contains("### Alpha — position") && arb[0].2.contains("Q1: MEMBERS DISAGREE — Alpha=AGREE, Beta=DISAGREE, Gamma=AGREE"));
+        assert!(arb[0].2.contains("each of the brief's 2 questions") && arb[0].2.contains("Q1: RULING\nQ2: RULING\n\n"));
+        assert!(!arb[0].2.contains("Q3: RULING"), "only the brief's own questions are asked for");
         s.transcript.push(turn(Some(4), Phase::Arbitration, "## Verdict\nQ1: REVISE\nQ2: APPROVED", TurnOutcome::Answered));
         let syn = asks(&next_action(&s));
         assert!(syn[0].2.contains("- [Structural — Q1]"));

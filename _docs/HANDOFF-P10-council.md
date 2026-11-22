@@ -64,9 +64,11 @@ repository the allowed set is `git ls-files --cached --others --exclude-standard
 start; outside git, a walk that skips `.git`, `node_modules`, `target`, `dist`, `build`, `bin`, `obj`
 and other build output. Then always blocked: `.env*`, key and certificate files (`*.pem`, `*.key`,
 `*.pfx`, `*.p12`, `id_rsa*`, `id_ed25519*`…), `.npmrc`, `.netrc`, `.pypirc`, `credentials*`,
-`secrets*`, anything under `.git/`, and the run's own findings file. Binary and files over 2 MB are
-refused by reason. Paths are relative, `..`, absolute and drive paths refused (pure check in
-`chorus-core::council::files`).
+`secrets*`, anything under `.git/`, and the run's own findings file. Every `.env…` and `….env` name is
+blocked except `.env.example`, `.sample`, `.template` and `.dist`. Symlinks are never readable, and a
+read whose real path resolves outside the project is refused. Binary and files over 2 MB are
+refused by reason; a line over 4,000 characters is cut with a note. Paths are relative, `..`, absolute
+and drive paths refused (pure check in `chorus-core::council::files`).
 
 **Scrubbing.** Every tool result passes the scrubber (vault values and known shapes) before a model
 sees it, and is stored scrubbed.
@@ -113,6 +115,13 @@ are about to rely on."*
    settle, start-up heal.
 4. **The Council screen**: Docket, new run, live progress, transcript, verdict strip, findings.
 5. **Seen working**: a real run on this repository with three members and an arbiter.
+
+Slices 1–4 built 2026-11-21 on `feature/council`. Slice 5: run 1 (dev build, project Chorus 2.0,
+DeepSeek v4.1 flash, Qwen 3.7 flash and GLM 5.3 flash, Claude Haiku 5.5 as arbiter, $2 cap) completed
+in 4 minutes for $0.049; every member rejected the brief's planted false claim by reading the code,
+and the findings file was written beside the brief. Its findings about the code tools were fixed the
+same day (LESSONS L86). Not yet seen in the app: choosing a brief through the native file dialog
+(the commands behind it were driven directly), and Settings → Council used by hand.
 
 ## 6. Out of scope
 

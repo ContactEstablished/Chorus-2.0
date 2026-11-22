@@ -30,13 +30,19 @@ pub fn blocked(rel: &str) -> Option<&'static str> {
         return Some("Git's own folder is not readable.");
     }
     let name = parts.last().copied().unwrap_or("");
+    // Every `.env…` name (`.envrc`, `.env-local`, `.env~` too) and every `….env`, except the
+    // templates; a name allowlist, not a pattern of known bad names (the first council's finding).
     let env_ok = [".env.example", ".env.sample", ".env.template", ".env.dist"];
-    if (name == ".env" || name.starts_with(".env.")) && !env_ok.contains(&name) {
+    if (name.starts_with(".env") || name.ends_with(".env")) && !env_ok.contains(&name) {
         return Some("Environment files can hold secrets, so they are never readable.");
     }
-    const NAMES: [&str; 9] =
-        [".npmrc", ".netrc", "_netrc", ".pypirc", ".git-credentials", ".dockercfg", ".htpasswd", ".pgpass", "secrets.json"];
-    if NAMES.contains(&name) || name.starts_with("credentials") || name.starts_with("secrets.") || name == ".secrets" {
+    const NAMES: [&str; 8] = [".npmrc", ".netrc", "_netrc", ".pypirc", ".git-credentials", ".dockercfg", ".htpasswd", ".pgpass"];
+    if NAMES.contains(&name)
+        || name.starts_with("credentials")
+        || name.starts_with("secrets.")
+        || name.starts_with("secret.")
+        || name == ".secrets"
+    {
         return Some("Credential files are never readable.");
     }
     if ["id_rsa", "id_dsa", "id_ecdsa", "id_ed25519"].iter().any(|k| name.starts_with(k)) {
@@ -86,10 +92,13 @@ mod tests {
 
     #[test]
     fn secrets_are_blocked_whatever_their_folder() {
-        for p in [".env", "app/.env.local", "x/.git/config", "certs/server.PEM", "deploy/id_ed25519.pub", ".npmrc", "infra/prod.tfvars", "config/credentials.json", "secrets.yaml"] {
+        for p in [
+            ".env", "app/.env.local", ".envrc", ".env~", ".env-local", ".env_backup", "config/prod.env", "x/.git/config", "certs/server.PEM",
+            "deploy/id_ed25519.pub", ".npmrc", "infra/prod.tfvars", "config/credentials.json", "secrets.yaml", "secret.json",
+        ] {
             assert!(blocked(p).is_some(), "{p}");
         }
-        for p in [".env.example", "src/environment.ts", "docs/keys.md", "src/secretsManager.ts", "README.md", "src/keyboard.rs"] {
+        for p in [".env.example", "src/environment.ts", "docs/keys.md", "src/secretsManager.ts", "README.md", "src/keyboard.rs", "src/env.rs"] {
             assert!(blocked(p).is_none(), "{p}");
         }
     }

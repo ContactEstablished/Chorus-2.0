@@ -10,8 +10,10 @@ use super::files;
 
 /// Most rows `list_files` returns.
 pub const MAX_LIST_ROWS: usize = 500;
-/// Most bytes one `read_file` returns.
+/// Most bytes of lines one `read_file` returns (its header and continue note come on top).
 pub const MAX_READ_BYTES: usize = 64_000;
+/// Longest line `read_file` shows whole; longer ones (minified code) are cut with a note.
+const MAX_LINE_CHARS: usize = 4_000;
 /// Most matching lines one `search_code` returns, and the longest line shown.
 pub const MAX_SEARCH_HITS: usize = 200;
 const MAX_HIT_CHARS: usize = 240;
@@ -194,7 +196,14 @@ pub fn number_lines(path: &str, text: &str, start: usize, end: Option<usize>) ->
     let mut out = String::new();
     let mut shown_to = start - 1;
     for (i, line) in lines.iter().enumerate().take(last).skip(start - 1) {
-        let row = format!("{:>width$}  {line}\n", i + 1);
+        // A minified line can be megabytes: cut it, so one row can't blow the read limit.
+        let chars = line.chars().count();
+        let row = if chars > MAX_LINE_CHARS {
+            let head: String = line.chars().take(MAX_LINE_CHARS).collect();
+            format!("{:>width$}  {head} … [line cut: {} more characters]\n", i + 1, chars - MAX_LINE_CHARS)
+        } else {
+            format!("{:>width$}  {line}\n", i + 1)
+        };
         if out.len() + row.len() > MAX_READ_BYTES && shown_to >= start {
             break;
         }
@@ -351,6 +360,10 @@ mod tests {
         let long = big.repeat(200);
         let out = number_lines("big", &long, 1, None).unwrap();
         assert!(out.len() < MAX_READ_BYTES + 200 && out.contains("start_line="));
+        // One huge line, last in the file: cut, never returned whole.
+        let minified = format!("short\n{}", "y".repeat(500_000));
+        let out = number_lines("min.js", &minified, 1, None).unwrap();
+        assert!(out.len() < 5_000 && out.contains("[line cut: 496000 more characters]"), "{}", out.len());
     }
 
     #[test]

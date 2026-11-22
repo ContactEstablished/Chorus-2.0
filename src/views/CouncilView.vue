@@ -5,7 +5,7 @@
  * each participant's turns with the code they read, the members' agreement per question beside the
  * arbiter's ruling, the findings, and what it cost from both sources.
  */
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import {
   commands,
   events,
@@ -73,7 +73,7 @@ async function loadRun(): Promise<void> {
 let unlisten: (() => void) | null = null
 let timer: ReturnType<typeof setInterval> | null = null
 onMounted(async () => {
-  if (!projects.list.length) await projects.load()
+  await projects.load()
   const preferred = view.projectFilter ?? choices.value.find((p) => p.folder)?.id ?? choices.value[0]?.id ?? null
   projectId.value = preferred
   unlisten = await events.councilUpdated.listen((e) => {
@@ -103,6 +103,22 @@ function open(id: number): void {
   choosing.value = false
   error.value = ''
   void loadRun()
+}
+
+/** Opens the running council, switching to its project first if it's another one. */
+async function showRunning(): Promise<void> {
+  const id = docket.value?.running
+  if (id === null || id === undefined) return
+  try {
+    const r = await unwrap(commands.councilRun(id))
+    if (r.projectId !== projectId.value) {
+      projectId.value = r.projectId
+      await nextTick()
+    }
+    open(id)
+  } catch (e) {
+    error.value = String(e)
+  }
 }
 
 function back(): void {
@@ -314,6 +330,10 @@ function outcomeLabel(t: CouncilTurnView): string {
       {{ docket.reason }}
       <button type="button" class="link" @click="view.openSettings('council')">Settings → Council</button>
     </p>
+    <p v-if="docket && docket.running !== null && run?.id !== docket.running" class="hint">
+      A council is running, so a new one waits until it finishes.
+      <button type="button" class="link" @click="showRunning">Show it</button>
+    </p>
 
     <!-- New council -->
     <div v-if="choosing" class="panel">
@@ -498,6 +518,9 @@ function outcomeLabel(t: CouncilTurnView): string {
   display: flex;
   gap: 10px;
   align-items: flex-end;
+}
+.head-controls button {
+  white-space: nowrap;
 }
 .project {
   display: grid;
@@ -725,7 +748,7 @@ button.link {
 .turn-head {
   width: 100%;
   display: grid;
-  grid-template-columns: 140px 1fr auto;
+  grid-template-columns: 140px 1fr;
   gap: 4px 12px;
   text-align: left;
   border: none;
@@ -737,8 +760,13 @@ button.link {
   grid-column: 1 / -1;
 }
 .outcome {
+  grid-column: 1 / -1;
   font-size: 12px;
   color: var(--text-2);
+  word-break: break-all;
+}
+.turns li.live .outcome {
+  color: var(--status-working);
 }
 .turn-body {
   padding: 0 12px 12px;
