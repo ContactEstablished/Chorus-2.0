@@ -9,6 +9,7 @@ pub mod activity;
 pub mod narrator;
 pub mod actions;
 pub mod composer;
+pub mod council;
 pub mod replies;
 pub mod agent;
 pub mod attention;

@@ -285,12 +285,30 @@ export const commands = {
 	branchDelete: (projectId: number, branch: string, tip: string | null, confirmed: boolean) => typedError<BranchReport, string>(__TAURI_INVOKE("branch_delete", { projectId, branch, tip, confirmed })),
 	/**  Runs the project's part of the sweep now: a notice for each stale branch not yet flagged. */
 	branchCheckNow: (projectId: number) => typedError<BranchReport, string>(__TAURI_INVOKE("branch_check_now", { projectId })),
+	councilSettings: () => typedError<CouncilSettings, string>(__TAURI_INVOKE("council_settings")),
+	councilConfigure: (config: CouncilConfig) => typedError<CouncilSettings, string>(__TAURI_INVOKE("council_configure", { config })),
+	councilMemberSave: (input: MemberInput) => typedError<CouncilSettings, string>(__TAURI_INVOKE("council_member_save", { input })),
+	councilMemberDelete: (id: number) => typedError<CouncilSettings, string>(__TAURI_INVOKE("council_member_delete", { id })),
+	/**  Picks a brief (`.md`), starting in the project's folder. */
+	councilBriefPick: (start: string | null) => __TAURI_INVOKE<string | null>("council_brief_pick", { start }),
+	/**  Reads a chosen brief and says what the council would be asked, before anything is spent. */
+	councilBriefCheck: (path: string) => typedError<BriefCheck, string>(__TAURI_INVOKE("council_brief_check", { path })),
+	councilStart: (projectId: number, briefPath: string) => typedError<number, string>(__TAURI_INVOKE("council_start", { projectId, briefPath })),
+	councilCancel: (runId: number) => typedError<null, string>(__TAURI_INVOKE("council_cancel", { runId })),
+	councilDocket: (projectId: number) => typedError<DocketView, string>(__TAURI_INVOKE("council_docket", { projectId })),
+	councilRun: (runId: number) => typedError<CouncilRunView, string>(__TAURI_INVOKE("council_run", { runId })),
+	councilTurn: (turnId: number) => typedError<TurnDetail, string>(__TAURI_INVOKE("council_turn", { turnId })),
+	/**  Removes a run from the Docket. The findings file beside the brief is left alone. */
+	councilRunDelete: (runId: number) => typedError<null, string>(__TAURI_INVOKE("council_run_delete", { runId })),
+	/**  Opens the run's findings file in the default app. */
+	councilFindingsOpen: (runId: number) => typedError<null, string>(__TAURI_INVOKE("council_findings_open", { runId })),
 };
 
 /** Events */
 export const events = {
 	attentionNavigate: makeEvent<AttentionNavigate>("attention-navigate"),
 	backendPulse: makeEvent<BackendPulse>("backend-pulse"),
+	councilUpdated: makeEvent<CouncilUpdated>("council-updated"),
 	fleetClick: makeEvent<FleetClick>("fleet-click"),
 	fleetRosterChanged: makeEvent<FleetRosterChanged>("fleet-roster-changed"),
 	fleetShown: makeEvent<FleetShown>("fleet-shown"),
@@ -600,6 +618,15 @@ export type BranchView = {
 	redacted: boolean,
 };
 
+export type BriefCheck = {
+	path: string,
+	questions: string[],
+	/**  Why it can't be run, or none. */
+	problem: string | null,
+	/**  Where the findings will be written. */
+	findingsPath: string,
+};
+
 /**  A candidate's blended price at the profile's token mix, in USD per million tokens. */
 export type CandidateCost = {
 	blended: number | null,
@@ -781,6 +808,76 @@ export type Condition =
 /**  A task stopped and nothing else in the phase can run. */
 "task-stopped";
 
+/**
+ *  What a run cost, from two sources that are never merged: the per-response `usage.cost`
+ *  OpenRouter reports (summed), and the run key's spend from analytics after it was revoked.
+ */
+export type Cost = {
+	reportedUsd: number | null,
+	turnsReporting: number,
+	turns: number,
+	keyUsd: number | null,
+	keyNote: string | null,
+	capUsd: number | null,
+	tokensIn: number | null,
+	tokensOut: number | null,
+};
+
+export type CouncilConfig = {
+	/**  The OpenRouter provider whose management key caps each run's spend. */
+	providerId: number | null,
+	limits: CouncilLimits,
+};
+
+/**  How much one participant turn may read (Settings → Council; D137's defaults). */
+export type CouncilLimits = {
+	maxCalls: number,
+	maxBytes: number,
+	/**  Stop calling tools once the conversation reaches this share of the model's context. */
+	contextShare: number | null,
+	/**  The run key's spend cap. */
+	capUsd: number | null,
+};
+
+export type CouncilRole = "member" | "arbiter";
+
+export type CouncilRunView = {
+	id: number,
+	projectId: number,
+	briefName: string,
+	briefPath: string,
+	status: RunStatus,
+	reason: string | null,
+	phase: Phase,
+	roster: RosterEntry[],
+	limits: CouncilLimits,
+	questions: string[],
+	turns: TurnView[],
+	summary: QuestionSummary[],
+	verdicts: VerdictRow[],
+	arbiterAsked: boolean,
+	findingsPath: string | null,
+	findingsText: string | null,
+	findingsProblem: string | null,
+	cost: Cost,
+	startedAt: number | null,
+	endedAt: number | null,
+};
+
+export type CouncilSettings = {
+	config: CouncilConfig,
+	defaultLimits: CouncilLimits,
+	providers: ProviderChoice[],
+	members: MemberView[],
+	/**  Why a council can't run, or none when it can. */
+	reason: string | null,
+};
+
+/**  A run changed: the Council screen reads it again. */
+export type CouncilUpdated = {
+	runId: number,
+};
+
 export type CreateSession = {
 	agent: AgentKind,
 	cwd: string,
@@ -847,6 +944,12 @@ export type Detection = {
 	problem: string | null,
 };
 
+/**
+ *  How a question's disagreement was established. Carried into the output: a counted
+ *  disagreement and a model's impression of one are different facts.
+ */
+export type DetectionPath = "structural" | "model-judged";
+
 export type Diff = {
 	additions: number,
 	deletions: number,
@@ -856,6 +959,32 @@ export type Diff = {
 export type Direction = "shorter" | "longer";
 
 export type DocKind = "plan" | "spec" | "report" | "review" | "decision";
+
+export type DocketRow = {
+	id: number,
+	briefName: string,
+	briefPath: string,
+	status: RunStatus,
+	reason: string | null,
+	startedAt: number | null,
+	endedAt: number | null,
+	turns: number,
+	toolCalls: number,
+	cost: Cost,
+	/**  "2 approved · 1 revise · 3 of 3 ruled · members split on 1", or none. */
+	digest: string | null,
+	hasFindings: boolean,
+};
+
+export type DocketView = {
+	projectId: number,
+	projectName: string,
+	folder: string | null,
+	/**  Why a council can't run in this project now (its folder, or the settings), or none. */
+	reason: string | null,
+	running: number | null,
+	runs: DocketRow[],
+};
 
 export type Document = {
 	id: number,
@@ -1136,6 +1265,36 @@ export type MausStatus = {
 /**  Settings → MausBot reads the view again (a message was logged, or a switch moved). */
 export type MausUpdatesChanged = {
 	away: boolean,
+};
+
+export type MemberInput = {
+	id: number | null,
+	label: string,
+	model: string,
+	role: CouncilRole,
+	maxTokens: number | null,
+};
+
+export type MemberRow = {
+	id: number,
+	label: string,
+	model: string,
+	role: CouncilRole,
+	maxTokens: number | null,
+};
+
+export type MemberVerdict = "AGREE" | "DISAGREE" | "QUALIFY";
+
+export type MemberView = {
+	member: MemberRow,
+	/**
+	 *  What the run will ask for: the member's own, or the role's default, held to the model's
+	 *  own output limit.
+	 */
+	effectiveMaxTokens: number,
+	contextLength: number | null,
+	/**  Why this member can't take part as things stand. */
+	problem: string | null,
 };
 
 export type Narration = {
@@ -1420,6 +1579,9 @@ export type PermissionChoice = {
 	args: string,
 };
 
+/**  The four phases, and `Done`. Each phase is asked once. */
+export type Phase = "positions" | "critique" | "arbitration" | "synthesis" | "done";
+
 /**  A phase as `roadmap.md` lists it. */
 export type PhaseEntry = {
 	number: number,
@@ -1569,6 +1731,13 @@ export type ProjectState = "active" |
 
 export type PromptSource = "composer" | "automation" | "telegram";
 
+export type ProviderChoice = {
+	id: number,
+	name: string,
+	/**  Why it can't be the Council's provider. */
+	problem: string | null,
+};
+
 /**  The `"deny"` literal OpenRouter's `provider.data_collection` takes. */
 export type ProviderDataCollection = "deny";
 
@@ -1632,6 +1801,22 @@ export type Question = {
 export type QuestionOption = {
 	label: string,
 	description: string,
+};
+
+/**
+ *  A question's outcome in one word. It says whether the members converged, never whether they
+ *  were right. A unanimous DISAGREE is `Disagreed`, not a green light.
+ */
+export type QuestionState = "agreed" | "qualified" | "split" | "disagreed" | "not-measured";
+
+export type QuestionSummary = {
+	index: number,
+	/**  Clipped to 200 characters: the strip is a glance, not a re-read. */
+	question: string,
+	detection: DetectionPath,
+	state: QuestionState,
+	votes: Vote[],
+	silent: string[],
 };
 
 /**  A question a step asked, as the Loop screen shows it. */
@@ -1832,6 +2017,17 @@ export type RoleSetting = {
 	fallback: number | null,
 };
 
+/**  A participant as the run recorded it. */
+export type RosterEntry = {
+	id: number,
+	label: string,
+	model: string,
+	role: CouncilRole,
+	maxTokens: number,
+	/**  The model's context length from the catalog, when known. */
+	contextLength: number | null,
+};
+
 /**  One open Chorus session in the roster. */
 export type RosterRow = {
 	sessionId: number,
@@ -1892,6 +2088,8 @@ export type RoutingSettingsView = {
 
 export type RowKind = "step" | "skill";
 
+export type Ruling = "APPROVED" | "APPROVED-WITH-REVISIONS" | "REVISE" | "REJECTED" | "INSUFFICIENT-INFORMATION";
+
 /**  A run's settings, which only Matthew edits, in Chorus. */
 export type RunConfig = {
 	roles: RoleSetting[],
@@ -1938,6 +2136,8 @@ export type RunState =
 "waiting" | "stopped" | 
 /**  Every phase in the roadmap passed. */
 "done";
+
+export type RunStatus = "running" | "complete" | "failed" | "cancelled" | "abandoned";
 
 export type RunView = {
 	id: number,
@@ -2426,6 +2626,13 @@ export type TokenUsage = {
 	costUsd: number | null,
 };
 
+export type ToolCallRow = {
+	call: string,
+	ok: boolean,
+	bytes: number,
+	note: string | null,
+};
+
 export type ToolEntry = {
 	tool: string,
 	target: string | null,
@@ -2450,6 +2657,11 @@ export type ToolKind = "read" | "edit" | "run" | "search" | "web" | "agent" | "o
 
 export type Trigger = "schedule" | "manual";
 
+export type TurnDetail = {
+	prompt: string,
+	toolCalls: ToolCallRow[],
+};
+
 /**  A turn as the session's history shows it. */
 export type TurnEntry = {
 	id: number,
@@ -2462,6 +2674,36 @@ export type TurnEntry = {
 	tools: ToolEntry[],
 	asks: AskEntry[],
 	progress: ProgressEntry[],
+};
+
+/**
+ *  How a turn ended. A refusal is a result, not an absence: it is stored like any other turn so a
+ *  partial council reads as partial. A cancelled turn is neither an answer nor the model's refusal.
+ */
+export type TurnOutcome = "answered" | "refused" | "cancelled";
+
+export type TurnRow = {
+	id: number,
+	memberId: number,
+	phase: Phase,
+	/**  None while in flight. */
+	outcome: TurnOutcome | null,
+	content: string | null,
+	tokensIn: number | null,
+	tokensOut: number | null,
+	costUsd: number | null,
+	toolCalls: number,
+	toolBytes: number,
+	startedAt: number | null,
+	endedAt: number | null,
+};
+
+export type TurnView = {
+	turn: TurnRow,
+	label: string,
+	model: string,
+	/**  While in flight: the last tool call it made. */
+	doing: string | null,
 };
 
 /**  What an endpoint that declares no quantization needs to be admitted (MR-D7). */
@@ -2520,10 +2762,23 @@ export type UsualMarker = {
 	runs: number,
 };
 
+/**  The arbiter's rulings next to the members' consensus, one row per question. */
+export type VerdictRow = {
+	index: number,
+	question: string,
+	consensus: QuestionState | null,
+	ruling: Ruling | null,
+};
+
 /**  How a found version relates to the one Chorus checked. */
 export type VersionFit = "verified" | "newer" | "older" | 
 /**  The CLI ran but printed no version Chorus could read. */
 "unreadable";
+
+export type Vote = {
+	label: string,
+	verdict: MemberVerdict,
+};
 
 /**  Where a new session works. */
 export type Workspace = 

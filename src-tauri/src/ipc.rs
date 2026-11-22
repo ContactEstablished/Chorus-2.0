@@ -8,7 +8,7 @@ use specta_typescript::Typescript;
 use std::path::Path;
 use tauri_specta::{Builder, collect_commands, collect_events};
 
-use crate::{agents, app, attention, export, fleet, fleet_registry, lock, narrator, prefs, projects, providers, routing, sessions, splash, vault};
+use crate::{agents, app, attention, council, export, fleet, fleet_registry, lock, narrator, prefs, projects, providers, routing, sessions, splash, vault};
 use crate::{automations, bots, documents, instructions, notes, relay, run_loop};
 use crate::handoff;
 
@@ -178,6 +178,20 @@ pub fn builder() -> Builder<tauri::Wry> {
             handoff::branch_keep,
             handoff::branch_delete,
             handoff::branch_check_now,
+            // p10: Council
+            council::council_settings,
+            council::council_configure,
+            council::council_member_save,
+            council::council_member_delete,
+            council::council_brief_pick,
+            council::council_brief_check,
+            council::council_start,
+            council::council_cancel,
+            council::council_docket,
+            council::council_run,
+            council::council_turn,
+            council::council_run_delete,
+            council::council_findings_open,
         ])
         .events(collect_events![
             app::BackendPulse,
@@ -194,6 +208,8 @@ pub fn builder() -> Builder<tauri::Wry> {
             // p18
             handoff::HandoffChanged,
             handoff::updates::MausUpdatesChanged,
+            // p10
+            council::CouncilUpdated,
         ])
 }
 

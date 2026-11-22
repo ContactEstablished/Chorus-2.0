@@ -3,6 +3,7 @@
 mod agents;
 mod app;
 mod attention;
+mod council;
 mod events;
 mod export;
 mod fleet;
@@ -128,6 +129,12 @@ pub fn run() {
             run_loop::prepare(&manager, Box::new(move |run_id| {
                 let _ = run_loop::LoopUpdated { run_id }.emit(&loop_handle);
             }));
+            // P10: a council Chorus was running when it stopped is marked abandoned.
+            council::prepare(manager.store())?;
+            let council_handle = app.handle().clone();
+            app.manage(Arc::new(council::Council::new(Box::new(move |run_id| {
+                let _ = council::CouncilUpdated { run_id }.emit(&council_handle);
+            }))));
             let relaunch = manager.reopen()?;
             // Revoke OpenRouter keys an earlier Chorus minted and couldn't revoke. Only keys from
             // before this start are touched, so it can run beside the relaunches, which mint new ones.

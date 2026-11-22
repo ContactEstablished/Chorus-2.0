@@ -2,9 +2,9 @@ import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 
 /** The rail's destinations, plus one session's own view. */
-export type ViewName = 'overview' | 'sessions' | 'session' | 'grid' | 'bots' | 'automations' | 'loop' | 'documents' | 'notes' | 'settings'
+export type ViewName = 'overview' | 'sessions' | 'session' | 'grid' | 'bots' | 'automations' | 'loop' | 'council' | 'documents' | 'notes' | 'settings'
 
-export type SettingsSection = 'appearance' | 'projects' | 'providers' | 'routing' | 'keys' | 'agents' | 'narrator' | 'phone' | 'mausbot'
+export type SettingsSection = 'appearance' | 'projects' | 'providers' | 'routing' | 'keys' | 'agents' | 'narrator' | 'council' | 'phone' | 'mausbot'
 
 interface Place {
   name: ViewName

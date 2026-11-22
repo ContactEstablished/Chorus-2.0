@@ -5,6 +5,7 @@ export const PATHS = {
   bots: 'M5 9h14v10H5zM12 5v4M9 13.5v1M15 13.5v1M2.5 13v3M21.5 13v3',
   automations: 'M12 3.5a8.5 8.5 0 1 0 0 17a8.5 8.5 0 1 0 0-17M12 7.5V12l3 2',
   loop: 'M19.5 12a7.5 7.5 0 1 1-2.2-5.3M19.5 4v4h-4M9 12l2 2l4-4',
+  council: 'M12 4v16M7 20h10M4.5 7.5h15M7 7.5l-3 6.5a3 3 0 0 0 6 0zM17 7.5l-3 6.5a3 3 0 0 0 6 0z',
   documents: 'M6 3h8l4 4v14H6zM14 3v4h4M9 12h6M9 16h6',
   notes: 'M5 4h14v11l-5 5H5zM14 20v-5h5M8.5 9h7M8.5 12.5h4',
   settings:
