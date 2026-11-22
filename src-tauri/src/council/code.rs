@@ -155,8 +155,9 @@ fn walk(root: &Path) -> Result<Vec<String>, String> {
 mod tests {
     use super::*;
 
-    fn fixture() -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("chorus-council-code-{}-{}", std::process::id(), crate::store::now_ms()));
+    /// `name` keeps tests that run in the same millisecond out of each other's folders.
+    fn fixture(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("chorus-council-{name}-{}-{}", std::process::id(), crate::store::now_ms()));
         std::fs::create_dir_all(dir.join("src")).unwrap();
         std::fs::create_dir_all(dir.join("node_modules/x")).unwrap();
         std::fs::write(dir.join("src/main.rs"), "fn main() {\n    let token = \"SECRET-VALUE-123\";\n}\n").unwrap();
@@ -169,7 +170,7 @@ mod tests {
 
     #[test]
     fn a_plain_folder_is_walked_and_secrets_never_reach_a_model() {
-        let dir = fixture();
+        let dir = fixture("walk");
         let code = Code::load(&dir, &["brief-Findings.md".into()], vec![b"SECRET-VALUE-123".to_vec()], vec![]).unwrap();
         let listed: Vec<&str> = code.allowed.iter().map(|(p, _)| p.as_str()).collect();
         assert_eq!(listed, vec!["logo.bin", "src/main.rs"]);
@@ -188,7 +189,7 @@ mod tests {
 
     #[test]
     fn a_symlink_never_leads_out_of_the_project() {
-        let dir = fixture();
+        let dir = fixture("symlink");
         let outside = std::env::temp_dir().join(format!("chorus-council-outside-{}.txt", crate::store::now_ms()));
         std::fs::write(&outside, "outside the project").unwrap();
         // Creating a symlink needs Developer Mode or elevation on Windows; without it there is
