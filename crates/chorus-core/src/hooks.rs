@@ -19,6 +19,12 @@ pub fn hook_url(port: u16, session_id: u32) -> String {
 /// Claude Code's settings file (passed with `--settings <file>`, LESSONS L1): an HTTP hook per
 /// event, with the token in a header filled from the child's environment (`allowedEnvVars`).
 pub fn claude_settings(url: &str) -> String {
+    claude_settings_allowing(url, &[])
+}
+
+/// [`claude_settings`], with `allow` added to its permission rules: Chorus's own tools run
+/// without asking (D135).
+pub fn claude_settings_allowing(url: &str, allow: &[&str]) -> String {
     let hook = json!([{
         "hooks": [{
             "type": "http",
@@ -35,7 +41,23 @@ pub fn claude_settings(url: &str) -> String {
         }
         ((*e).to_owned(), entry)
     }).collect();
-    json!({ "hooks": hooks }).to_string()
+    let mut settings = json!({ "hooks": hooks });
+    if !allow.is_empty() {
+        settings["permissions"] = json!({ "allow": allow });
+    }
+    settings.to_string()
+}
+
+/// Chorus's MCP server for one interactive session (D135): its tools at
+/// `/mcp/session/<id>` on the listener, with the session's hook token in a header that Claude
+/// Code fills from its environment (the form spike S3 checked for loop steps).
+pub fn session_mcp_config(port: u16, session_id: u32) -> String {
+    json!({"mcpServers": {"chorus": {
+        "type": "http",
+        "url": format!("http://127.0.0.1:{port}/mcp/session/{session_id}"),
+        "headers": {"Authorization": format!("Bearer ${{{TOKEN_VAR}}}")},
+    }}})
+    .to_string()
 }
 
 /// A TOML basic string.
@@ -84,6 +106,19 @@ mod tests {
         assert_eq!(stop["headers"]["Authorization"], "Bearer $CHORUS_HOOK_TOKEN");
         assert_eq!(stop["allowedEnvVars"][0], "CHORUS_HOOK_TOKEN");
         assert_eq!(s["hooks"].as_object().unwrap().len(), CLAUDE_HOOK_EVENTS.len());
+    }
+
+    #[test]
+    fn chorus_tools_can_be_allowed_and_the_session_server_takes_the_token_from_the_environment() {
+        let plain: Value = serde_json::from_str(&claude_settings("u")).unwrap();
+        assert!(plain.get("permissions").is_none());
+        let s: Value = serde_json::from_str(&claude_settings_allowing("u", &["mcp__chorus__maus_send"])).unwrap();
+        assert_eq!(s["permissions"]["allow"][0], "mcp__chorus__maus_send");
+        let m: Value = serde_json::from_str(&session_mcp_config(4100, 7)).unwrap();
+        let server = &m["mcpServers"]["chorus"];
+        assert_eq!(server["url"], "http://127.0.0.1:4100/mcp/session/7");
+        assert_eq!(server["headers"]["Authorization"], "Bearer ${CHORUS_HOOK_TOKEN}");
+        assert!(!m.to_string().contains("omb_"), "no key, only the variable's name");
     }
 
     #[test]

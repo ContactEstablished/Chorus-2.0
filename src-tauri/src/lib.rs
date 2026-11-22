@@ -96,11 +96,13 @@ pub fn run() {
                     relay::sessions::observe(&session);
                     // P18: the hand-off note's own subscription (it only queues).
                     handoff::observe(&session);
+                    // D135: automatic notices to MausBot (it only queues).
+                    handoff::updates::observe(&session);
                 }),
             );
             attention.bind(&manager);
             app.manage(attention);
-            if let Err(e) = tray::install(app.handle(), fleet::wanted(&manager)) {
+            if let Err(e) = tray::install(app.handle(), fleet::wanted(&manager), handoff::updates::is_away(&manager)) {
                 eprintln!("tray: {e}");
             }
             // The strip and the tray mustn't keep Chorus running: closing the main window quits,

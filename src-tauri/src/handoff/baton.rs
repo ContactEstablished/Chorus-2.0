@@ -100,7 +100,7 @@ fn start_mausbot(m: &SessionManager, scrubber: &Scrubber, id: u32, bot_id: Optio
         (Ok(Some(t)), Some(_)) => t,
     };
     let bot = bot_id.unwrap_or_default();
-    let thread = match client::create_conversation(&token, bot, worktree, title) {
+    let thread = match client::create_conversation(&token, bot, Some(worktree), title) {
         Ok(thread) => thread,
         Err(Failure::Timeout) => {
             return (None, Some("MausBot didn't answer in time, so it may have made the conversation anyway. Check MausBot before you start one yourself.".into()))

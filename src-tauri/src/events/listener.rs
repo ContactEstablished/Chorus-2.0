@@ -25,6 +25,8 @@ pub fn start(manager: Arc<SessionManager>) -> Result<u16, String> {
         .route("/hook/{session}", post(hook))
         // P15: Chorus's tools for a loop step's agent, over MCP's streamable HTTP.
         .route("/mcp/{step}", any(mcp))
+        // D135: Chorus's tools for an interactive session's agent (maus_send).
+        .route("/mcp/session/{session}", any(session_mcp))
         .layer(DefaultBodyLimit::max(MAX_HOOK_BODY))
         .with_state(manager);
     tauri::async_runtime::spawn(async move {
@@ -57,6 +59,22 @@ async fn mcp(State(m): State<Arc<SessionManager>>, Path(step): Path<u32>, method
         Ok((true, Ok(Some(json)))) => ([(axum::http::header::CONTENT_TYPE, "application/json")], json).into_response(),
         Ok((true, Ok(None))) => StatusCode::ACCEPTED.into_response(),
         Ok((true, Err(Refused::Bad(e)))) => (StatusCode::BAD_REQUEST, e).into_response(),
+        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    }
+}
+
+/// The same transport as `mcp`, for a session's tools, authorised by the session's hook token.
+async fn session_mcp(State(m): State<Arc<SessionManager>>, Path(session): Path<u32>, method: Method, headers: HeaderMap, body: Bytes) -> Response {
+    let token = bearer(&headers);
+    let body = String::from_utf8_lossy(&body).into_owned();
+    let post = method == Method::POST;
+    let served = tauri::async_runtime::spawn_blocking(move || crate::handoff::updates::serve(&m, session, &token, if post { &body } else { "[]" })).await;
+    match served {
+        Ok(Err(())) => StatusCode::UNAUTHORIZED.into_response(),
+        Ok(Ok(_)) if !post => (StatusCode::METHOD_NOT_ALLOWED, [(axum::http::header::ALLOW, "POST")]).into_response(),
+        Ok(Ok(Ok(Some(json)))) => ([(axum::http::header::CONTENT_TYPE, "application/json")], json).into_response(),
+        Ok(Ok(Ok(None))) => StatusCode::ACCEPTED.into_response(),
+        Ok(Ok(Err(e))) => (StatusCode::BAD_REQUEST, e).into_response(),
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     }
 }

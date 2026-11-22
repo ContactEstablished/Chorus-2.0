@@ -177,3 +177,6 @@ export type {
   MausStatus,
   ReturnView as HandoffReturn,
 } from './bindings'
+
+// D135: Chorus's messages to Matthew through MausBot.
+export type { BotChoice as MausUpdateBot, UpdateRow as MausUpdateRow, UpdatesChange as MausUpdatesChange, UpdatesView as MausUpdatesView } from './bindings'

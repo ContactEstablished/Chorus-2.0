@@ -166,6 +166,10 @@ pub fn builder() -> Builder<tauri::Wry> {
             handoff::mausbot_pair,
             handoff::mausbot_forget,
             handoff::mausbot_bots,
+            handoff::mausbot_updates_view,
+            handoff::mausbot_updates_change,
+            handoff::mausbot_updates_test,
+            handoff::mausbot_away,
             handoff::handoff_start,
             handoff::handoff_take_back,
             handoff::handoff_dismiss,
@@ -189,6 +193,7 @@ pub fn builder() -> Builder<tauri::Wry> {
             run_loop::LoopUpdated,
             // p18
             handoff::HandoffChanged,
+            handoff::updates::MausUpdatesChanged,
         ])
 }
 

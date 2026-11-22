@@ -159,7 +159,7 @@ impl ToolResult {
 
 const PROTOCOL: &str = "2025-06-18";
 
-fn answer(msg: &Value, call: &mut impl FnMut(&str, &Value) -> ToolResult) -> Option<Value> {
+fn answer(msg: &Value, tools: &Value, call: &mut impl FnMut(&str, &Value) -> ToolResult) -> Option<Value> {
     let id = msg.get("id")?.clone();
     let method = msg.get("method").and_then(Value::as_str).unwrap_or("");
     let params = msg.get("params").cloned().unwrap_or(Value::Null);
@@ -170,7 +170,7 @@ fn answer(msg: &Value, call: &mut impl FnMut(&str, &Value) -> ToolResult) -> Opt
             "serverInfo": {"name": SERVER_NAME, "version": "1"},
         }),
         "ping" => json!({}),
-        "tools/list" => json!({"tools": tool_list()}),
+        "tools/list" => json!({"tools": tools}),
         "tools/call" => {
             let name = params.get("name").and_then(Value::as_str).unwrap_or("");
             let args = params.get("arguments").cloned().unwrap_or(json!({}));
@@ -184,14 +184,19 @@ fn answer(msg: &Value, call: &mut impl FnMut(&str, &Value) -> ToolResult) -> Opt
 
 /// The response to a POSTed body: one message or a batch. `None` when every message was a
 /// notification (HTTP 202, no body); `Err` for a body that isn't JSON-RPC (HTTP 400).
-pub fn respond(body: &str, mut call: impl FnMut(&str, &Value) -> ToolResult) -> Result<Option<String>, String> {
+pub fn respond(body: &str, call: impl FnMut(&str, &Value) -> ToolResult) -> Result<Option<String>, String> {
+    respond_with(body, &tool_list(), call)
+}
+
+/// [`respond`] for another server of Chorus's, with its own `tools` (D135's session tools).
+pub fn respond_with(body: &str, tools: &Value, mut call: impl FnMut(&str, &Value) -> ToolResult) -> Result<Option<String>, String> {
     let v: Value = serde_json::from_str(body).map_err(|e| format!("not JSON: {e}"))?;
     match v {
         Value::Array(msgs) => {
-            let out: Vec<Value> = msgs.iter().filter_map(|m| answer(m, &mut call)).collect();
+            let out: Vec<Value> = msgs.iter().filter_map(|m| answer(m, tools, &mut call)).collect();
             Ok((!out.is_empty()).then(|| Value::Array(out).to_string()))
         }
-        Value::Object(_) => Ok(answer(&v, &mut call).map(|r| r.to_string())),
+        Value::Object(_) => Ok(answer(&v, tools, &mut call).map(|r| r.to_string())),
         _ => Err("not a JSON-RPC message".into()),
     }
 }

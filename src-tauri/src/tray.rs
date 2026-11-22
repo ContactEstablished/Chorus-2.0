@@ -17,13 +17,17 @@ const TRAY: &str = "chorus";
 const OVERLAY_PX: u32 = 32;
 
 static STRIP_ITEM: OnceLock<CheckMenuItem<Wry>> = OnceLock::new();
+static AWAY_ITEM: OnceLock<CheckMenuItem<Wry>> = OnceLock::new();
 
-pub fn install(app: &AppHandle, strip_shown: bool) -> tauri::Result<()> {
+pub fn install(app: &AppHandle, strip_shown: bool, away: bool) -> tauri::Result<()> {
     let open = MenuItem::with_id(app, "open", "Open Chorus", true, None::<&str>)?;
     let strip = CheckMenuItem::with_id(app, "strip", "Show fleet strip", true, strip_shown, None::<&str>)?;
+    // D135: while away, Chorus messages Matthew through MausBot when sessions finish or need him.
+    let away_item = CheckMenuItem::with_id(app, "away", "I'm away (message me on MausBot)", true, away, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit Chorus", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&open, &strip, &PredefinedMenuItem::separator(app)?, &quit])?;
+    let menu = Menu::with_items(app, &[&open, &strip, &away_item, &PredefinedMenuItem::separator(app)?, &quit])?;
     let _ = STRIP_ITEM.set(strip);
+    let _ = AWAY_ITEM.set(away_item);
     let mut tray = TrayIconBuilder::with_id(TRAY)
         .tooltip(badge::tooltip(0))
         .menu(&menu)
@@ -33,6 +37,16 @@ pub fn install(app: &AppHandle, strip_shown: bool) -> tauri::Result<()> {
             "strip" => {
                 let show = !fleet::is_shown(app);
                 fleet::set_shown(app, show);
+            }
+            "away" => {
+                let m = app.state::<std::sync::Arc<crate::sessions::SessionManager>>().inner().clone();
+                // Off the main thread: the change reads and writes the store.
+                std::thread::spawn(move || {
+                    let away = !crate::handoff::updates::is_away(&m);
+                    if let Err(e) = crate::handoff::updates::change(&m, &crate::handoff::updates::UpdatesChange { away: Some(away), ..Default::default() }) {
+                        eprintln!("tray: {e}");
+                    }
+                });
             }
             "quit" => app.exit(0),
             _ => {}
@@ -56,6 +70,16 @@ pub fn strip_checked(shown: bool) {
         let tick = item.clone();
         let _ = item.app_handle().run_on_main_thread(move || {
             let _ = tick.set_checked(shown);
+        });
+    }
+}
+
+/// Keeps the Away tick in step when it changes elsewhere (the title bar, Settings).
+pub fn away_checked(away: bool) {
+    if let Some(item) = AWAY_ITEM.get() {
+        let tick = item.clone();
+        let _ = item.app_handle().run_on_main_thread(move || {
+            let _ = tick.set_checked(away);
         });
     }
 }

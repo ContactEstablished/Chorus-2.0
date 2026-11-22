@@ -104,6 +104,7 @@ fn work(m: &Arc<SessionManager>, run_id: u32) {
         }
         if let Err(e) = pass(m, &run) {
             let _ = db::set_state(m.store(), run_id, RunState::Stopped, Some(&format!("The loop stopped on an error: {e}")));
+            crate::handoff::updates::run_changed(run_id, RunState::Stopped);
             notify(run_id);
             return;
         }
@@ -721,6 +722,7 @@ fn after_pass(m: &Arc<SessionManager>, run: &RunRow, phases: &[PhaseRow], plan: 
             let then = if next.is_some() { "then Approve to start the next phase" } else { "it was the last phase in the roadmap, so Approve finishes the run" };
             let note = format!("P{:02} · {} passed and is tagged {tag}. Review the {} branch; {then}.", last.number, last.title, run.run_branch);
             db::set_state(m.store(), run.id, RunState::Waiting, Some(&note))?;
+            crate::handoff::updates::run_changed(run.id, RunState::Waiting);
             notify(run.id);
             crate::relay::outbound::milestone(m, run.id, &run.name, last.number, &last.title, &tag, next.is_some());
             return Ok(());
@@ -736,6 +738,7 @@ fn after_pass(m: &Arc<SessionManager>, run: &RunRow, phases: &[PhaseRow], plan: 
         }
         None => {
             db::set_state(m.store(), run.id, RunState::Done, Some(&format!("Every phase passed; the last is tagged {tag}. Review and merge {} yourself.", run.run_branch)))?;
+            crate::handoff::updates::run_changed(run.id, RunState::Done);
             notify(run.id);
             crate::relay::outbound::run_done(m, run.id, &run.name, &tag);
             Ok(())
@@ -769,6 +772,7 @@ fn stop_run(m: &Arc<SessionManager>, run: &RunRow, phase: &PhaseRow, stop: Optio
         run.worktree_path.as_deref().unwrap_or("?")
     );
     db::set_state(m.store(), run.id, RunState::Stopped, Some(&note))?;
+    crate::handoff::updates::run_changed(run.id, RunState::Stopped);
     cancel_questions(m, run.id, None)?;
     notify(run.id);
     let phone_why = stop.map_or_else(|| "it was stopped".to_owned(), |s| format!("{}. {}", condition_text(s.condition), s.detail));

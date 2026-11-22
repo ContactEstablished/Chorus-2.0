@@ -257,6 +257,14 @@ export const commands = {
 	mausbotForget: () => typedError<MausStatus, string>(__TAURI_INVOKE("mausbot_forget")),
 	/**  MausBot's bots, for the Hand to MausBot picker. */
 	mausbotBots: (projectId: number) => typedError<BotsView, string>(__TAURI_INVOKE("mausbot_bots", { projectId })),
+	/**  D135: Settings → MausBot's messages to you: switches, bot, and the last messages sent. */
+	mausbotUpdatesView: () => typedError<UpdatesView, string>(__TAURI_INVOKE("mausbot_updates_view")),
+	/**  Changes the switches or the bot. */
+	mausbotUpdatesChange: (change: UpdatesChange) => typedError<UpdatesView, string>(__TAURI_INVOKE("mausbot_updates_change", { change })),
+	/**  Sends a test message. `Ok` says what to look for on the phone; `Err` why it wasn't sent. */
+	mausbotUpdatesTest: () => typedError<string, string>(__TAURI_INVOKE("mausbot_updates_test")),
+	/**  Whether Matthew is away, for the title bar (reads only Chorus's settings). */
+	mausbotAway: () => typedError<boolean, string>(__TAURI_INVOKE("mausbot_away")),
 	/**  Hands the project to MausBot on its own branch. */
 	handoffStart: (projectId: number, botId: string | null, task: string) => typedError<HandoffView, string>(__TAURI_INVOKE("handoff_start", { projectId, botId, task })),
 	/**  Takes the project back from MausBot, whatever its note says. */
@@ -288,6 +296,7 @@ export const events = {
 	fleetShown: makeEvent<FleetShown>("fleet-shown"),
 	handoffChanged: makeEvent<HandoffChanged>("handoff-changed"),
 	loopUpdated: makeEvent<LoopUpdated>("loop-updated"),
+	mausUpdatesChanged: makeEvent<MausUpdatesChanged>("maus-updates-changed"),
 	notificationAdded: makeEvent<NotificationAdded>("notification-added"),
 	prefsChanged: makeEvent<PrefsChanged>("prefs-changed"),
 	sessionUpdated: makeEvent<SessionUpdated>("session-updated"),
@@ -523,6 +532,11 @@ export type Bot = {
 	/**  Automations that run it. */
 	automations: number,
 	updatedAtSecs: number,
+};
+
+export type BotChoice = {
+	id: string,
+	name: string,
 };
 
 export type BotSave = {
@@ -1117,6 +1131,11 @@ export type MausStatus = {
 	canChooseFolder: boolean,
 	expiresAtMs: number | null,
 	tokenProblem: string | null,
+};
+
+/**  Settings → MausBot reads the view again (a message was logged, or a switch moved). */
+export type MausUpdatesChanged = {
+	away: boolean,
 };
 
 export type Narration = {
@@ -2454,6 +2473,44 @@ export type UnknownQuantPolicy =
  *  record for the tag.
  */
 "first-party-and-verified";
+
+/**  One message, as Settings → MausBot lists it. */
+export type UpdateRow = {
+	id: number,
+	atMs: number | null,
+	sessionId: number | null,
+	runId: number | null,
+	/**  `ad-hoc`, `done`, `failed`, `needs-you` or `test`. */
+	kind: string,
+	text: string,
+	/**  `sending`, `sent` or `skipped`. */
+	outcome: string,
+	reason: string | null,
+};
+
+/**  Settings → MausBot's changes. `bot_id`: `Some("")` goes back to the default bot. */
+export type UpdatesChange = {
+	enabled: boolean | null,
+	away: boolean | null,
+	botId: string | null,
+};
+
+/**  Settings → MausBot's "Messages to you" part. */
+export type UpdatesView = {
+	enabled: boolean,
+	away: boolean,
+	/**  The bot Matthew chose; `None` means the one named Jammie. */
+	chosenBotId: string | null,
+	/**  The bot messages go to now, if MausBot lists it. */
+	bot: BotChoice | null,
+	bots: BotChoice[],
+	defaultBotName: string,
+	conversationTitle: string,
+	hasConversation: boolean,
+	/**  Why messages can't go now, if Chorus can tell. */
+	problem: string | null,
+	recent: UpdateRow[],
+};
 
 export type UsualMarker = {
 	direction: Direction,

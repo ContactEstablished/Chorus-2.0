@@ -453,3 +453,198 @@ fn branches_in_use_anywhere_are_left_alone() {
     assert!(side.is_dir());
     let _ = std::fs::remove_dir_all(&r.dir);
 }
+
+/// D135: Chorus updates against a stand-in for MausBot.
+mod updates_tests {
+    use std::sync::Mutex;
+
+    use chorus_core::maus::{Bot, Conversation};
+    use chorus_core::maus_updates::{ECHO, Kind, MAX_BYTES, Source};
+
+    use super::{repo, serial};
+    use crate::handoff::maus_client::Failure;
+    use crate::handoff::updates::{self, MausApi, Pending, Whence};
+    use crate::sessions::SessionManager;
+    use crate::store::maus_updates as log;
+
+    /// A key of MausBot's shape, made here so the secret scan has nothing to find.
+    fn token() -> String {
+        format!("omb_sess_{}", "Ab9_-".repeat(9))
+    }
+
+    struct Fake {
+        paired: bool,
+        running: bool,
+        bots: Mutex<Vec<Bot>>,
+        sent: Mutex<Vec<(String, String, String)>>,
+        made: Mutex<u32>,
+    }
+
+    impl Fake {
+        fn new() -> Self {
+            let jammie = Bot { id: "jammie-1".into(), name: "Jammie".into(), title: None, cwd: None, busy: false, conversations: Vec::new() };
+            let other = Bot { id: "suzy-1".into(), name: "Suzy".into(), ..jammie.clone() };
+            Self { paired: true, running: true, bots: Mutex::new(vec![other, jammie]), sent: Mutex::new(Vec::new()), made: Mutex::new(0) }
+        }
+        fn sent(&self) -> Vec<(String, String, String)> {
+            self.sent.lock().unwrap().clone()
+        }
+        fn drop_threads(&self) {
+            for b in self.bots.lock().unwrap().iter_mut() {
+                b.conversations.clear();
+            }
+        }
+    }
+
+    impl MausApi for Fake {
+        fn token(&self, _: &SessionManager) -> Result<Option<String>, String> {
+            Ok(self.paired.then(token))
+        }
+        fn bots(&self) -> Result<Vec<Bot>, Failure> {
+            if self.running { Ok(self.bots.lock().unwrap().clone()) } else { Err(Failure::NotRunning) }
+        }
+        fn create(&self, token: &str, bot_id: &str, title: &str) -> Result<String, Failure> {
+            assert_eq!(token, self::token());
+            assert_eq!(title, "Chorus updates");
+            let mut made = self.made.lock().unwrap();
+            *made += 1;
+            let thread = format!("thread-{made}");
+            let mut bots = self.bots.lock().unwrap();
+            let bot = bots.iter_mut().find(|b| b.id == bot_id).unwrap();
+            bot.conversations.push(Conversation { thread_id: thread.clone(), title: Some(title.into()), cwd: None, busy: false, updated_at_ms: None });
+            Ok(thread)
+        }
+        fn send(&self, token: &str, bot_id: &str, thread_id: &str, text: &str, send_id: &str) -> Result<(), Failure> {
+            assert_eq!(token, self::token());
+            assert!(send_id.starts_with("chorus-update-") && (16..=80).contains(&send_id.len()));
+            let listed = self.bots.lock().unwrap().iter().any(|b| b.id == bot_id && b.conversations.iter().any(|c| c.thread_id == thread_id));
+            if !listed {
+                return Err(Failure::Refused("no such task".into()));
+            }
+            self.sent.lock().unwrap().push((bot_id.into(), thread_id.into(), text.into()));
+            Ok(())
+        }
+    }
+
+    fn adhoc(session: u32) -> Whence {
+        Whence { source: Source::Session(session), session_id: Some(session), run_id: None }
+    }
+
+    /// Another source, with no session row behind it.
+    fn other(n: u32) -> Whence {
+        Whence { source: Source::Session(n), session_id: None, run_id: None }
+    }
+
+    fn rows(m: &SessionManager) -> Vec<log::UpdateRow> {
+        log::recent(m.store(), 50).unwrap()
+    }
+
+    #[test]
+    fn a_message_goes_to_jammie_in_one_conversation_with_the_echo_and_under_one_kilobyte() {
+        let _one = serial();
+        let r = repo("updates-send");
+        let fake = Fake::new();
+        let long = format!("[Chorus] Atlas \u{b7} Vince \u{b7} main\n{}", "\u{e9}".repeat(900));
+        let sent = updates::deliver(&r.manager, &fake, adhoc(r.session), "ad-hoc", &long).unwrap();
+        assert_eq!(sent.bot_name, "Jammie");
+        let first = fake.sent();
+        assert_eq!(first.len(), 1);
+        let (bot, thread, text) = &first[0];
+        assert_eq!((bot.as_str(), thread.as_str()), ("jammie-1", "thread-1"));
+        assert!(text.starts_with("[Chorus] Atlas \u{b7} Vince \u{b7} main\n") && text.ends_with(ECHO));
+        assert!(text.len() <= MAX_BYTES, "{}", text.len());
+        // A second message, from elsewhere, reuses the conversation.
+        updates::deliver(&r.manager, &fake, Whence { source: Source::Run(4), session_id: None, run_id: Some(4) }, "done", "[Chorus] run \u{b7} done").unwrap();
+        assert_eq!(*fake.made.lock().unwrap(), 1);
+        assert_eq!(fake.sent()[1].1, "thread-1");
+        let logged = rows(&r.manager);
+        assert_eq!(logged.iter().map(|l| l.outcome.as_str()).collect::<Vec<_>>(), ["sent", "sent"]);
+        assert!(!logged[1].text.contains(ECHO), "the log keeps the message, not the instruction");
+        let _ = std::fs::remove_dir_all(&r.dir);
+    }
+
+    #[test]
+    fn a_lost_conversation_is_made_again() {
+        let _one = serial();
+        let r = repo("updates-lost");
+        let fake = Fake::new();
+        updates::deliver(&r.manager, &fake, adhoc(r.session), "ad-hoc", "one").unwrap();
+        fake.drop_threads();
+        updates::deliver(&r.manager, &fake, other(91), "ad-hoc", "two").unwrap();
+        assert_eq!(*fake.made.lock().unwrap(), 2);
+        assert_eq!(fake.sent()[1].1, "thread-2");
+        assert_eq!(updates::stored(&r.manager).thread_id.as_deref(), Some("thread-2"));
+        let _ = std::fs::remove_dir_all(&r.dir);
+    }
+
+    #[test]
+    fn without_a_key_or_with_mausbot_down_nothing_is_sent_and_the_reason_is_kept() {
+        let _one = serial();
+        let r = repo("updates-down");
+        let unpaired = Fake { paired: false, ..Fake::new() };
+        let e = updates::deliver(&r.manager, &unpaired, adhoc(r.session), "ad-hoc", "hello").unwrap_err();
+        assert!(e.contains("isn't paired"), "{e}");
+        let down = Fake { running: false, ..Fake::new() };
+        let e = updates::deliver(&r.manager, &down, adhoc(r.session), "ad-hoc", "hello").unwrap_err();
+        assert!(e.contains("isn't running"), "{e}");
+        assert!(down.sent().is_empty() && unpaired.sent().is_empty());
+        let logged = rows(&r.manager);
+        assert!(logged.iter().all(|l| l.outcome == "skipped" && l.reason.is_some()));
+        // Skips that never reached MausBot don't use up the session's allowance.
+        updates::deliver(&r.manager, &Fake::new(), adhoc(r.session), "ad-hoc", "hello").unwrap();
+        let _ = std::fs::remove_dir_all(&r.dir);
+    }
+
+    #[test]
+    fn a_session_is_rate_limited_and_switching_off_stops_everything() {
+        let _one = serial();
+        let r = repo("updates-limit");
+        let fake = Fake::new();
+        updates::deliver(&r.manager, &fake, adhoc(r.session), "ad-hoc", "one").unwrap();
+        let e = updates::deliver(&r.manager, &fake, adhoc(r.session), "ad-hoc", "two").unwrap_err();
+        assert!(e.contains("Wait"), "{e}");
+        assert_eq!(fake.sent().len(), 1);
+        updates::change(&r.manager, &updates::UpdatesChange { enabled: Some(false), ..Default::default() }).unwrap();
+        let e = updates::deliver(&r.manager, &fake, other(97), "ad-hoc", "three").unwrap_err();
+        assert!(e.contains("switched off"), "{e}");
+        assert_eq!(fake.sent().len(), 1);
+        let _ = std::fs::remove_dir_all(&r.dir);
+    }
+
+    #[test]
+    fn secrets_are_scrubbed_and_the_key_never_reaches_the_message_or_the_log() {
+        let _one = serial();
+        let r = repo("updates-scrub");
+        let secret = "sk-live-ChorusTestSecret0123456789";
+        crate::vault::add(r.manager.store(), "Some key", secret).unwrap();
+        let fake = Fake::new();
+        updates::deliver(&r.manager, &fake, adhoc(r.session), "ad-hoc", &format!("key {secret} and token {}", token())).unwrap();
+        let (_, _, text) = fake.sent().remove(0);
+        assert!(!text.contains(secret) && !text.contains(&token()), "{text}");
+        let logged = rows(&r.manager).remove(0);
+        assert!(!logged.text.contains(secret) && !logged.text.contains(&token()), "{}", logged.text);
+        let _ = std::fs::remove_dir_all(&r.dir);
+    }
+
+    #[test]
+    fn a_notice_names_the_project_session_kind_reply_and_branch() {
+        let _one = serial();
+        let r = repo("updates-notice");
+        let (whence, kind, body) = updates::notice_body(&r.manager, Pending::Session { session: r.session, kind: Kind::Done, closed: false }).unwrap();
+        assert_eq!((whence.session_id, kind), (Some(r.session), Kind::Done));
+        assert_eq!(body, "[Chorus] Atlas \u{b7} Vince \u{b7} done\nThe store is built.\nBranch: main");
+        let (_, _, closed) = updates::notice_body(&r.manager, Pending::Session { session: r.session, kind: Kind::Done, closed: true }).unwrap();
+        assert!(closed.contains("\nSession closed. The store is built.\n"), "{closed}");
+        let _ = std::fs::remove_dir_all(&r.dir);
+    }
+
+    #[test]
+    fn a_session_that_isnt_running_is_refused_by_its_tool_server() {
+        let _one = serial();
+        let r = repo("updates-auth");
+        let body = r#"{"jsonrpc":"2.0","id":1,"method":"tools/list"}"#;
+        assert!(updates::serve(&r.manager, r.session, "anything", body).is_err());
+        assert!(updates::serve(&r.manager, r.session, "", body).is_err());
+        let _ = std::fs::remove_dir_all(&r.dir);
+    }
+}

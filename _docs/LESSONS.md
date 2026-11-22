@@ -645,3 +645,19 @@ computers → Pair a computer shows a 12-character code, a Full access choice an
 credential, or a link carrying either. Wrong codes from loopback share one bucket: five in five
 minutes lock pairing and cancel every open code, so never retry a pairing automatically. Sessions
 last 30 days, renewed while used, up to 180 days.
+
+**L82 — OpenMausBot 0.1.173 has no way to notify without a bot turn (2026-11-20).** Read from its
+installed source (`resources/server/server`). `POST /api/bots/<id>/messages` posts the text as the
+owner's message and starts a turn (queued behind running work). Only four notification kinds push to
+a phone: `approval`, `question`, `sign-in` and `done`. `done` fires when a bot's turn ends with a
+reply; the push carries only the title ("<bot> finished"), while MausBot's notification list shows
+the reply's first 140 characters. The `notice` kind (`buildNoticeNotification`) is internal only and
+doesn't push, and `/api/notifications` only lists and marks read. So a message from Chorus reaches
+the phone through the bot's reply: ask it to echo the text and do nothing else. A conversation made
+with `POST /api/bots/<id>/tasks` without `cwd` pins the bot's default folder at its first turn.
+
+**L83 — Claude Code 2.1.316's `--mcp-config` takes several values (2026-11-20).** `--mcp-config
+<configs...>` keeps reading files until the next option, so a following positional argument would be
+read as another config. Chorus passes it straight before `--settings`. Without
+`--strict-mcp-config`, the user's own MCP servers still load beside it, and a `permissions.allow`
+rule in the `--settings` file (`mcp__chorus__maus_send`) lets the tool run without asking.

@@ -4,6 +4,7 @@
 // own worktree; without it, hand-offs start by hand.
 import { computed, onMounted, ref } from 'vue'
 import { commands, unwrap, type MausStatus } from '../../ipc'
+import MausUpdatesSettings from './MausUpdatesSettings.vue'
 
 const status = ref<MausStatus | null>(null)
 const error = ref<string | null>(null)
@@ -73,6 +74,7 @@ const access = computed(() => (status.value?.canChooseFolder ? 'full access' : '
       </p>
     </template>
     <p v-if="error" class="warn" role="alert">{{ error }}</p>
+    <MausUpdatesSettings />
   </section>
 </template>
 

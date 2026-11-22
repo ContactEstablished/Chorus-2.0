@@ -15,6 +15,7 @@ pub mod connection;
 pub mod maus_client;
 pub mod note;
 pub mod refresh;
+pub mod updates;
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -93,6 +94,7 @@ fn forget_all() {
     *PROBLEMS.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
     *LAST.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = None;
     baton::forget_all();
+    updates::forget_all();
 }
 
 fn problem_of(project_id: u32) -> Option<String> {
@@ -133,6 +135,8 @@ pub fn start(m: &Arc<SessionManager>, app: tauri::AppHandle) -> Result<(), Strin
     let _ = QUEUE.set(Mutex::new(tx));
     let worker = m.clone();
     std::thread::Builder::new().name("handoff".into()).spawn(move || run(&worker, &rx)).map_err(|e| e.to_string())?;
+    // D135: messages to Matthew through MausBot.
+    updates::start(m)?;
     // 18-3: the daily sweep for branches unused for 30 days.
     branches::start(m, app)
 }
@@ -338,6 +342,38 @@ pub async fn mausbot_pair(state: Manager<'_>, input: String) -> Result<connectio
 #[specta::specta]
 pub async fn mausbot_forget(state: Manager<'_>) -> Result<connection::MausStatus, String> {
     blocking(&state, move |m| connection::forget(&m)).await
+}
+
+/// D135: Settings → MausBot's messages to you: switches, bot, and the last messages sent.
+#[tauri::command]
+#[specta::specta]
+pub async fn mausbot_updates_view(state: Manager<'_>) -> Result<updates::UpdatesView, String> {
+    blocking(&state, move |m| updates::view(&m)).await
+}
+
+/// Changes the switches or the bot.
+#[tauri::command]
+#[specta::specta]
+pub async fn mausbot_updates_change(state: Manager<'_>, change: updates::UpdatesChange) -> Result<updates::UpdatesView, String> {
+    blocking(&state, move |m| {
+        updates::change(&m, &change)?;
+        updates::view(&m)
+    })
+    .await
+}
+
+/// Whether Matthew is away, for the title bar (reads only Chorus's settings).
+#[tauri::command]
+#[specta::specta]
+pub async fn mausbot_away(state: Manager<'_>) -> Result<bool, String> {
+    blocking(&state, move |m| Ok(updates::is_away(&m))).await
+}
+
+/// Sends a test message. `Ok` says what to look for on the phone; `Err` why it wasn't sent.
+#[tauri::command]
+#[specta::specta]
+pub async fn mausbot_updates_test(state: Manager<'_>) -> Result<String, String> {
+    blocking(&state, move |m| updates::test(&m)).await
 }
 
 /// MausBot's bots, for the Hand to MausBot picker.

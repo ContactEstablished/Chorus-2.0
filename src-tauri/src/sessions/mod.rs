@@ -596,11 +596,27 @@ impl SessionManager {
 
     /// Claude Code's hook settings for a session, in Chorus's data (never the repo, LESSONS L1).
     /// It holds the address only; the token is in the child's environment.
-    fn write_claude_settings(&self, session_id: u32, url: &str) -> Result<PathBuf, String> {
+    fn write_claude_settings(&self, session_id: u32, url: &str, allow: &[&str]) -> Result<PathBuf, String> {
         let dir = self.data_dir.join("hooks");
         std::fs::create_dir_all(&dir).map_err(|e| format!("creating {}: {e}", dir.display()))?;
         let path = dir.join(format!("claude-session-{session_id}.json"));
-        std::fs::write(&path, hk::claude_settings(url)).map_err(|e| format!("writing {}: {e}", path.display()))?;
+        std::fs::write(&path, hk::claude_settings_allowing(url, allow)).map_err(|e| format!("writing {}: {e}", path.display()))?;
+        Ok(path)
+    }
+
+    /// Whether `token` is the hook token of the session's current run (D135: its MCP server takes
+    /// the same token as its hooks). Never true for a session that isn't running.
+    pub fn hook_token_matches(&self, session_id: u32, token: &str) -> bool {
+        let Ok(live) = self.open_live(session_id) else { return false };
+        let Some(run) = live.current_run() else { return false };
+        run.hook_token.as_deref().is_some_and(|expected| !token.is_empty() && same_token(expected, token))
+    }
+
+    fn write_session_mcp(&self, session_id: u32, port: u16) -> Result<PathBuf, String> {
+        let dir = self.data_dir.join("hooks");
+        std::fs::create_dir_all(&dir).map_err(|e| format!("creating {}: {e}", dir.display()))?;
+        let path = dir.join(format!("mcp-session-{session_id}.json"));
+        std::fs::write(&path, hk::session_mcp_config(port, session_id)).map_err(|e| format!("writing {}: {e}", path.display()))?;
         Ok(path)
     }
 
@@ -1052,6 +1068,8 @@ impl SessionManager {
         let mut secrets: Vec<(String, String)> = Vec::new();
         // A loop step's launch, taken by this run only: its token joins the redacted environment.
         let step = self.loop_args.lock().unwrap_or_else(std::sync::PoisonError::into_inner).remove(&row.id);
+        // A loop step has its own strict MCP server; Chorus's session tools (D135) are for the rest.
+        let loop_step = step.is_some();
         if let Some(s) = &step {
             secrets.extend(s.secrets.iter().cloned());
         }
@@ -1161,7 +1179,13 @@ impl SessionManager {
                 Some(Ok(port)) => {
                     let url = hk::hook_url(*port, row.id);
                     let setup = match row.agent {
-                        AgentKind::Claude => self.write_claude_settings(row.id, &url).map(|p| vec!["--settings".to_owned(), p.display().to_string()]),
+                        // D135: Chorus's own MCP server (maus_send), its tool allowed without
+                        // asking. `--mcp-config` takes several values, so `--settings` follows it.
+                        AgentKind::Claude if !loop_step => self.write_session_mcp(row.id, *port).and_then(|mcp| {
+                            let settings = self.write_claude_settings(row.id, &url, &[chorus_core::maus_updates::CLAUDE_TOOL_NAME])?;
+                            Ok(vec!["--mcp-config".to_owned(), mcp.display().to_string(), "--settings".to_owned(), settings.display().to_string()])
+                        }),
+                        AgentKind::Claude => self.write_claude_settings(row.id, &url, &[]).map(|p| vec!["--settings".to_owned(), p.display().to_string()]),
                         _ => agents::hook_relay()
                             .map(|relay| hk::codex_hook_args(&relay.display().to_string(), &url))
                             .ok_or_else(|| "chorus-hook.exe isn't beside Chorus".to_owned()),

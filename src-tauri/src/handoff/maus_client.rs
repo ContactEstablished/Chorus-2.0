@@ -145,14 +145,19 @@ pub fn check(token: &str) -> Result<PairingFacts, Failure> {
     call(Method::GET, "/api/auth/session", Some(token), None).map(|v| facts_of(&v))
 }
 
-/// A new conversation for `bot_id`, pinned to `cwd` (needs the admin scope), not selected in
-/// MausBot's own view. Returns its thread id.
-pub fn create_conversation(token: &str, bot_id: &str, cwd: &str, title: &str) -> Result<String, Failure> {
+/// A new conversation for `bot_id`, not selected in MausBot's own view, pinned to `cwd` (needs the
+/// admin scope); without one, MausBot pins the bot's default folder at its first turn. Returns its
+/// thread id.
+pub fn create_conversation(token: &str, bot_id: &str, cwd: Option<&str>, title: &str) -> Result<String, Failure> {
     if !maus::valid_id(bot_id) {
         return Err(Failure::Other("that isn't a MausBot bot id".into()));
     }
     ensure_mausbot()?;
-    let v = call(Method::POST, &format!("/api/bots/{bot_id}/tasks"), Some(token), Some(&json!({ "title": title, "cwd": cwd, "select": false })))?;
+    let mut body = json!({ "title": title, "select": false });
+    if let Some(cwd) = cwd {
+        body["cwd"] = json!(cwd);
+    }
+    let v = call(Method::POST, &format!("/api/bots/{bot_id}/tasks"), Some(token), Some(&body))?;
     v.pointer("/task/threadId")
         .and_then(Value::as_str)
         .filter(|t| maus::valid_id(t))

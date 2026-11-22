@@ -14,6 +14,7 @@ pub mod images;
 pub mod replies;
 pub mod history;
 pub mod handoff;
+pub mod maus_updates;
 pub mod profiles;
 pub mod progress;
 pub mod projects;
@@ -64,6 +65,7 @@ const MIGRATION_FILES: &[(&str, &str)] = &[
     ("0028_p18_handoffs.sql", include_str!("../../migrations/0028_p18_handoffs.sql")),
     ("0029_p18_project_notices.sql", include_str!("../../migrations/0029_p18_project_notices.sql")),
     ("0030_p18_telegram_off.sql", include_str!("../../migrations/0030_p18_telegram_off.sql")),
+    ("0031_maus_updates.sql", include_str!("../../migrations/0031_maus_updates.sql")),
 ];
 
 pub struct Store {
