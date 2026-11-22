@@ -38,6 +38,10 @@ fn complaint(stderr: &str) -> String {
 }
 
 fn run(dir: &Path, args: &[&str], limit: Duration) -> Result<Ran, String> {
+    run_capped(dir, args, limit, MAX_OUTPUT_BYTES)
+}
+
+fn run_capped(dir: &Path, args: &[&str], limit: Duration, max_bytes: u64) -> Result<Ran, String> {
     let mut child = Command::new("git")
         .arg("-C")
         .arg(dir)
@@ -61,11 +65,11 @@ fn run(dir: &Path, args: &[&str], limit: Duration) -> Result<Ran, String> {
         std::thread::spawn(move || {
             let mut out = Vec::new();
             if let Some(mut p) = pipe {
-                p.by_ref().take(MAX_OUTPUT_BYTES + 1).read_to_end(&mut out).map_err(|e| format!("Reading git output: {e}"))?;
+                p.by_ref().take(max_bytes + 1).read_to_end(&mut out).map_err(|e| format!("Reading git output: {e}"))?;
                 // Keep draining so Git can't hang on a full pipe. Never call truncated output clean.
                 std::io::copy(&mut p, &mut std::io::sink()).map_err(|e| format!("Reading git output: {e}"))?;
             }
-            if out.len() as u64 > MAX_OUTPUT_BYTES { return Err("Git output exceeded the 256 KiB limit; status is unavailable.".to_owned()); }
+            if out.len() as u64 > max_bytes { return Err(format!("Git output exceeded its {} KiB limit; status is unavailable.", max_bytes / 1024)); }
             String::from_utf8(out).map_err(|_| "Git returned text that isn't UTF-8.".to_owned())
         })
     };
@@ -89,6 +93,21 @@ fn run(dir: &Path, args: &[&str], limit: Duration) -> Result<Ran, String> {
         stdout: stdout.join().map_err(|_| "Reading git output failed.")??,
         stderr: stderr.join().map_err(|_| "Reading git errors failed.")??,
     })
+}
+
+/// The files under `dir` git tracks or would track (untracked but not ignored), relative to `dir`
+/// with forward slashes, sorted; none when `dir` isn't in a repository. For Council's code tools
+/// (D137).
+pub fn ls_files(dir: &Path) -> Result<Option<Vec<String>>, String> {
+    let args = ["ls-files", "-z", "--cached", "--others", "--exclude-standard"];
+    let ran = run_capped(dir, &args, Duration::from_secs(60), 64 * 1024 * 1024)?;
+    if !ran.ok {
+        return if ran.stderr.contains("not a git repository") { Ok(None) } else { Err(complaint(&ran.stderr)) };
+    }
+    let mut files: Vec<String> = ran.stdout.split('\0').filter(|f| !f.is_empty()).map(str::to_owned).collect();
+    files.sort();
+    files.dedup();
+    Ok(Some(files))
 }
 
 /// What git says about `dir`, or none when it isn't in a repository.

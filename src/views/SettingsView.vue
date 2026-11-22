@@ -5,6 +5,7 @@ import AppearanceSettings from './settings/AppearanceSettings.vue'
 import ProjectsSettings from './settings/ProjectsSettings.vue'
 import AgentsSettings from './settings/AgentsSettings.vue'
 import NarratorSettings from './settings/NarratorSettings.vue'
+import CouncilSettings from './settings/CouncilSettings.vue'
 import PhoneSettings from './settings/PhoneSettings.vue'
 import MausBotSettings from './settings/MausBotSettings.vue'
 import RoutingSettings from './settings/RoutingSettings.vue'
@@ -38,6 +39,7 @@ const view = useViewStore()
         <ProvidersPanel v-else-if="view.settingsSection === 'providers'" />
         <RoutingSettings v-else-if="view.settingsSection === 'routing'" />
         <NarratorSettings v-else-if="view.settingsSection === 'narrator'" />
+        <CouncilSettings v-else-if="view.settingsSection === 'council'" />
         <PhoneSettings v-else-if="view.settingsSection === 'phone'" />
         <MausBotSettings v-else-if="view.settingsSection === 'mausbot'" />
         <KeysPanel v-else-if="view.settingsSection === 'keys'" />

@@ -2,8 +2,8 @@
 //! was detected, any elision, the dissents (always), and provenance.
 
 use super::dissent::{self, Dissent};
-use super::verdict::{Detection, QuestionDisagreement};
-use super::{Outcome, Phase, State};
+use super::verdict::{DetectionPath, QuestionDisagreement};
+use super::{TurnOutcome, Phase, State};
 
 /// Directly under the header, above the synthesis: a caveat read after the conclusions is too late.
 pub const STANDING_CAVEAT: &str = "> **These findings are model deliberation, not verified fact.** The members could read the \
@@ -17,7 +17,7 @@ pub fn assemble(state: &State, synthesis: &str, disagreement: &[QuestionDisagree
     let answered: std::collections::BTreeSet<u32> = state
         .transcript
         .iter()
-        .filter(|t| t.phase == Phase::Positions && t.outcome == Outcome::Answered)
+        .filter(|t| t.phase == Phase::Positions && t.outcome == TurnOutcome::Answered)
         .filter_map(|t| t.member_id)
         .collect();
 
@@ -25,7 +25,7 @@ pub fn assemble(state: &State, synthesis: &str, disagreement: &[QuestionDisagree
         let refusals = state
             .transcript
             .iter()
-            .filter(|t| t.outcome != Outcome::Answered)
+            .filter(|t| t.outcome != TurnOutcome::Answered)
             .map(|t| {
                 let who = t.member_id.map_or_else(|| "the orchestrator".to_owned(), label_for);
                 format!("> - {who} refused at **{}** (round {}): {}", t.phase.key(), t.phase.round(), t.content)
@@ -45,10 +45,10 @@ pub fn assemble(state: &State, synthesis: &str, disagreement: &[QuestionDisagree
         .iter()
         .map(|q| {
             let how = match q.detection {
-                Detection::Structural => {
+                DetectionPath::Structural => {
                     format!("`structural` · {}", if q.disagrees { "members disagreed" } else { "members agreed" })
                 }
-                Detection::ModelJudged => "`model-judged` · not measured".to_owned(),
+                DetectionPath::ModelJudged => "`model-judged` · not measured".to_owned(),
             };
             let silent = if q.silent.is_empty() {
                 String::new()
@@ -88,7 +88,7 @@ fn provenance(state: &State) -> String {
         if turns.is_empty() {
             return "never asked".to_owned();
         }
-        let answered = turns.iter().filter(|t| t.outcome == Outcome::Answered).count();
+        let answered = turns.iter().filter(|t| t.outcome == TurnOutcome::Answered).count();
         let other = turns.len() - answered;
         let s = |n: usize| if n == 1 { "" } else { "s" };
         match (answered, other) {

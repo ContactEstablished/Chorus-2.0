@@ -57,12 +57,12 @@ impl Phase {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "kebab-case")]
-pub enum Role {
+pub enum CouncilRole {
     Member,
     Arbiter,
 }
 
-impl Role {
+impl CouncilRole {
     pub fn key(self) -> &'static str {
         match self {
             Self::Member => "member",
@@ -83,13 +83,13 @@ impl Role {
 /// partial council reads as partial. A cancelled turn is neither an answer nor the model's refusal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "kebab-case")]
-pub enum Outcome {
+pub enum TurnOutcome {
     Answered,
     Refused,
     Cancelled,
 }
 
-impl Outcome {
+impl TurnOutcome {
     pub fn key(self) -> &'static str {
         match self {
             Self::Answered => "answered",
@@ -147,7 +147,7 @@ pub struct Turn {
     pub member_id: Option<u32>,
     pub phase: Phase,
     pub content: String,
-    pub outcome: Outcome,
+    pub outcome: TurnOutcome,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -166,7 +166,7 @@ impl State {
     pub fn answered_in(&self, phase: Phase) -> Vec<(u32, &str)> {
         self.transcript
             .iter()
-            .filter(|t| t.phase == phase && t.outcome == Outcome::Answered)
+            .filter(|t| t.phase == phase && t.outcome == TurnOutcome::Answered)
             .filter_map(|t| t.member_id.map(|id| (id, t.content.as_str())))
             .collect()
     }

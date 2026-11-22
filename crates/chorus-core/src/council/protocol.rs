@@ -98,7 +98,7 @@ pub fn current_phase(state: &State) -> Phase {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::council::{Outcome, Participant, PlannedRun, Turn};
+    use crate::council::{TurnOutcome, Participant, PlannedRun, Turn};
 
     fn p(id: u32, label: &str) -> Participant {
         Participant { id, label: label.into(), model: format!("vendor/model-{id}") }
@@ -119,7 +119,7 @@ mod tests {
         }
     }
 
-    fn turn(id: Option<u32>, phase: Phase, content: &str, outcome: Outcome) -> Turn {
+    fn turn(id: Option<u32>, phase: Phase, content: &str, outcome: TurnOutcome) -> Turn {
         Turn { member_id: id, phase, content: content.into(), outcome }
     }
 
@@ -146,9 +146,9 @@ mod tests {
     fn critique_is_anonymised_skips_refusals_and_carries_the_brief() {
         let mut s = state();
         s.transcript = vec![
-            turn(Some(1), Phase::Positions, "Q1: AGREE\nAlpha text", Outcome::Answered),
-            turn(Some(2), Phase::Positions, "Q1: DISAGREE\nBeta text", Outcome::Answered),
-            turn(Some(3), Phase::Positions, "The provider returned an error.", Outcome::Refused),
+            turn(Some(1), Phase::Positions, "Q1: AGREE\nAlpha text", TurnOutcome::Answered),
+            turn(Some(2), Phase::Positions, "Q1: DISAGREE\nBeta text", TurnOutcome::Answered),
+            turn(Some(3), Phase::Positions, "The provider returned an error.", TurnOutcome::Refused),
         ];
         let a = asks(&next_action(&s));
         assert_eq!(a.iter().map(|x| x.0).collect::<Vec<_>>(), vec![1, 2]);
@@ -162,9 +162,9 @@ mod tests {
     fn floors_and_aborts() {
         let mut s = state();
         s.transcript = vec![
-            turn(Some(1), Phase::Positions, "Q1: AGREE", Outcome::Answered),
-            turn(Some(2), Phase::Positions, "x", Outcome::Refused),
-            turn(Some(3), Phase::Positions, "x", Outcome::Refused),
+            turn(Some(1), Phase::Positions, "Q1: AGREE", TurnOutcome::Answered),
+            turn(Some(2), Phase::Positions, "x", TurnOutcome::Refused),
+            turn(Some(3), Phase::Positions, "x", TurnOutcome::Refused),
         ];
         assert_eq!(next_action(&s), vec![Action::Abort { reason: "Only 1 of 3 members answered; a council needs at least two.".into() }]);
         let mut c = state();
@@ -176,21 +176,21 @@ mod tests {
     fn a_full_run_completes_with_dissents_kept_whatever_the_arbiter_wrote() {
         let mut s = state();
         s.transcript = vec![
-            turn(Some(1), Phase::Positions, "Q1: AGREE\nQ2: AGREE", Outcome::Answered),
-            turn(Some(2), Phase::Positions, "Q1: DISAGREE\nQ2: AGREE", Outcome::Answered),
-            turn(Some(3), Phase::Positions, "Q1: AGREE\nQ2: AGREE", Outcome::Answered),
+            turn(Some(1), Phase::Positions, "Q1: AGREE\nQ2: AGREE", TurnOutcome::Answered),
+            turn(Some(2), Phase::Positions, "Q1: DISAGREE\nQ2: AGREE", TurnOutcome::Answered),
+            turn(Some(3), Phase::Positions, "Q1: AGREE\nQ2: AGREE", TurnOutcome::Answered),
         ];
         assert!(matches!(&next_action(&s)[0], Action::Ask { phase: Phase::Critique, .. }));
         for id in 1..=3 {
-            s.transcript.push(turn(Some(id), Phase::Critique, "DISAGREE: store.rs:10 leaks the handle", Outcome::Answered));
+            s.transcript.push(turn(Some(id), Phase::Critique, "DISAGREE: store.rs:10 leaks the handle", TurnOutcome::Answered));
         }
         let arb = asks(&next_action(&s));
         assert_eq!((arb[0].0, arb[0].1), (4, Phase::Arbitration));
         assert!(arb[0].2.contains("### Alpha — position") && arb[0].2.contains("Q1: MEMBERS DISAGREE — Alpha=AGREE, Beta=DISAGREE, Gamma=AGREE"));
-        s.transcript.push(turn(Some(4), Phase::Arbitration, "## Verdict\nQ1: REVISE\nQ2: APPROVED", Outcome::Answered));
+        s.transcript.push(turn(Some(4), Phase::Arbitration, "## Verdict\nQ1: REVISE\nQ2: APPROVED", TurnOutcome::Answered));
         let syn = asks(&next_action(&s));
         assert!(syn[0].2.contains("- [Structural — Q1]"));
-        s.transcript.push(turn(Some(4), Phase::Synthesis, "All fine, nothing to see.", Outcome::Answered));
+        s.transcript.push(turn(Some(4), Phase::Synthesis, "All fine, nothing to see.", TurnOutcome::Answered));
         let Action::Complete { summary, findings } = &next_action(&s)[0] else { panic!() };
         assert_eq!(summary.len(), 2);
         assert!(findings.starts_with("> Council of 3 members plus an arbiter. All members completed."));
@@ -206,16 +206,16 @@ mod tests {
     fn arbiter_refusals_abort_without_a_fallback() {
         let mut s = state();
         for id in 1..=3 {
-            s.transcript.push(turn(Some(id), Phase::Positions, "Q1: AGREE", Outcome::Answered));
-            s.transcript.push(turn(Some(id), Phase::Critique, "AGREE: all", Outcome::Answered));
+            s.transcript.push(turn(Some(id), Phase::Positions, "Q1: AGREE", TurnOutcome::Answered));
+            s.transcript.push(turn(Some(id), Phase::Critique, "AGREE: all", TurnOutcome::Answered));
         }
-        s.transcript.push(turn(Some(4), Phase::Arbitration, "error", Outcome::Refused));
+        s.transcript.push(turn(Some(4), Phase::Arbitration, "error", TurnOutcome::Refused));
         assert!(matches!(&next_action(&s)[0], Action::Abort { reason } if reason.contains("at arbitration")));
         s.transcript.pop();
-        s.transcript.push(turn(Some(4), Phase::Arbitration, "## Verdict\nQ1: APPROVED", Outcome::Answered));
+        s.transcript.push(turn(Some(4), Phase::Arbitration, "## Verdict\nQ1: APPROVED", TurnOutcome::Answered));
         let syn = asks(&next_action(&s));
         assert!(syn[0].2.contains("_None — the council was observed to agree"));
-        s.transcript.push(turn(Some(4), Phase::Synthesis, "error", Outcome::Refused));
+        s.transcript.push(turn(Some(4), Phase::Synthesis, "error", TurnOutcome::Refused));
         assert!(matches!(&next_action(&s)[0], Action::Abort { reason } if reason.contains("at synthesis")));
     }
 
@@ -223,13 +223,13 @@ mod tests {
     fn a_partial_run_says_so_first() {
         let mut s = state();
         s.transcript = vec![
-            turn(Some(1), Phase::Positions, "Q1: AGREE", Outcome::Answered),
-            turn(Some(2), Phase::Positions, "Q1: AGREE", Outcome::Answered),
-            turn(Some(3), Phase::Positions, "Rate limited by the provider.", Outcome::Refused),
-            turn(Some(1), Phase::Critique, "AGREE: yes", Outcome::Answered),
-            turn(Some(2), Phase::Critique, "AGREE: yes", Outcome::Answered),
-            turn(Some(4), Phase::Arbitration, "## Verdict\nQ1: APPROVED", Outcome::Answered),
-            turn(Some(4), Phase::Synthesis, "Fine. Q1 approved.", Outcome::Answered),
+            turn(Some(1), Phase::Positions, "Q1: AGREE", TurnOutcome::Answered),
+            turn(Some(2), Phase::Positions, "Q1: AGREE", TurnOutcome::Answered),
+            turn(Some(3), Phase::Positions, "Rate limited by the provider.", TurnOutcome::Refused),
+            turn(Some(1), Phase::Critique, "AGREE: yes", TurnOutcome::Answered),
+            turn(Some(2), Phase::Critique, "AGREE: yes", TurnOutcome::Answered),
+            turn(Some(4), Phase::Arbitration, "## Verdict\nQ1: APPROVED", TurnOutcome::Answered),
+            turn(Some(4), Phase::Synthesis, "Fine. Q1 approved.", TurnOutcome::Answered),
         ];
         let Action::Complete { findings, .. } = &next_action(&s)[0] else { panic!() };
         assert!(findings.starts_with("> **PARTIAL RUN — 2 of 3 members completed.**"));

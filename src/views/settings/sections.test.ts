@@ -16,6 +16,8 @@ describe('the Settings sections', () => {
       { key: 'projects', label: 'Projects', icon: 'folder' },
       { key: 'providers', label: 'Providers', icon: 'plug' },
       { key: 'narrator', label: 'Narrator', icon: 'agents' },
+      // P10: Council sits after Narrator, the other model-calling feature.
+      { key: 'council', label: 'Council', icon: 'council' },
       // Phone came from p15/loop and sits where it did there: after Narrator, before Keys and lock.
       { key: 'phone', label: 'Phone', icon: 'bell' },
       // P18: MausBot sits beside Phone, the other way in from a phone.
@@ -23,7 +25,7 @@ describe('the Settings sections', () => {
       { key: 'keys', label: 'Keys and lock', icon: 'key' },
       { key: 'agents', label: 'Agents', icon: 'agents' },
     ])
-    expect(SECTIONS).toHaveLength(9)
+    expect(SECTIONS).toHaveLength(10)
   })
 
   it('uses icons that are drawn', () => {

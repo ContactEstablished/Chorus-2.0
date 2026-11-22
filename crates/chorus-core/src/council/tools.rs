@@ -239,7 +239,7 @@ pub fn search_result(query: &str, hits: &[String], complete: bool) -> String {
 /// How much one participant turn may read (Settings → Council; D137's defaults).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
-pub struct Limits {
+pub struct CouncilLimits {
     pub max_calls: u32,
     pub max_bytes: u32,
     /// Stop calling tools once the conversation reaches this share of the model's context.
@@ -248,13 +248,13 @@ pub struct Limits {
     pub cap_usd: f64,
 }
 
-impl Default for Limits {
+impl Default for CouncilLimits {
     fn default() -> Self {
         Self { max_calls: 40, max_bytes: 1_500_000, context_share: 0.7, cap_usd: 10.0 }
     }
 }
 
-impl Limits {
+impl CouncilLimits {
     pub fn check(&self) -> Result<(), String> {
         if !(1..=200).contains(&self.max_calls) {
             return Err("Tool calls per turn must be between 1 and 200.".into());
@@ -281,7 +281,7 @@ pub struct Budget {
 
 impl Budget {
     /// Why the turn may not call another tool, if it may not.
-    pub fn spent(&self, limits: &Limits, prompt_tokens: Option<u64>, context_length: Option<u64>) -> Option<String> {
+    pub fn spent(&self, limits: &CouncilLimits, prompt_tokens: Option<u64>, context_length: Option<u64>) -> Option<String> {
         if self.calls >= limits.max_calls {
             return Some(format!("You have used all {} tool calls for this turn.", limits.max_calls));
         }
@@ -361,11 +361,11 @@ mod tests {
         let mut few = Vec::new();
         assert!(!search_into("a.rs", "x\nx\nx", "x", true, &mut few, 2));
         assert!(under("src/a.rs", "src") && !under("srcx/a.rs", "src") && under("a", ""));
-        let l = Limits::default();
+        let l = CouncilLimits::default();
         assert!(Budget { calls: 39, bytes: 0 }.spent(&l, Some(10), Some(100)).is_none());
         assert!(Budget { calls: 40, bytes: 0 }.spent(&l, None, None).is_some());
         assert!(Budget { calls: 1, bytes: 1_500_000 }.spent(&l, None, None).is_some());
         assert!(Budget::default().spent(&l, Some(71), Some(100)).is_some());
-        assert!(l.check().is_ok() && Limits { cap_usd: 0.1, ..l }.check().is_err());
+        assert!(l.check().is_ok() && CouncilLimits { cap_usd: 0.1, ..l }.check().is_err());
     }
 }

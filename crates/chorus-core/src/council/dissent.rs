@@ -3,7 +3,7 @@
 //! can comment on an entry; it cannot remove one.
 
 use super::verdict::{MemberVerdict, QuestionDisagreement};
-use super::{Outcome, Phase, Turn};
+use super::{TurnOutcome, Phase, Turn};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DissentPath {
@@ -114,7 +114,7 @@ pub fn extract(disagreement: &[QuestionDisagreement], transcript: &[Turn], label
             text: format!("{} — {breakdown}", q.question),
         });
     }
-    for t in transcript.iter().filter(|t| t.phase == Phase::Critique && t.outcome == Outcome::Answered) {
+    for t in transcript.iter().filter(|t| t.phase == Phase::Critique && t.outcome == TurnOutcome::Answered) {
         let Some(id) = t.member_id else { continue };
         for section in critique_sections(&t.content) {
             out.push(Dissent {
@@ -239,7 +239,7 @@ mod tests {
             member_id: Some(2),
             phase: Phase::Critique,
             content: "DISAGREE: Position A ignores roaming profiles".into(),
-            outcome: Outcome::Answered,
+            outcome: TurnOutcome::Answered,
         }];
         let label = |id: u32| ["", "Alpha", "Beta", "Gamma"][id as usize].to_owned();
         let e = extract(&d, &transcript, &label);

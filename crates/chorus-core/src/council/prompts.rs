@@ -4,8 +4,8 @@
 //! critique round the brief and the questions (Chorus 1 sent only the other positions).
 
 use super::dissent::{self, Dissent};
-use super::verdict::{Detection, QuestionDisagreement};
-use super::{Outcome, Phase, State};
+use super::verdict::{DetectionPath, QuestionDisagreement};
+use super::{TurnOutcome, Phase, State};
 
 /// What every participant is told about the project's code.
 pub fn code_mandate(project_name: &str) -> String {
@@ -72,7 +72,7 @@ fn vector(disagreement: &[QuestionDisagreement], label_for: &dyn Fn(u32) -> Stri
     disagreement
         .iter()
         .map(|q| {
-            if q.detection == Detection::ModelJudged {
+            if q.detection == DetectionPath::ModelJudged {
                 return format!(
                     "Q{}: NOT MEASURED (too few members answered in the required form) — judge it from the prose.",
                     q.index + 1
@@ -89,7 +89,7 @@ fn attributed(state: &State, phase: Phase, suffix: &str) -> String {
     state
         .transcript
         .iter()
-        .filter(|t| t.phase == phase && t.outcome == Outcome::Answered)
+        .filter(|t| t.phase == phase && t.outcome == TurnOutcome::Answered)
         .filter_map(|t| t.member_id.map(|id| format!("### {}{suffix}\n\n{}", state.run.label_for(id), t.content)))
         .collect::<Vec<_>>()
         .join("\n\n")
@@ -130,7 +130,7 @@ pub fn synthesis(state: &State, dissents: &[Dissent], mandate: &str) -> String {
     let ruling = state
         .transcript
         .iter()
-        .find(|t| t.phase == Phase::Arbitration && t.outcome == Outcome::Answered)
+        .find(|t| t.phase == Phase::Arbitration && t.outcome == TurnOutcome::Answered)
         .map_or("(none)", |t| t.content.as_str());
     format!(
         "You are the ARBITER of this review council, writing its findings.\n\n\

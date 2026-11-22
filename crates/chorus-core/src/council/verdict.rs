@@ -131,7 +131,7 @@ pub fn parse_arbiter(content: &str) -> ArbiterRuling {
 /// disagreement and a model's impression of one are different facts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "kebab-case")]
-pub enum Detection {
+pub enum DetectionPath {
     Structural,
     ModelJudged,
 }
@@ -140,7 +140,7 @@ pub enum Detection {
 pub struct QuestionDisagreement {
     pub index: usize,
     pub question: String,
-    pub detection: Detection,
+    pub detection: DetectionPath,
     /// True only when structural and the verdicts differ.
     pub disagrees: bool,
     /// Member id → verdict, in the order the positions were given.
@@ -169,7 +169,7 @@ pub fn disagreement(questions: &[String], positions: &[(u32, &str)]) -> Vec<Ques
             QuestionDisagreement {
                 index,
                 question: question.clone(),
-                detection: if structural { Detection::Structural } else { Detection::ModelJudged },
+                detection: if structural { DetectionPath::Structural } else { DetectionPath::ModelJudged },
                 disagrees,
                 verdicts,
                 silent,
@@ -201,7 +201,7 @@ pub struct QuestionSummary {
     pub index: u32,
     /// Clipped to 200 characters: the strip is a glance, not a re-read.
     pub question: String,
-    pub detection: Detection,
+    pub detection: DetectionPath,
     pub state: QuestionState,
     pub votes: Vec<Vote>,
     pub silent: Vec<String>,
@@ -218,7 +218,7 @@ pub fn clip(s: &str, max_chars: usize) -> String {
 }
 
 fn state_of(q: &QuestionDisagreement) -> QuestionState {
-    if q.detection != Detection::Structural {
+    if q.detection != DetectionPath::Structural {
         return QuestionState::NotMeasured;
     }
     let first = q.verdicts[0].1;
@@ -277,9 +277,9 @@ mod tests {
         let a = "Q1: AGREE\nQ2: AGREE\nQ3: QUALIFY\nQ4: DISAGREE";
         let b = "Q1: AGREE\nQ2: DISAGREE\nQ3: AGREE";
         let d = disagreement(&qs, &[(1, a), (2, b)]);
-        assert!(!d[0].disagrees && d[0].detection == Detection::Structural);
+        assert!(!d[0].disagrees && d[0].detection == DetectionPath::Structural);
         assert!(d[1].disagrees);
-        assert_eq!(d[3].detection, Detection::ModelJudged);
+        assert_eq!(d[3].detection, DetectionPath::ModelJudged);
         assert_eq!(d[3].silent, vec![2]);
         let s = summarise(&d, &|id| format!("M{id}"));
         let states: Vec<_> = s.iter().map(|q| q.state).collect();

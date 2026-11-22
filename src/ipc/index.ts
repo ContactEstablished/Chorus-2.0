@@ -180,3 +180,26 @@ export type {
 
 // D135: Chorus's messages to Matthew through MausBot.
 export type { BotChoice as MausUpdateBot, UpdateRow as MausUpdateRow, UpdatesChange as MausUpdatesChange, UpdatesView as MausUpdatesView } from './bindings'
+
+// P10: Council.
+export type {
+  BriefCheck as CouncilBriefCheck,
+  Cost as CouncilCost,
+  CouncilConfig,
+  CouncilLimits,
+  CouncilRole,
+  CouncilRunView,
+  CouncilSettings,
+  DocketRow as CouncilDocketRow,
+  DocketView as CouncilDocket,
+  MemberInput as CouncilMemberInput,
+  MemberView as CouncilMemberView,
+  Phase as CouncilPhase,
+  QuestionState as CouncilQuestionState,
+  QuestionSummary as CouncilQuestionSummary,
+  Ruling as CouncilRuling,
+  RunStatus as CouncilRunStatus,
+  TurnDetail as CouncilTurnDetail,
+  TurnView as CouncilTurnView,
+  VerdictRow as CouncilVerdictRow,
+} from './bindings'
