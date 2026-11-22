@@ -221,6 +221,12 @@ fn replace(s: &[u8], matches: &[(usize, usize)]) -> Vec<u8> {
     out
 }
 
+/// The name of the first known credential shape found in `s`, if any. For refusing input
+/// outright (a Council brief) rather than redacting it.
+pub fn first_pattern<'a>(s: &[u8], patterns: &'a [Pattern]) -> Option<&'a str> {
+    patterns.iter().find(|p| (0..s.len()).any(|at| p.match_at(s, at).is_some())).map(|p| p.name.as_str())
+}
+
 /// One-shot scrub of a complete text (history rows, logs, exports).
 pub fn scrub_all(s: &[u8], secrets: &[Vec<u8>], patterns: &[Pattern]) -> Vec<u8> {
     replace(s, &find_matches(s, secrets, patterns))
