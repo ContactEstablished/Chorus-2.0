@@ -4,7 +4,7 @@ use rusqlite::{OptionalExtension, Row, params};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
-use chorus_core::council::{TurnOutcome, Phase, CouncilRole};
+use chorus_core::council::{TurnOutcome, Phase, CouncilRole, local::RunsOn};
 
 use super::{Store, now_ms};
 
@@ -16,6 +16,8 @@ pub struct MemberRow {
     pub model: String,
     pub role: CouncilRole,
     pub max_tokens: Option<u32>,
+    /// Where its turns run (D140).
+    pub runs_on: RunsOn,
 }
 
 fn member(r: &Row<'_>) -> rusqlite::Result<MemberRow> {
@@ -26,18 +28,19 @@ fn member(r: &Row<'_>) -> rusqlite::Result<MemberRow> {
         model: r.get(2)?,
         role: CouncilRole::parse(&role).unwrap_or(CouncilRole::Member),
         max_tokens: r.get(4)?,
+        runs_on: RunsOn::parse(&r.get::<_, String>(5)?).unwrap_or_default(),
     })
 }
 
 pub fn members(store: &Store) -> Result<Vec<MemberRow>, String> {
     store.with(|c| {
-        let mut s = c.prepare("SELECT id, label, model, role, max_tokens FROM council_members ORDER BY role DESC, label")?;
+        let mut s = c.prepare("SELECT id, label, model, role, max_tokens, runs_on FROM council_members ORDER BY role DESC, label")?;
         s.query_map([], member)?.collect()
     })
 }
 
 /// Inserts (no id) or updates a member. The label is unique without case.
-pub fn save_member(store: &Store, id: Option<u32>, label: &str, model: &str, role: CouncilRole, max_tokens: Option<u32>) -> Result<u32, String> {
+pub fn save_member(store: &Store, id: Option<u32>, label: &str, model: &str, role: CouncilRole, max_tokens: Option<u32>, runs_on: RunsOn) -> Result<u32, String> {
     let now = now_ms();
     let taken: Option<u32> = store.with(|c| {
         c.query_row("SELECT id FROM council_members WHERE label = ?1 COLLATE NOCASE", [label], |r| r.get(0)).optional()
@@ -49,8 +52,8 @@ pub fn save_member(store: &Store, id: Option<u32>, label: &str, model: &str, rol
         Some(id) => {
             let n = store.with(|c| {
                 c.execute(
-                    "UPDATE council_members SET label = ?2, model = ?3, role = ?4, max_tokens = ?5, updated_at = ?6 WHERE id = ?1",
-                    params![id, label, model, role.key(), max_tokens, now],
+                    "UPDATE council_members SET label = ?2, model = ?3, role = ?4, max_tokens = ?5, runs_on = ?7, updated_at = ?6 WHERE id = ?1",
+                    params![id, label, model, role.key(), max_tokens, now, runs_on.key()],
                 )
             })?;
             if n == 0 {
@@ -60,8 +63,8 @@ pub fn save_member(store: &Store, id: Option<u32>, label: &str, model: &str, rol
         }
         None => store.with(|c| {
             c.execute(
-                "INSERT INTO council_members (label, model, role, max_tokens, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?5)",
-                params![label, model, role.key(), max_tokens, now],
+                "INSERT INTO council_members (label, model, role, max_tokens, runs_on, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?6, ?5, ?5)",
+                params![label, model, role.key(), max_tokens, now, runs_on.key()],
             )?;
             Ok(c.last_insert_rowid() as u32)
         }),
@@ -83,6 +86,9 @@ pub struct RosterEntry {
     pub max_tokens: u32,
     /// The model's context length from the catalog, when known.
     pub context_length: Option<u32>,
+    /// Where its turns run; a roster stored before D140 has none and ran on OpenRouter.
+    #[serde(default)]
+    pub runs_on: RunsOn,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -123,7 +129,8 @@ pub struct NewRun<'a> {
     pub brief_text: &'a str,
     pub roster: &'a [RosterEntry],
     pub limits_json: &'a str,
-    pub provider_id: u32,
+    /// None when every participant runs on a local subscription (no key is minted).
+    pub provider_id: Option<u32>,
 }
 
 /// Opens a run, refusing a second while one is running (the single-flight guard, in the same
@@ -397,17 +404,20 @@ mod tests {
     }
 
     fn new_run<'a>(project_id: u32, roster: &'a [RosterEntry]) -> NewRun<'a> {
-        NewRun { project_id, project_folder: "C:\\p", brief_path: "C:\\p\\b.md", brief_text: "b", roster, limits_json: "{}", provider_id: 1 }
+        NewRun { project_id, project_folder: "C:\\p", brief_path: "C:\\p\\b.md", brief_text: "b", roster, limits_json: "{}", provider_id: Some(1) }
     }
 
     #[test]
     fn members_are_unique_without_case() {
         let store = Store::in_memory();
-        let a = save_member(&store, None, "Alpha", "x/y", CouncilRole::Member, None).unwrap();
-        assert!(save_member(&store, None, "alpha", "x/z", CouncilRole::Member, None).unwrap_err().contains("already exists"));
-        assert_eq!(save_member(&store, Some(a), "ALPHA", "x/z", CouncilRole::Arbiter, Some(4000)).unwrap(), a);
+        let a = save_member(&store, None, "Alpha", "x/y", CouncilRole::Member, None, RunsOn::Openrouter).unwrap();
+        assert!(save_member(&store, None, "alpha", "x/z", CouncilRole::Member, None, RunsOn::Openrouter).unwrap_err().contains("already exists"));
+        assert_eq!(members(&store).unwrap()[0].runs_on, RunsOn::Openrouter);
+        assert_eq!(save_member(&store, Some(a), "ALPHA", "claude-opus-5-5", CouncilRole::Arbiter, Some(4000), RunsOn::Claude).unwrap(), a);
         let m = members(&store).unwrap();
-        assert_eq!((m[0].label.as_str(), m[0].role, m[0].max_tokens), ("ALPHA", CouncilRole::Arbiter, Some(4000)));
+        assert_eq!((m[0].label.as_str(), m[0].role, m[0].max_tokens, m[0].runs_on), ("ALPHA", CouncilRole::Arbiter, Some(4000), RunsOn::Claude));
+        // The column refuses anything else.
+        assert!(store.with(|c| c.execute("UPDATE council_members SET runs_on = 'gemini'", [])).is_err());
     }
 
     #[test]

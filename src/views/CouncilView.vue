@@ -299,6 +299,7 @@ function costLine(c: CouncilCost): string {
   const parts: string[] = []
   if (c.reportedUsd !== null) parts.push(`${money(c.reportedUsd)} reported`)
   if (c.keyUsd !== null) parts.push(`${money(c.keyUsd)} by the key`)
+  if (c.subscriptionTurns > 0) parts.push(`${c.subscriptionTurns} turn${c.subscriptionTurns === 1 ? '' : 's'} on subscriptions`)
   return parts.join(' · ') || 'cost not known yet'
 }
 

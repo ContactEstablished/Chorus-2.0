@@ -199,6 +199,7 @@ export type {
   QuestionSummary as CouncilQuestionSummary,
   Ruling as CouncilRuling,
   RunStatus as CouncilRunStatus,
+  RunsOn as CouncilRunsOn,
   TurnDetail as CouncilTurnDetail,
   TurnView as CouncilTurnView,
   VerdictRow as CouncilVerdictRow,

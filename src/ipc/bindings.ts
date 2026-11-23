@@ -823,6 +823,8 @@ export type Cost = {
 	capUsd: number | null,
 	tokensIn: number | null,
 	tokensOut: number | null,
+	/**  Ended turns that ran on a local subscription: no dollar cost is reported for them (D140). */
+	subscriptionTurns: number,
 };
 
 export type CouncilConfig = {
@@ -1282,6 +1284,8 @@ export type MemberInput = {
 	model: string,
 	role: CouncilRole,
 	maxTokens: number | null,
+	/**  Where its turns run (D140). */
+	runsOn: RunsOn,
 };
 
 export type MemberRow = {
@@ -1290,6 +1294,8 @@ export type MemberRow = {
 	model: string,
 	role: CouncilRole,
 	maxTokens: number | null,
+	/**  Where its turns run (D140). */
+	runsOn: RunsOn,
 };
 
 export type MemberVerdict = "AGREE" | "DISAGREE" | "QUALIFY";
@@ -1304,6 +1310,8 @@ export type MemberView = {
 	contextLength: number | null,
 	/**  Why this member can't take part as things stand. */
 	problem: string | null,
+	/**  Something worth knowing that doesn't stop it (a local CLI's version). */
+	note: string | null,
 };
 
 export type Narration = {
@@ -2035,6 +2043,8 @@ export type RosterEntry = {
 	maxTokens: number,
 	/**  The model's context length from the catalog, when known. */
 	contextLength: number | null,
+	/**  Where its turns run; a roster stored before D140 has none and ran on OpenRouter. */
+	runsOn?: RunsOn,
 };
 
 /**  One open Chorus session in the roster. */
@@ -2166,6 +2176,15 @@ export type RunView = {
 	createdAtSecs: number,
 	updatedAtSecs: number,
 };
+
+/**  Where a member's turns run. */
+export type RunsOn = 
+/**  OpenRouter's API, paid from the run's capped key. */
+"openrouter" | 
+/**  The local Claude Code, on its own sign-in (a Claude subscription). */
+"claude" | 
+/**  The local Codex, on its own sign-in (a ChatGPT subscription). */
+"codex";
 
 export type Schedule = 
 /**  Every `minutes` (at least [`MIN_EVERY_MINUTES`]), counted from when it was set up. */

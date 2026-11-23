@@ -9,6 +9,7 @@ pub mod brief;
 pub mod dissent;
 pub mod files;
 pub mod findings;
+pub mod local;
 pub mod prompts;
 pub mod protocol;
 pub mod tools;

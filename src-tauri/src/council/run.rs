@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use chorus_core::council::{Action, TurnOutcome, Participant, Phase, PlannedRun, CouncilRole, State, Turn, protocol, tools};
+use chorus_core::council::{Action, TurnOutcome, Participant, Phase, PlannedRun, CouncilRole, State, Turn, local::RunsOn, protocol, tools};
 use chorus_core::scrub::{self, Pattern};
 use serde_json::{Value, json};
 
@@ -29,7 +29,8 @@ pub struct Ctx {
     pub run_id: u32,
     pub project_name: String,
     pub limits: tools::CouncilLimits,
-    pub provider_id: u32,
+    /// None when every participant runs on a local subscription.
+    pub provider_id: Option<u32>,
 }
 
 impl Ctx {
@@ -42,9 +43,10 @@ impl Ctx {
 }
 
 /// Everything a turn needs that is the same for the whole run.
-struct Shared {
-    key: String,
-    code: Code,
+pub(super) struct Shared {
+    /// The run's capped OpenRouter key; None when no participant runs on OpenRouter.
+    key: Option<String>,
+    pub(super) code: Code,
     secrets: Vec<Vec<u8>>,
     patterns: Vec<Pattern>,
 }
@@ -70,6 +72,8 @@ pub fn drive(ctx: Ctx) {
         Err(reason) => (RunStatus::Failed, Some(reason)),
     };
     let _ = db::finish_run(ctx.store(), ctx.run_id, status, reason.as_deref());
+    // The empty working folder local members ran in (D140).
+    let _ = std::fs::remove_dir_all(ctx.manager.data_dir().join("council").join(format!("run-{}", ctx.run_id)));
     (ctx.notify)(ctx.run_id);
     // Revoke the key, then read its cost from analytics (LESSONS L16). This blocks for up to half
     // a minute; the screen shows the run as ended meanwhile.
@@ -99,9 +103,15 @@ fn drive_inner(ctx: &Ctx, run: &RunRow, ledger: &mut Option<u32>) -> Result<(), 
         return Err("Cancelled.".into());
     }
 
-    let (key, ledger_id) = mint(ctx)?;
-    *ledger = Some(ledger_id);
-    db::set_key_ledger(ctx.store(), ctx.run_id, ledger_id)?;
+    // A key is minted only for OpenRouter participants; local ones use their own sign-in (D140).
+    let key = if run.roster.iter().any(|r| r.runs_on == RunsOn::Openrouter) {
+        let (key, ledger_id) = mint(ctx)?;
+        *ledger = Some(ledger_id);
+        db::set_key_ledger(ctx.store(), ctx.run_id, ledger_id)?;
+        Some(key)
+    } else {
+        None
+    };
     let shared = Arc::new(Shared { key, code, secrets, patterns });
 
     let planned = planned_run(run)?;
@@ -195,7 +205,8 @@ fn transcript(store: &Store, run: u32) -> Result<Vec<Turn>, String> {
 
 /// A key for this run that stops at the Council's cap.
 fn mint(ctx: &Ctx) -> Result<(String, u32), String> {
-    let provider = provider_rows::get(ctx.store(), ctx.provider_id)?.ok_or("The Council's OpenRouter provider was deleted.")?;
+    let provider_id = ctx.provider_id.ok_or("Choose the Council's OpenRouter provider in Settings → Council: a member runs on OpenRouter.")?;
+    let provider = provider_rows::get(ctx.store(), provider_id)?.ok_or("The Council's OpenRouter provider was deleted.")?;
     let management_id = provider
         .management_credential_id
         .ok_or("The Council's OpenRouter provider has no management key, which a council needs to cap its spend.")?;
@@ -214,29 +225,33 @@ fn mint(ctx: &Ctx) -> Result<(String, u32), String> {
     }
 }
 
-struct TurnCtx {
-    manager: Arc<SessionManager>,
+pub(super) struct TurnCtx {
+    pub(super) manager: Arc<SessionManager>,
     cancel: Arc<AtomicBool>,
-    notify: Arc<dyn Fn(u32) + Send + Sync>,
-    run_id: u32,
-    limits: tools::CouncilLimits,
+    pub(super) notify: Arc<dyn Fn(u32) + Send + Sync>,
+    pub(super) run_id: u32,
+    pub(super) limits: tools::CouncilLimits,
 }
 
 impl TurnCtx {
-    fn stopping(&self) -> bool {
+    pub(super) fn stopping(&self) -> bool {
         self.cancel.load(Ordering::SeqCst) || self.manager.is_quitting()
     }
 }
 
 /// One participant's turn: the prompt is stored first, then the tool loop runs until the model
 /// answers. Its outcome is stored whatever happens; an `Err` is a storage failure only.
-fn take_turn(ctx: &TurnCtx, shared: &Shared, who: &RosterEntry, phase: Phase, prompt: &str) -> Result<(), String> {
+fn take_turn(ctx: &TurnCtx, shared: &Arc<Shared>, who: &RosterEntry, phase: Phase, prompt: &str) -> Result<(), String> {
     let store = ctx.manager.store();
     let prompt = shared.scrub(prompt);
     let turn = db::open_turn(store, ctx.run_id, who.id, phase, &prompt)?;
     (ctx.notify)(ctx.run_id);
     let mut usage = Usage::default();
-    let (outcome, content) = converse(ctx, shared, who, turn, &prompt, &mut usage);
+    let (outcome, content) = if who.runs_on.is_local() {
+        super::local::converse(ctx, shared, who, turn, &prompt, &mut usage)
+    } else {
+        converse(ctx, shared, who, turn, &prompt, &mut usage)
+    };
     db::finish_turn(store, turn, outcome, &shared.scrub(&content), &usage)?;
     (ctx.notify)(ctx.run_id);
     Ok(())
@@ -244,6 +259,9 @@ fn take_turn(ctx: &TurnCtx, shared: &Shared, who: &RosterEntry, phase: Phase, pr
 
 fn converse(ctx: &TurnCtx, shared: &Shared, who: &RosterEntry, turn: u32, prompt: &str, usage: &mut Usage) -> (TurnOutcome, String) {
     let store = ctx.manager.store();
+    let Some(key) = shared.key.as_deref() else {
+        return (TurnOutcome::Refused, "This run has no OpenRouter key, so an OpenRouter member couldn't answer.".into());
+    };
     let mut messages = vec![json!({"role": "user", "content": prompt})];
     let mut budget = tools::Budget::default();
     let mut last_prompt_tokens: Option<u64> = None;
@@ -268,7 +286,7 @@ fn converse(ctx: &TurnCtx, shared: &Shared, who: &RosterEntry, turn: u32, prompt
             "tool_choice": if spent.is_some() { "none" } else { "auto" },
             "usage": {"include": true},
         });
-        let response = match call(ctx, &shared.key, &body) {
+        let response = match call(ctx, key, &body) {
             Ok(r) => r,
             Err(Failure::Cancelled) => return (TurnOutcome::Cancelled, "Cancelled before this turn finished.".into()),
             Err(Failure::Refused(reason)) => return (TurnOutcome::Refused, reason),
@@ -454,6 +472,22 @@ pub fn read_findings(run: &RunRow) -> (Option<String>, Option<String>) {
 }
 
 #[cfg(test)]
+impl Shared {
+    /// A run's shared state with no key, for the local-turn server's tests.
+    pub(super) fn for_test(code: Code, secrets: Vec<Vec<u8>>) -> Self {
+        Self { key: None, code, secrets, patterns: vec![] }
+    }
+}
+
+#[cfg(test)]
+impl TurnCtx {
+    /// A turn's context outside a run, for the local-turn tests.
+    pub(super) fn for_test(manager: Arc<SessionManager>, run_id: u32) -> Self {
+        Self { manager, cancel: Arc::new(AtomicBool::new(false)), notify: Arc::new(|_| {}), run_id, limits: tools::CouncilLimits::default() }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -479,3 +513,4 @@ mod tests {
         assert!(response_usage(&json!({})).cost_usd.is_none());
     }
 }
+

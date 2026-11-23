@@ -1,12 +1,13 @@
 <script setup lang="ts">
 /**
- * Settings → Council (P10, D136–D137): the OpenRouter provider whose management key caps each
- * run, the members and the arbiter, and how much code each turn may read. A member whose model
- * can't take tools is shown with the reason and keeps the council from running: it couldn't read
- * the code.
+ * Settings → Council (P10, D136–D137, D140): the OpenRouter provider whose management key caps
+ * each run, the members and the arbiter, where each runs (OpenRouter, or the local Claude Code or
+ * Codex on its own subscription), and how much code each turn may read. A member whose model
+ * can't take tools, or whose CLI isn't found, is shown with the reason and keeps the council from
+ * running.
  */
 import { computed, onMounted, ref } from 'vue'
-import { commands, unwrap, type CatalogEntry, type CouncilLimits, type CouncilMemberView, type CouncilRole, type CouncilSettings } from '../../ipc'
+import { commands, unwrap, type CatalogEntry, type CouncilLimits, type CouncilMemberView, type CouncilRole, type CouncilRunsOn, type CouncilSettings } from '../../ipc'
 import { useViewStore } from '../../stores/view'
 
 const view = useViewStore()
@@ -29,7 +30,12 @@ interface Draft {
   model: string
   role: CouncilRole
   maxTokens: string
+  runsOn: CouncilRunsOn
 }
+
+/** Where a member's turns run, as the screen names it. */
+const RUNS_ON: Record<CouncilRunsOn, string> = { openrouter: 'OpenRouter', claude: 'Claude subscription', codex: 'ChatGPT subscription' }
+const LOCAL_EXAMPLE: Record<CouncilRunsOn, string> = { openrouter: '', claude: 'claude-opus-5-5', codex: 'gpt-6-astra' }
 const draft = ref<Draft | null>(null)
 const search = ref('')
 const confirmDelete = ref<number | null>(null)
@@ -95,12 +101,12 @@ function resetLimits(): void {
 }
 
 function startAdd(role: CouncilRole): void {
-  draft.value = { id: null, label: '', model: '', role, maxTokens: '' }
+  draft.value = { id: null, label: '', model: '', role, maxTokens: '', runsOn: 'openrouter' }
   search.value = ''
 }
 
 function startEdit(m: CouncilMemberView): void {
-  draft.value = { id: m.member.id, label: m.member.label, model: m.member.model, role: m.member.role, maxTokens: m.member.maxTokens?.toString() ?? '' }
+  draft.value = { id: m.member.id, label: m.member.label, model: m.member.model, role: m.member.role, maxTokens: m.member.maxTokens?.toString() ?? '', runsOn: m.member.runsOn }
   search.value = ''
 }
 
@@ -116,7 +122,7 @@ async function saveMember(): Promise<void> {
   error.value = ''
   try {
     settings.value = await unwrap(
-      commands.councilMemberSave({ id: d.id, label: d.label, model: d.model, role: d.role, maxTokens: max ? Number(max) : null }),
+      commands.councilMemberSave({ id: d.id, label: d.label, model: d.model, role: d.role, maxTokens: max && d.runsOn === 'openrouter' ? Number(max) : null, runsOn: d.runsOn }),
     )
     draft.value = null
   } catch (e) {
@@ -186,7 +192,8 @@ function context(n: number | null): string {
         </select>
       </label>
       <p class="muted">
-        Each run mints its own OpenRouter key from this provider's management key, capped at the spend limit below, and revokes it when the run ends.
+        Each run mints its own OpenRouter key from this provider's management key, capped at the spend limit below, and revokes it when the run ends. It's
+        needed only when a member runs on OpenRouter; members on a subscription need no key.
         <button type="button" class="link" @click="view.openSettings('providers')">Manage providers and keys</button>
       </p>
       <div class="limits">
@@ -207,18 +214,25 @@ function context(n: number | null): string {
 
     <div class="block">
       <h3>Members</h3>
-      <p class="muted">At least two members and exactly one arbiter, at most twelve in all. Each must be a model that takes tools, so it can read the code.</p>
+      <p class="muted">
+        At least two members and exactly one arbiter, at most twelve in all. Each must be a model that takes tools, so it can read the code. A member can run
+        on OpenRouter, or on the Claude Code or Codex installed here, using that app's own subscription: Chorus switches off their own file and shell tools,
+        so they read the code only through the same scrubbed, read-only tools as everyone else.
+      </p>
       <ul class="members">
         <li v-for="m in [...arbiters, ...deliberators]" :key="m.member.id" :class="{ bad: m.problem }">
           <div class="who">
             <strong>{{ m.member.label }}</strong>
             <span class="chip" :class="m.member.role">{{ m.member.role }}</span>
+            <span class="chip runs-on" :class="m.member.runsOn">{{ RUNS_ON[m.member.runsOn] }}</span>
           </div>
           <div class="mono">{{ m.member.model }}</div>
-          <div class="muted small">
+          <div v-if="m.member.runsOn === 'openrouter'" class="muted small">
             {{ m.effectiveMaxTokens.toLocaleString() }} output tokens{{ m.member.maxTokens === null ? ' (default)' : '' }}{{ context(m.contextLength) }}
           </div>
+          <div v-else class="muted small">No per-token cost: it uses your subscription's own limits.</div>
           <p v-if="m.problem" class="error small">{{ m.problem }}</p>
+          <p v-else-if="m.note" class="muted small">{{ m.note }}</p>
           <div class="row">
             <button type="button" :disabled="busy" @click="startEdit(m)">Edit</button>
             <template v-if="confirmDelete === m.member.id">
@@ -248,10 +262,33 @@ function context(n: number | null): string {
               <option value="arbiter">arbiter — rules and writes the findings</option>
             </select>
           </label>
-          <label>Max output tokens<input v-model="draft.maxTokens" inputmode="numeric" :placeholder="draft.role === 'arbiter' ? '32000 (default)' : '16000 (default)'" :disabled="busy" /></label>
+          <label>
+            Runs on
+            <select v-model="draft.runsOn" :disabled="busy">
+              <option value="openrouter">OpenRouter (pay per token)</option>
+              <option value="claude">Claude subscription (Claude Code here)</option>
+              <option value="codex">ChatGPT subscription (Codex here)</option>
+            </select>
+          </label>
+          <label v-if="draft.runsOn === 'openrouter'">
+            Max output tokens<input v-model="draft.maxTokens" inputmode="numeric" :placeholder="draft.role === 'arbiter' ? '32000 (default)' : '16000 (default)'" :disabled="busy" />
+          </label>
         </div>
-        <label>Model id<input v-model="draft.model" class="mono" maxlength="200" placeholder="Choose below, or type an OpenRouter model id" spellcheck="false" :disabled="busy" /></label>
-        <details v-if="providerId" open>
+        <label v-if="draft.runsOn === 'openrouter'">
+          Model id<input v-model="draft.model" class="mono" maxlength="200" placeholder="Choose below, or type an OpenRouter model id" spellcheck="false" :disabled="busy" />
+        </label>
+        <template v-else>
+          <label>
+            Model
+            <input v-model="draft.model" class="mono" maxlength="200" :placeholder="`e.g. ${LOCAL_EXAMPLE[draft.runsOn]}`" spellcheck="false" :disabled="busy" />
+          </label>
+          <p class="muted">
+            The name {{ draft.runsOn === 'claude' ? 'Claude Code' : 'Codex' }} takes for <code>{{ draft.runsOn === 'claude' ? '--model' : '-m' }}</code>, without a
+            provider prefix. Its turns run on {{ draft.runsOn === 'claude' ? 'Claude Code' : 'Codex' }}'s own sign-in, with its own tools switched off, so it reads the
+            code only through Chorus's tools.
+          </p>
+        </template>
+        <details v-if="draft.runsOn === 'openrouter' && providerId" open>
           <summary>Models on this provider that take tools</summary>
           <div class="row">
             <input v-model="search" placeholder="Search models…" aria-label="Search council models" />
@@ -265,7 +302,7 @@ function context(n: number | null): string {
           </div>
           <p v-if="!models.length" class="muted">No matching models that take tools. Refresh the list, or change the search.</p>
         </details>
-        <p v-else class="muted">Choose and save the provider above to pick from its models.</p>
+        <p v-else-if="draft.runsOn === 'openrouter'" class="muted">Choose and save the provider above to pick from its models.</p>
         <div class="row">
           <button type="submit" class="primary" :disabled="busy || !draft.label.trim() || !draft.model.trim()">Save {{ draft.role }}</button>
           <button type="button" :disabled="busy" @click="draft = null">Cancel</button>
@@ -380,6 +417,11 @@ button.link {
 .chip.arbiter {
   background: var(--accent-soft);
   color: var(--accent);
+}
+.chip.runs-on.claude,
+.chip.runs-on.codex {
+  background: color-mix(in srgb, var(--status-ready) 14%, transparent);
+  color: var(--status-ready);
 }
 .mono {
   font-family: var(--font-mono);
