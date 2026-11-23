@@ -272,6 +272,32 @@ pub fn valid_model(name: &str) -> bool {
     crate::agent::valid_model(name) && !name.contains('/')
 }
 
+/// The name a local CLI takes for what was typed, which may be an OpenRouter id copied from a
+/// member that ran there: `anthropic/claude-opus-5.5` is `claude-opus-5-5` to Claude Code, and
+/// `openai/gpt-6-astra` is `gpt-6-astra` to Codex. A variant suffix (`:batch`) is dropped. A
+/// model from another vendor is refused with the reason.
+pub fn local_model(runs_on: RunsOn, typed: &str) -> Result<String, String> {
+    let (cli, vendor, example) = match runs_on {
+        RunsOn::Claude => ("Claude Code", "anthropic", "claude-opus-5-5"),
+        RunsOn::Codex => ("Codex", "openai", "gpt-6-astra"),
+        RunsOn::Openrouter => return Err("An OpenRouter member keeps its OpenRouter id.".into()),
+    };
+    let typed = typed.trim();
+    let base = typed.split(':').next().unwrap_or(typed);
+    let name = match base.split_once('/') {
+        Some((v, n)) if v.eq_ignore_ascii_case(vendor) => n,
+        Some((v, _)) => return Err(format!("`{typed}` is a {v} model; {cli} runs only {vendor}'s models.")),
+        None => base,
+    };
+    // Claude Code's ids spell a version with dashes, where OpenRouter's use a dot.
+    let name = if runs_on == RunsOn::Claude { name.replace('.', "-") } else { name.to_owned() };
+    if valid_model(&name) {
+        Ok(name)
+    } else {
+        Err(format!("That isn't a model name {cli} takes (for example `{example}`)."))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -377,5 +403,21 @@ mod tests {
         assert!(!valid_model("anthropic/claude-opus-5.5"));
         assert!(!valid_model("--dangerously-skip-permissions"));
         assert!(!valid_model(""));
+    }
+
+    #[test]
+    fn openrouter_ids_become_the_clis_own_names() {
+        let claude = |s| local_model(RunsOn::Claude, s);
+        let codex = |s| local_model(RunsOn::Codex, s);
+        assert_eq!(claude("anthropic/claude-opus-5.5").unwrap(), "claude-opus-5-5");
+        assert_eq!(claude(" claude-opus-5-5 ").unwrap(), "claude-opus-5-5");
+        assert_eq!(claude("opus").unwrap(), "opus");
+        assert_eq!(claude("anthropic/claude-sonnet-5.5:batch").unwrap(), "claude-sonnet-5-5");
+        assert_eq!(codex("openai/gpt-6-astra").unwrap(), "gpt-6-astra");
+        assert_eq!(codex("gpt-6.2-astra").unwrap(), "gpt-6.2-astra");
+        assert_eq!(claude("google/gemini-4-neon").unwrap_err(), "`google/gemini-4-neon` is a google model; Claude Code runs only anthropic's models.");
+        assert!(codex("anthropic/claude-opus-5.5").unwrap_err().contains("Codex runs only openai's models"));
+        assert!(claude("--dangerously-skip-permissions").is_err());
+        assert!(codex("").is_err());
     }
 }
