@@ -30,12 +30,12 @@ impl Code {
     /// own findings file) are left out.
     pub fn load(root: &Path, exclude: &[String], secrets: Vec<Vec<u8>>, patterns: Vec<Pattern>) -> Result<Self, String> {
         if !root.is_dir() {
-            return Err(format!("The project's folder ({}) doesn't exist.", root.display()));
+            return Err(format!("The folder to read ({}) doesn't exist.", root.display()));
         }
         let candidates = match crate::git::ls_files(root) {
             Ok(Some(files)) => files,
             Ok(None) => walk(root)?,
-            Err(e) => return Err(format!("Couldn't list the project's files with git: {e}")),
+            Err(e) => return Err(format!("Couldn't list the folder's files with git: {e}")),
         };
         let mut allowed = Vec::new();
         for rel in candidates {
@@ -84,7 +84,7 @@ impl Code {
             .zip(std::fs::canonicalize(&self.root).ok())
             .is_some_and(|(p, root)| p.starts_with(root));
         if !inside {
-            return Err(format!("`{rel}` resolves outside the project's folder, so it isn't readable."));
+            return Err(format!("`{rel}` resolves outside the folder being read, so it isn't readable."));
         }
         let bytes = std::fs::read(&path).map_err(|_| format!("`{rel}` couldn't be read."))?;
         if files::looks_binary(&bytes) {

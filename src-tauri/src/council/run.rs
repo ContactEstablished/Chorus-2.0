@@ -93,7 +93,7 @@ fn drive_inner(ctx: &Ctx, run: &RunRow, ledger: &mut Option<u32>) -> Result<(), 
     let exclude: Vec<String> = relative_to(Path::new(&run.project_folder), &findings_target).into_iter().collect();
     let code = Code::load(Path::new(&run.project_folder), &exclude, secrets.clone(), patterns.clone())?;
     if code.file_count() == 0 {
-        return Err("The project's folder has no readable files, so the council would have no code to read.".into());
+        return Err("The folder has no readable files, so the council would have no code to read.".into());
     }
     if ctx.stopping() {
         return Err("Cancelled.".into());
