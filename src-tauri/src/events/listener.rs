@@ -27,6 +27,8 @@ pub fn start(manager: Arc<SessionManager>) -> Result<u16, String> {
         .route("/mcp/{step}", any(mcp))
         // D135: Chorus's tools for an interactive session's agent (maus_send).
         .route("/mcp/session/{session}", any(session_mcp))
+        // D140: Chorus's read-only code tools for one local council turn.
+        .route("/mcp/council/{turn}", any(council_mcp))
         .layer(DefaultBodyLimit::max(MAX_HOOK_BODY))
         .with_state(manager);
     tauri::async_runtime::spawn(async move {
@@ -69,6 +71,23 @@ async fn session_mcp(State(m): State<Arc<SessionManager>>, Path(session): Path<u
     let body = String::from_utf8_lossy(&body).into_owned();
     let post = method == Method::POST;
     let served = tauri::async_runtime::spawn_blocking(move || crate::handoff::updates::serve(&m, session, &token, if post { &body } else { "[]" })).await;
+    match served {
+        Ok(Err(())) => StatusCode::UNAUTHORIZED.into_response(),
+        Ok(Ok(_)) if !post => (StatusCode::METHOD_NOT_ALLOWED, [(axum::http::header::ALLOW, "POST")]).into_response(),
+        Ok(Ok(Ok(Some(json)))) => ([(axum::http::header::CONTENT_TYPE, "application/json")], json).into_response(),
+        Ok(Ok(Ok(None))) => StatusCode::ACCEPTED.into_response(),
+        Ok(Ok(Err(e))) => (StatusCode::BAD_REQUEST, e).into_response(),
+        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    }
+}
+
+/// The same transport, for a council turn running on a local subscription: its token is the
+/// turn's own, held only in that CLI's environment.
+async fn council_mcp(Path(turn): Path<u32>, method: Method, headers: HeaderMap, body: Bytes) -> Response {
+    let token = bearer(&headers);
+    let body = String::from_utf8_lossy(&body).into_owned();
+    let post = method == Method::POST;
+    let served = tauri::async_runtime::spawn_blocking(move || crate::council::serve_local_turn(turn, &token, if post { &body } else { "[]" })).await;
     match served {
         Ok(Err(())) => StatusCode::UNAUTHORIZED.into_response(),
         Ok(Ok(_)) if !post => (StatusCode::METHOD_NOT_ALLOWED, [(axum::http::header::ALLOW, "POST")]).into_response(),

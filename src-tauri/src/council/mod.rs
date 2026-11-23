@@ -2,7 +2,10 @@
 //! Council screen's commands: the Docket, starting and cancelling a run, and reading one back.
 
 mod code;
+mod local;
 mod run;
+
+pub use local::serve as serve_local_turn;
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
@@ -10,6 +13,7 @@ use std::sync::{Arc, Mutex};
 
 use chorus_core::council::{
     self as core, TurnOutcome, Phase, CouncilRole, brief,
+    local::RunsOn,
     tools::CouncilLimits,
     verdict::{self, QuestionState, QuestionSummary, Ruling},
 };
@@ -89,6 +93,8 @@ pub struct MemberView {
     pub context_length: Option<u32>,
     /// Why this member can't take part as things stand.
     pub problem: Option<String>,
+    /// Something worth knowing that doesn't stop it (a local CLI's version).
+    pub note: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Type)]
@@ -117,9 +123,16 @@ fn provider_problem(store: &Store, p: &provider_rows::ProviderRow) -> Option<Str
 }
 
 /// The member as a run would take it, or why it can't.
-fn member_view(store: &Store, provider: Option<u32>, m: &MemberRow) -> MemberView {
+/// Why a local member's CLI can't run now, or none (`local::problem`, or a stand-in in tests).
+type LocalCheck<'a> = &'a dyn Fn(RunsOn) -> Option<String>;
+
+fn member_view(store: &Store, provider: Option<u32>, m: &MemberRow, local: LocalCheck<'_>) -> MemberView {
     let default = if m.role == CouncilRole::Arbiter { DEFAULT_ARBITER_TOKENS } else { DEFAULT_MEMBER_TOKENS };
     let wanted = m.max_tokens.unwrap_or(default);
+    // A local member's CLI decides its own output and context limits.
+    if m.runs_on.is_local() {
+        return MemberView { member: m.clone(), effective_max_tokens: wanted, context_length: None, problem: local(m.runs_on), note: None };
+    }
     let catalog = provider.and_then(|p| provider_rows::catalog_model(store, p, &m.model).ok().flatten());
     let problem = match (provider, &catalog) {
         (None, _) => Some("Choose the Council's OpenRouter provider first.".to_owned()),
@@ -131,19 +144,26 @@ fn member_view(store: &Store, provider: Option<u32>, m: &MemberRow) -> MemberVie
         _ => None,
     };
     let effective = catalog.as_ref().and_then(|c| c.max_output).map_or(wanted, |max| wanted.min(max));
-    MemberView { member: m.clone(), effective_max_tokens: effective, context_length: catalog.and_then(|c| c.context_length), problem }
+    MemberView { member: m.clone(), effective_max_tokens: effective, context_length: catalog.and_then(|c| c.context_length), problem, note: None }
 }
 
 /// The provider and roster a run would use now, or the one reason it can't start.
-fn readiness(store: &Store, cfg: &CouncilConfig) -> Result<(provider_rows::ProviderRow, Vec<RosterEntry>), String> {
-    let id = cfg.provider_id.ok_or("Choose the Council's OpenRouter provider in Settings → Council.")?;
-    let provider = provider_rows::get(store, id)?.ok_or("The Council's provider was deleted. Choose another in Settings → Council.")?;
-    if let Some(problem) = provider_problem(store, &provider) {
-        return Err(format!("The Council's provider \"{}\": {problem}", provider.name));
-    }
-    cfg.limits.check()?;
+/// The provider (when a member runs on OpenRouter) and roster a run would use now, or the one
+/// reason it can't start.
+fn readiness(store: &Store, cfg: &CouncilConfig, local: LocalCheck<'_>) -> Result<(Option<provider_rows::ProviderRow>, Vec<RosterEntry>), String> {
     let members = db::members(store)?;
-    let views: Vec<MemberView> = members.iter().map(|m| member_view(store, Some(id), m)).collect();
+    let provider = if members.iter().any(|m| m.runs_on == RunsOn::Openrouter) {
+        let id = cfg.provider_id.ok_or("Choose the Council's OpenRouter provider in Settings → Council.")?;
+        let provider = provider_rows::get(store, id)?.ok_or("The Council's provider was deleted. Choose another in Settings → Council.")?;
+        if let Some(problem) = provider_problem(store, &provider) {
+            return Err(format!("The Council's provider \"{}\": {problem}", provider.name));
+        }
+        Some(provider)
+    } else {
+        None
+    };
+    cfg.limits.check()?;
+    let views: Vec<MemberView> = members.iter().map(|m| member_view(store, provider.as_ref().map(|p| p.id), m, local)).collect();
     if let Some(v) = views.iter().find(|v| v.problem.is_some()) {
         return Err(format!("Council member '{}': {}", v.member.label, v.problem.as_deref().unwrap_or("")));
     }
@@ -170,22 +190,28 @@ fn readiness(store: &Store, cfg: &CouncilConfig) -> Result<(provider_rows::Provi
             role: v.member.role,
             max_tokens: v.effective_max_tokens,
             context_length: v.context_length,
+            runs_on: v.member.runs_on,
         })
         .collect();
     roster.sort_by_key(|r| r.role == CouncilRole::Arbiter);
     Ok((provider, roster))
 }
 
-fn settings_view(store: &Store) -> Result<CouncilSettings, String> {
+fn settings_view(m: &SessionManager) -> Result<CouncilSettings, String> {
+    let store = m.store();
+    let check = |r: RunsOn| local::problem(m, r);
     let cfg = config(store)?;
     let providers = provider_rows::list(store)?
         .into_iter()
         .filter(|p| p.kind == ProviderKind::Openrouter)
         .map(|p| ProviderChoice { id: p.id, name: p.name.clone(), problem: provider_problem(store, &p) })
         .collect();
-    let members = db::members(store)?.iter().map(|m| member_view(store, cfg.provider_id, m)).collect();
+    let members = db::members(store)?
+        .iter()
+        .map(|row| MemberView { note: local::version_note(m, row.runs_on), ..member_view(store, cfg.provider_id, row, &check) })
+        .collect();
     Ok(CouncilSettings {
-        reason: readiness(store, &cfg).err(),
+        reason: readiness(store, &cfg, &check).err(),
         config: cfg,
         default_limits: CouncilLimits::default(),
         providers,
@@ -196,7 +222,7 @@ fn settings_view(store: &Store) -> Result<CouncilSettings, String> {
 #[tauri::command]
 #[specta::specta]
 pub fn council_settings(state: Manager<'_>) -> Result<CouncilSettings, String> {
-    settings_view(state.store())
+    settings_view(&state)
 }
 
 #[tauri::command]
@@ -211,7 +237,7 @@ pub fn council_configure(state: Manager<'_>, config: CouncilConfig) -> Result<Co
     }
     config.limits.check()?;
     settings::set(store, CONFIG, &serde_json::to_string(&config).map_err(|e| e.to_string())?)?;
-    settings_view(store)
+    settings_view(&state)
 }
 
 #[derive(Debug, Clone, Deserialize, Type)]
@@ -222,6 +248,8 @@ pub struct MemberInput {
     pub model: String,
     pub role: CouncilRole,
     pub max_tokens: Option<u32>,
+    /// Where its turns run (D140).
+    pub runs_on: RunsOn,
 }
 
 #[tauri::command]
@@ -233,21 +261,32 @@ pub fn council_member_save(state: Manager<'_>, input: MemberInput) -> Result<Cou
         return Err("A council member needs a name of 1–60 characters.".into());
     }
     let model = input.model.trim();
-    if !chorus_core::agent::valid_model(model) {
-        return Err("That isn't a model id (for example `anthropic/claude-opus-5`).".into());
+    match input.runs_on {
+        RunsOn::Openrouter if !chorus_core::agent::valid_model(model) => {
+            return Err("That isn't a model id (for example `anthropic/claude-opus-5`).".into());
+        }
+        RunsOn::Claude if !core::local::valid_model(model) => {
+            return Err("That isn't a model name Claude Code takes (for example `claude-opus-5-5`, without a provider prefix).".into());
+        }
+        RunsOn::Codex if !core::local::valid_model(model) => {
+            return Err("That isn't a model name Codex takes (for example `gpt-6-astra`, without a provider prefix).".into());
+        }
+        _ => {}
     }
     if input.max_tokens.is_some_and(|n| !(256..=200_000).contains(&n)) {
         return Err("Max output tokens must be between 256 and 200,000, or empty for the default.".into());
     }
-    db::save_member(store, input.id, label, model, input.role, input.max_tokens)?;
-    settings_view(store)
+    // A local CLI decides its own output limit.
+    let max_tokens = if input.runs_on.is_local() { None } else { input.max_tokens };
+    db::save_member(store, input.id, label, model, input.role, max_tokens, input.runs_on)?;
+    settings_view(&state)
 }
 
 #[tauri::command]
 #[specta::specta]
 pub fn council_member_delete(state: Manager<'_>, id: u32) -> Result<CouncilSettings, String> {
     db::delete_member(state.store(), id)?;
-    settings_view(state.store())
+    settings_view(&state)
 }
 
 /// Picks a brief (`.md`), starting in the project's folder.
@@ -394,7 +433,7 @@ pub fn council_start(state: Manager<'_>, council: Councils<'_>, project_id: u32,
     let (brief_path, text) = read_brief(&brief_path)?;
     check_brief(store, &text)?;
     let cfg = config(store)?;
-    let (provider, roster) = readiness(store, &cfg)?;
+    let (provider, roster) = readiness(store, &cfg, &|r| local::problem(&state, r))?;
     let mut active = council.active.lock().map_err(|_| "Council state is unavailable.")?;
     let run_id = db::open_run(
         store,
@@ -405,7 +444,7 @@ pub fn council_start(state: Manager<'_>, council: Councils<'_>, project_id: u32,
             brief_text: &text,
             roster: &roster,
             limits_json: &serde_json::to_string(&cfg.limits).map_err(|e| e.to_string())?,
-            provider_id: provider.id,
+            provider_id: provider.as_ref().map(|p| p.id),
         },
     )?;
     let cancel = Arc::new(AtomicBool::new(false));
@@ -418,7 +457,7 @@ pub fn council_start(state: Manager<'_>, council: Councils<'_>, project_id: u32,
         run_id,
         project_name: project.name,
         limits: cfg.limits,
-        provider_id: provider.id,
+        provider_id: provider.as_ref().map(|p| p.id),
     };
     let councils = council.inner().clone();
     let started = std::thread::Builder::new().name(format!("council-{run_id}")).spawn(move || {
@@ -498,6 +537,8 @@ pub struct Cost {
     pub cap_usd: f64,
     pub tokens_in: Option<u32>,
     pub tokens_out: Option<u32>,
+    /// Ended turns that ran on a local subscription: no dollar cost is reported for them (D140).
+    pub subscription_turns: u32,
 }
 
 fn cost(store: &Store, run: &RunRow, turns: &[TurnRow]) -> Cost {
@@ -518,6 +559,10 @@ fn cost(store: &Store, run: &RunRow, turns: &[TurnRow]) -> Cost {
         cap_usd: limits.cap_usd,
         tokens_in: sum(|t| t.tokens_in),
         tokens_out: sum(|t| t.tokens_out),
+        subscription_turns: ended
+            .iter()
+            .filter(|t| run.roster.iter().any(|r| r.id == t.member_id && r.runs_on.is_local()))
+            .count() as u32,
     }
 }
 
@@ -585,7 +630,7 @@ pub fn council_docket(state: Manager<'_>, project_id: u32) -> Result<DocketView,
     let project = projects::get(store, project_id)?.ok_or("That project no longer exists.")?;
     let folder_problem = project_folder(store, project_id).err();
     let reason = match config(store) {
-        Ok(cfg) => readiness(store, &cfg).err(),
+        Ok(cfg) => readiness(store, &cfg, &|r| local::problem(&state, r)).err(),
         Err(e) => Some(e),
     };
     let runs = db::runs_for_project(store, project_id)?
@@ -771,7 +816,23 @@ mod tests {
     fn readiness_explains_itself() {
         let store = Store::in_memory();
         let cfg = CouncilConfig::default();
-        assert!(readiness(&store, &cfg).unwrap_err().contains("Choose the Council's OpenRouter provider"));
+        // No members: nothing needs OpenRouter, so the roster is what's missing.
+        assert!(readiness(&store, &cfg, &|_| None).unwrap_err().contains("no arbiter"));
+        let add = |label: &str, model: &str, role, runs_on| db::save_member(&store, None, label, model, role, None, runs_on).unwrap();
+        add("Opus", "claude-opus-5-5", CouncilRole::Arbiter, RunsOn::Claude);
+        add("Astra", "gpt-6-astra", CouncilRole::Member, RunsOn::Codex);
+        add("Sonnet", "claude-sonnet-5-5", CouncilRole::Member, RunsOn::Claude);
+        // Every participant local: no provider is needed, and the roster says where each runs.
+        let (provider, roster) = readiness(&store, &cfg, &|_| None).unwrap();
+        assert!(provider.is_none());
+        assert_eq!(roster.iter().map(|r| r.runs_on).collect::<Vec<_>>(), [RunsOn::Codex, RunsOn::Claude, RunsOn::Claude]);
+        assert_eq!(roster.last().map(|r| r.label.as_str()), Some("Opus"));
+        // A local CLI that isn't found stops the run, by name.
+        let missing = |r: RunsOn| (r == RunsOn::Codex).then(|| "Codex isn't available: not found".to_owned());
+        assert_eq!(readiness(&store, &cfg, &missing).unwrap_err(), "Council member 'Astra': Codex isn't available: not found");
+        // One OpenRouter member brings the provider back as a requirement.
+        add("Grok", "x-ai/grok-4.7", CouncilRole::Member, RunsOn::Openrouter);
+        assert!(readiness(&store, &cfg, &|_| None).unwrap_err().contains("Choose the Council's OpenRouter provider"));
     }
 
     #[test]

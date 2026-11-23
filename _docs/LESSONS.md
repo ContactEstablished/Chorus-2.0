@@ -683,3 +683,27 @@ that `.envrc` and `.env-local` passed the `.env` block, and that one huge line b
 cap. All fixed the same day. The arbiter (Claude Haiku 5.5) ruled on a Q4 and Q5 the brief didn't have
 because the prompt's example verdict block listed five questions; the block now lists exactly the
 brief's. DeepSeek used 26 tool calls on one turn where Qwen used 3: the per-turn limits matter.
+
+**L87 — Codex 0.169.0's read-only sandbox doesn't stop reading, and its shell can be switched off (2026-11-22).**
+Measured with a planted `.env` in the working folder and a file outside it. With `codex exec -s read-only`,
+Codex read both through PowerShell (`Get-Content`): read-only stops writes, not reads anywhere on the disk.
+With `--disable shell_tool --disable unified_exec` (neither is listed by `codex features list`, but both are
+accepted) it had no shell and read neither. What remains is code mode's `functions.exec` (JavaScript with no
+`require`, `fetch`, Deno or imports), `apply_patch` (a failed patch echoes only its own lines; a write is
+refused by the sandbox), MCP resources, a clock and `collaboration.*` (a spawn failed under `--ephemeral`).
+`--disable code_mode_host` breaks every tool call, MCP included, so it stays on. An unknown `--disable` name
+stops Codex before it runs ("Unknown feature flag"), so a rename fails closed. `codex exec` never asks, so an
+MCP tool needs `mcp_servers.<name>.default_tools_approval_mode="approve"`, or the call is refused ("requires
+approval, but approval policy is never"). `mcp_servers.<name>.bearer_token_env_var` sends a bearer token from
+the environment to a streamable-HTTP server. `--ignore-user-config` keeps the sign-in; `-` reads the prompt
+from stdin. `--json` events: `item.started`/`item.completed` with item types `agent_message`,
+`mcp_tool_call`, `command_execution`; `turn.completed` carries `usage` (`input_tokens`,
+`cached_input_tokens`, `output_tokens`); `turn.failed` carries `error.message`.
+
+**L88 — Claude Code 2.1.330 headless with no tools but Chorus's (2026-11-22).** `claude -p --tools ""
+--restricted --strict-mcp-config --mcp-config <file> --allowedTools mcp__council__… --setting-sources ""`
+listed only the MCP tool and read neither a planted `.env` nor a file outside its folder. `--bare` is not an
+option for a subscription: it reads only `ANTHROPIC_API_KEY` or an `apiKeyHelper`, never the OAuth sign-in.
+`--output-format json` prints one `result` object (`is_error`, `subtype`, `result`, `usage` with
+`input_tokens`, `cache_creation_input_tokens`, `cache_read_input_tokens`, `output_tokens`); its
+`total_cost_usd` is reported on a subscription too and is not money spent. The prompt can come on stdin.
