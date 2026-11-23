@@ -291,9 +291,11 @@ export const commands = {
 	councilMemberDelete: (id: number) => typedError<CouncilSettings, string>(__TAURI_INVOKE("council_member_delete", { id })),
 	/**  Picks a brief (`.md`), starting in the project's folder. */
 	councilBriefPick: (start: string | null) => __TAURI_INVOKE<string | null>("council_brief_pick", { start }),
+	/**  Picks the folder a council reads, which may be a copy of the project (a redacted one, say). */
+	councilFolderPick: (start: string | null) => __TAURI_INVOKE<string | null>("council_folder_pick", { start }),
 	/**  Reads a chosen brief and says what the council would be asked, before anything is spent. */
 	councilBriefCheck: (path: string) => typedError<BriefCheck, string>(__TAURI_INVOKE("council_brief_check", { path })),
-	councilStart: (projectId: number, briefPath: string) => typedError<number, string>(__TAURI_INVOKE("council_start", { projectId, briefPath })),
+	councilStart: (projectId: number, briefPath: string, folder: string | null) => typedError<number, string>(__TAURI_INVOKE("council_start", { projectId, briefPath, folder })),
 	councilCancel: (runId: number) => typedError<null, string>(__TAURI_INVOKE("council_cancel", { runId })),
 	councilDocket: (projectId: number) => typedError<DocketView, string>(__TAURI_INVOKE("council_docket", { projectId })),
 	councilRun: (runId: number) => typedError<CouncilRunView, string>(__TAURI_INVOKE("council_run", { runId })),
@@ -857,6 +859,8 @@ export type CouncilRunView = {
 	verdicts: VerdictRow[],
 	arbiterAsked: boolean,
 	findingsPath: string | null,
+	/**  The folder the run read. */
+	folder: string,
 	findingsText: string | null,
 	findingsProblem: string | null,
 	cost: Cost,
@@ -974,13 +978,18 @@ export type DocketRow = {
 	/**  "2 approved · 1 revise · 3 of 3 ruled · members split on 1", or none. */
 	digest: string | null,
 	hasFindings: boolean,
+	/**  The folder the run read: the project's, or a copy chosen for it. */
+	folder: string,
 };
 
 export type DocketView = {
 	projectId: number,
 	projectName: string,
+	/**  The project's folder, which a new council reads unless another is chosen. */
 	folder: string | null,
-	/**  Why a council can't run in this project now (its folder, or the settings), or none. */
+	/**  Why the project's own folder can't be read (so another must be chosen), or none. */
+	folderProblem: string | null,
+	/**  Why no council can run now (the settings), or none. */
 	reason: string | null,
 	running: number | null,
 	runs: DocketRow[],

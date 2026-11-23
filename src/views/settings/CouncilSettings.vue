@@ -180,7 +180,7 @@ function context(n: number | null): string {
       <h3>Provider and limits</h3>
       <label>
         OpenRouter provider
-        <select v-model="providerId" :disabled="busy" @change="loadCatalog">
+        <select v-model="providerId" :disabled="busy" @change="saveConfig">
           <option :value="null">Not chosen</option>
           <option v-for="p in settings?.providers ?? []" :key="p.id" :value="p.id">{{ p.name }}{{ p.problem ? ` — ${p.problem}` : '' }}</option>
         </select>

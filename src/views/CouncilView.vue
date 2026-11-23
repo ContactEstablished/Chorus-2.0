@@ -1,7 +1,8 @@
 <script setup lang="ts">
 /**
- * Council (P10, D136–D138). The Docket lists a project's council runs; New council takes a brief,
- * shows the questions it will ask before anything is spent, and runs it. A run shows its phases,
+ * Council (P10, D136–D138). The Docket lists a project's council runs; New council takes a brief
+ * and the folder to read (the project's, or another such as a redacted copy, D139), shows the
+ * questions it will ask before anything is spent, and runs it. A run shows its phases,
  * each participant's turns with the code they read, the members' agreement per question beside the
  * arbiter's ruling, the findings, and what it cost from both sources.
  */
@@ -37,6 +38,12 @@ const now = ref(Date.now())
 /** New council: the chosen brief and what checking it said. */
 const choosing = ref(false)
 const brief = ref<CouncilBriefCheck | null>(null)
+/** The folder the new council reads, when it isn't the project's own. */
+const folder = ref<string | null>(null)
+/** What the new council would read: the chosen folder, or the project's when it's usable. */
+const readFolder = computed(() => folder.value ?? (docket.value?.folderProblem ? null : (docket.value?.folder ?? null)))
+const sameFolder = (a: string | null | undefined, b: string | null | undefined) =>
+  !!a && !!b && a.replace(/[\\/]+$/, '').toLowerCase() === b.replace(/[\\/]+$/, '').toLowerCase()
 
 /** The turn whose answer, prompt and tool calls are open. */
 const openTurn = ref<number | null>(null)
@@ -92,6 +99,7 @@ watch(projectId, () => {
   run.value = null
   choosing.value = false
   brief.value = null
+  folder.value = null
   error.value = ''
   void loadDocket()
 })
@@ -131,6 +139,7 @@ function back(): void {
 function startNew(): void {
   choosing.value = true
   brief.value = null
+  folder.value = null
   openRun.value = null
   run.value = null
   error.value = ''
@@ -138,7 +147,7 @@ function startNew(): void {
 
 async function pickBrief(): Promise<void> {
   error.value = ''
-  const path = await commands.councilBriefPick(docket.value?.folder ?? null)
+  const path = await commands.councilBriefPick(readFolder.value ?? docket.value?.folder ?? null)
   if (!path) return
   try {
     brief.value = await unwrap(commands.councilBriefCheck(path))
@@ -148,14 +157,22 @@ async function pickBrief(): Promise<void> {
   }
 }
 
+async function pickFolder(): Promise<void> {
+  error.value = ''
+  const path = await commands.councilFolderPick(folder.value ?? docket.value?.folder ?? null)
+  if (!path) return
+  folder.value = sameFolder(path, docket.value?.folder) && !docket.value?.folderProblem ? null : path
+}
+
 async function start(): Promise<void> {
-  if (!brief.value || projectId.value === null) return
+  if (!brief.value || projectId.value === null || !readFolder.value) return
   busy.value = true
   error.value = ''
   try {
-    const id = await unwrap(commands.councilStart(projectId.value, brief.value.path))
+    const id = await unwrap(commands.councilStart(projectId.value, brief.value.path, folder.value))
     choosing.value = false
     brief.value = null
+    folder.value = null
     open(id)
     void loadDocket()
   } catch (e) {
@@ -338,10 +355,27 @@ function outcomeLabel(t: CouncilTurnView): string {
     <!-- New council -->
     <div v-if="choosing" class="panel">
       <h2>New council</h2>
-      <p class="muted">Choose a Markdown brief with numbered questions. Nothing is sent until you press Run.</p>
-      <div class="row">
-        <button type="button" @click="pickBrief">Choose brief…</button>
-        <span v-if="brief" class="mono">{{ brief.path }}</span>
+      <p class="muted">Choose a Markdown brief with numbered questions, and the folder the council reads. Nothing is sent until you press Run.</p>
+      <div class="choice">
+        <span class="choice-label">Brief</span>
+        <div class="row">
+          <button type="button" @click="pickBrief">Choose brief…</button>
+          <span v-if="brief" class="mono">{{ brief.path }}</span>
+        </div>
+      </div>
+      <div class="choice">
+        <span class="choice-label">Folder to read</span>
+        <div class="row">
+          <button type="button" @click="pickFolder">Choose folder…</button>
+          <span v-if="readFolder" class="mono">{{ readFolder }}</span>
+          <span v-if="!folder && readFolder" class="muted small">(the project’s folder)</span>
+          <button v-if="folder && docket?.folder && !docket.folderProblem" type="button" class="link" @click="folder = null">Use the project’s folder</button>
+        </div>
+        <p v-if="!readFolder && docket?.folderProblem" class="error">{{ docket.folderProblem }} Choose a folder to read instead.</p>
+        <p class="muted small">
+          Every member can read every file in this folder, read-only. To keep passwords away from the models, choose a redacted copy of the project.
+          The run is still listed under {{ docket?.projectName ?? 'this project' }}.
+        </p>
       </div>
       <template v-if="brief">
         <p v-if="brief.problem" class="error">{{ brief.problem }}</p>
@@ -354,7 +388,7 @@ function outcomeLabel(t: CouncilTurnView): string {
         </template>
       </template>
       <div class="row">
-        <button type="button" class="primary" :disabled="busy || !brief || !!brief.problem" @click="start">Run council</button>
+        <button type="button" class="primary" :disabled="busy || !brief || !!brief.problem || !readFolder" @click="start">Run council</button>
         <button type="button" :disabled="busy" @click="choosing = false">Cancel</button>
       </div>
     </div>
@@ -369,6 +403,7 @@ function outcomeLabel(t: CouncilTurnView): string {
             <span class="status" :class="run.status">{{ STATUS_LABEL[run.status] }}</span>
             · started {{ ago(run.startedAt) }} · {{ duration(run.startedAt, run.endedAt) }} · {{ run.roster.length }} participants
           </p>
+          <p class="muted small">Read <span class="mono">{{ run.folder }}</span></p>
         </div>
         <div class="row">
           <button v-if="run.status === 'running'" type="button" class="danger" @click="cancel">Cancel run</button>
@@ -494,6 +529,7 @@ function outcomeLabel(t: CouncilTurnView): string {
             <span class="status" :class="r.status">{{ STATUS_LABEL[r.status] }}</span>
             <strong :title="r.briefPath">{{ r.briefName }}</strong>
             <span class="muted small">{{ ago(r.startedAt) }} · {{ duration(r.startedAt, r.endedAt) }} · {{ r.turns }} turns · {{ r.toolCalls }} tool calls · {{ costLine(r.cost) }}</span>
+            <span v-if="!sameFolder(r.folder, docket.folder)" class="small muted" :title="r.folder">Read {{ r.folder }}</span>
             <span v-if="r.digest" class="small">{{ r.digest }}</span>
             <span v-else-if="r.reason" class="small muted">{{ r.reason }}</span>
           </button>
@@ -575,6 +611,15 @@ p {
   font-family: var(--font-mono);
   font-size: 12px;
   word-break: break-all;
+}
+.choice {
+  display: grid;
+  gap: 6px;
+}
+.choice-label {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-2);
 }
 .row {
   display: flex;

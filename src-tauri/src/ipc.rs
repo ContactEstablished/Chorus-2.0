@@ -184,6 +184,7 @@ pub fn builder() -> Builder<tauri::Wry> {
             council::council_member_save,
             council::council_member_delete,
             council::council_brief_pick,
+            council::council_folder_pick,
             council::council_brief_check,
             council::council_start,
             council::council_cancel,

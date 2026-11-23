@@ -53,6 +53,12 @@ fn clean_folder(folder: Option<&str>) -> Result<Option<String>, String> {
     let Some(f) = folder.map(str::trim).filter(|f| !f.is_empty()) else {
         return Err("Choose a folder for this project.".into());
     };
+    resolve_folder(f).map(Some)
+}
+
+/// An existing folder at a full path, resolved to its normal spelling.
+pub(crate) fn resolve_folder(f: &str) -> Result<String, String> {
+    let f = f.trim();
     if f.chars().count() > MAX_FOLDER_CHARS || f.chars().any(char::is_control) {
         return Err("That folder path is too long or has control characters.".into());
     }
@@ -72,7 +78,7 @@ fn clean_folder(folder: Option<&str>) -> Result<Option<String>, String> {
     } else {
         canonical.strip_prefix(r"\\?\").unwrap_or(&canonical).to_owned()
     };
-    Ok(Some(display))
+    Ok(display)
 }
 
 fn existing(store: &Store, id: u32) -> Result<ProjectRow, String> {

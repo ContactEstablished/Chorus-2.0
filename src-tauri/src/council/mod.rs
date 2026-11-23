@@ -271,6 +271,27 @@ pub async fn council_brief_pick(app: tauri::AppHandle, start: Option<String>) ->
     .flatten()
 }
 
+/// Picks the folder a council reads, which may be a copy of the project (a redacted one, say).
+#[tauri::command]
+#[specta::specta]
+pub async fn council_folder_pick(app: tauri::AppHandle, start: Option<String>) -> Option<String> {
+    use tauri::Manager as _;
+    use tauri_plugin_dialog::DialogExt;
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut dialog = app.dialog().file().set_title("Choose the folder the council reads");
+        if let Some(start) = start.filter(|s| Path::new(s).is_dir()) {
+            dialog = dialog.set_directory(start);
+        }
+        if let Some(window) = app.get_webview_window("main") {
+            dialog = dialog.set_parent(&window);
+        }
+        dialog.blocking_pick_folder().and_then(|p| p.into_path().ok()).map(|p| p.display().to_string())
+    })
+    .await
+    .ok()
+    .flatten()
+}
+
 /// The brief at `path`, checked: a local `.md` file within the size limit.
 fn read_brief(path: &str) -> Result<(PathBuf, String), String> {
     let p = PathBuf::from(path.trim());
@@ -352,11 +373,24 @@ fn project_folder(store: &Store, project_id: u32) -> Result<(projects::ProjectRo
     Ok((project, path))
 }
 
+/// The folder a run reads: the one chosen (any existing folder, such as a redacted copy of the
+/// project), or the project's own. The run is listed under `project_id` either way.
+fn run_folder(store: &Store, project_id: u32, chosen: Option<&str>) -> Result<(projects::ProjectRow, PathBuf), String> {
+    match chosen.map(str::trim).filter(|f| !f.is_empty()) {
+        Some(f) => {
+            let project = projects::get(store, project_id)?.ok_or("That project no longer exists.")?;
+            let folder = crate::projects::resolve_folder(f).map_err(|e| format!("The folder to read: {e}"))?;
+            Ok((project, PathBuf::from(folder)))
+        }
+        None => project_folder(store, project_id),
+    }
+}
+
 #[tauri::command]
 #[specta::specta]
-pub fn council_start(state: Manager<'_>, council: Councils<'_>, project_id: u32, brief_path: String) -> Result<u32, String> {
+pub fn council_start(state: Manager<'_>, council: Councils<'_>, project_id: u32, brief_path: String, folder: Option<String>) -> Result<u32, String> {
     let store = state.store();
-    let (project, folder) = project_folder(store, project_id)?;
+    let (project, folder) = run_folder(store, project_id, folder.as_deref())?;
     let (brief_path, text) = read_brief(&brief_path)?;
     check_brief(store, &text)?;
     let cfg = config(store)?;
@@ -432,6 +466,8 @@ pub struct DocketRow {
     /// "2 approved · 1 revise · 3 of 3 ruled · members split on 1", or none.
     pub digest: Option<String>,
     pub has_findings: bool,
+    /// The folder the run read: the project's, or a copy chosen for it.
+    pub folder: String,
 }
 
 #[derive(Debug, Clone, Serialize, Type)]
@@ -439,8 +475,11 @@ pub struct DocketRow {
 pub struct DocketView {
     pub project_id: u32,
     pub project_name: String,
+    /// The project's folder, which a new council reads unless another is chosen.
     pub folder: Option<String>,
-    /// Why a council can't run in this project now (its folder, or the settings), or none.
+    /// Why the project's own folder can't be read (so another must be chosen), or none.
+    pub folder_problem: Option<String>,
+    /// Why no council can run now (the settings), or none.
     pub reason: Option<String>,
     pub running: Option<u32>,
     pub runs: Vec<DocketRow>,
@@ -544,7 +583,11 @@ fn summary_of(run: &RunRow) -> Vec<QuestionSummary> {
 pub fn council_docket(state: Manager<'_>, project_id: u32) -> Result<DocketView, String> {
     let store = state.store();
     let project = projects::get(store, project_id)?.ok_or("That project no longer exists.")?;
-    let reason = project_folder(store, project_id).err().or_else(|| readiness(store, &config(store).ok()?).err());
+    let folder_problem = project_folder(store, project_id).err();
+    let reason = match config(store) {
+        Ok(cfg) => readiness(store, &cfg).err(),
+        Err(e) => Some(e),
+    };
     let runs = db::runs_for_project(store, project_id)?
         .into_iter()
         .map(|r| {
@@ -563,6 +606,7 @@ pub fn council_docket(state: Manager<'_>, project_id: u32) -> Result<DocketView,
                 cost: cost(store, &r, &turns),
                 digest: digest(&rows, asked),
                 has_findings: r.findings_path.is_some(),
+                folder: r.project_folder.clone(),
             })
         })
         .collect::<Result<_, String>>()?;
@@ -570,6 +614,7 @@ pub fn council_docket(state: Manager<'_>, project_id: u32) -> Result<DocketView,
         project_id,
         project_name: project.name,
         folder: project.folder,
+        folder_problem,
         reason,
         running: db::running(store)?,
         runs,
@@ -604,6 +649,8 @@ pub struct CouncilRunView {
     pub verdicts: Vec<VerdictRow>,
     pub arbiter_asked: bool,
     pub findings_path: Option<String>,
+    /// The folder the run read.
+    pub folder: String,
     pub findings_text: Option<String>,
     pub findings_problem: Option<String>,
     pub cost: Cost,
@@ -657,6 +704,7 @@ pub fn council_run(state: Manager<'_>, run_id: u32) -> Result<CouncilRunView, St
         verdicts: rows,
         arbiter_asked: asked,
         findings_path: run.findings_path.clone(),
+        folder: run.project_folder.clone(),
         findings_text,
         findings_problem,
         started_at: run.started_at as f64,
@@ -724,6 +772,35 @@ mod tests {
         let store = Store::in_memory();
         let cfg = CouncilConfig::default();
         assert!(readiness(&store, &cfg).unwrap_err().contains("Choose the Council's OpenRouter provider"));
+    }
+
+    #[test]
+    fn a_run_reads_the_chosen_folder_or_the_projects_own() {
+        use crate::store::projects::NewProject;
+        let store = Store::in_memory();
+        let root = std::env::temp_dir().join(format!("chorus-council-folder-{}", std::process::id()));
+        let (own, copy, gone) = (root.join("app"), root.join("app-redacted"), root.join("moved"));
+        std::fs::create_dir_all(&own).unwrap();
+        std::fs::create_dir_all(&gone).unwrap();
+        std::fs::create_dir_all(&copy).unwrap();
+        let own_text = own.display().to_string();
+        let with = projects::insert(&store, &NewProject { name: "Atlas", folder: Some(&own_text), colour: "#336699" }).unwrap();
+        let gone_text = gone.display().to_string();
+        let moved = projects::insert(&store, &NewProject { name: "Moved", folder: Some(&gone_text), colour: "#336699" }).unwrap();
+        std::fs::remove_dir_all(&gone).unwrap();
+
+        let same = |p: &Path, q: &Path| p.canonicalize().unwrap() == q.canonicalize().unwrap();
+        assert!(same(&run_folder(&store, with, None).unwrap().1, &own));
+        assert!(same(&run_folder(&store, with, Some("  ")).unwrap().1, &own));
+        assert!(same(&run_folder(&store, with, copy.to_str()).unwrap().1, &copy));
+        // A project whose folder has gone can still run on a chosen one.
+        assert!(run_folder(&store, moved, None).unwrap_err().contains("doesn't exist"));
+        assert!(same(&run_folder(&store, moved, copy.to_str()).unwrap().1, &copy));
+        // A chosen folder must exist and be a full path.
+        assert!(run_folder(&store, with, root.join("missing").to_str()).unwrap_err().starts_with("The folder to read"));
+        assert!(run_folder(&store, with, Some("relative\\dir")).is_err());
+        assert!(run_folder(&store, 9999, copy.to_str()).unwrap_err().contains("no longer exists"));
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
