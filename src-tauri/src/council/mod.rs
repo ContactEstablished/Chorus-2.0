@@ -260,19 +260,18 @@ pub fn council_member_save(state: Manager<'_>, input: MemberInput) -> Result<Cou
     if label.is_empty() || label.chars().count() > 60 {
         return Err("A council member needs a name of 1–60 characters.".into());
     }
-    let model = input.model.trim();
-    match input.runs_on {
-        RunsOn::Openrouter if !chorus_core::agent::valid_model(model) => {
+    let model = if input.runs_on.is_local() {
+        // An OpenRouter id is turned into the CLI's own name (`anthropic/claude-opus-5.5` →
+        // `claude-opus-5-5`), so switching a member to a subscription keeps working.
+        core::local::local_model(input.runs_on, &input.model)?
+    } else {
+        let model = input.model.trim().to_owned();
+        if !chorus_core::agent::valid_model(&model) {
             return Err("That isn't a model id (for example `anthropic/claude-opus-5`).".into());
         }
-        RunsOn::Claude if !core::local::valid_model(model) => {
-            return Err("That isn't a model name Claude Code takes (for example `claude-opus-5-5`, without a provider prefix).".into());
-        }
-        RunsOn::Codex if !core::local::valid_model(model) => {
-            return Err("That isn't a model name Codex takes (for example `gpt-6-astra`, without a provider prefix).".into());
-        }
-        _ => {}
-    }
+        model
+    };
+    let model = model.as_str();
     if input.max_tokens.is_some_and(|n| !(256..=200_000).contains(&n)) {
         return Err("Max output tokens must be between 256 and 200,000, or empty for the default.".into());
     }

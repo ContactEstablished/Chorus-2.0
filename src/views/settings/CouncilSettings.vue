@@ -283,8 +283,9 @@ function context(n: number | null): string {
             <input v-model="draft.model" class="mono" maxlength="200" :placeholder="`e.g. ${LOCAL_EXAMPLE[draft.runsOn]}`" spellcheck="false" :disabled="busy" />
           </label>
           <p class="muted">
-            The name {{ draft.runsOn === 'claude' ? 'Claude Code' : 'Codex' }} takes for <code>{{ draft.runsOn === 'claude' ? '--model' : '-m' }}</code>, without a
-            provider prefix. Its turns run on {{ draft.runsOn === 'claude' ? 'Claude Code' : 'Codex' }}'s own sign-in, with its own tools switched off, so it reads the
+            The name {{ draft.runsOn === 'claude' ? 'Claude Code' : 'Codex' }} takes for <code>{{ draft.runsOn === 'claude' ? '--model' : '-m' }}</code>. An OpenRouter
+            id is turned into it when you save (<code>{{ draft.runsOn === 'claude' ? 'anthropic/claude-opus-5.5' : 'openai/gpt-6-astra' }}</code> becomes
+            <code>{{ LOCAL_EXAMPLE[draft.runsOn] }}</code>). Its turns run on {{ draft.runsOn === 'claude' ? 'Claude Code' : 'Codex' }}'s own sign-in, with its own tools switched off, so it reads the
             code only through Chorus's tools.
           </p>
         </template>
