@@ -18,5 +18,6 @@ export const useLayoutStore = defineStore('layout', () => {
 
   const railCollapsed = preference('chorus.layout.railCollapsed', window.matchMedia('(max-width: 720px)').matches)
   const detailsOpen = preference('chorus.layout.detailsOpen', !window.matchMedia('(max-width: 980px)').matches)
-  return { railCollapsed, detailsOpen }
+  const progressOpen = preference('chorus.layout.progressOpen', true)
+  return { railCollapsed, detailsOpen, progressOpen }
 })

@@ -7,6 +7,7 @@
  */
 import { computed, ref } from 'vue'
 import type { SessionProgress, SessionSummary } from '../../ipc'
+import { useLayoutStore } from '../../stores/layout'
 import { useNow } from '../../shell/now'
 import { ATTENTION } from '../../shell/status'
 import { timeLabel } from './conversation'
@@ -14,7 +15,8 @@ import { elapsedLabel, emptyLine, liveSecs, nowNext, skillChip, skillTitle, spli
 
 const props = defineProps<{ session: SessionSummary; progress: SessionProgress | null; error: string }>()
 const now = useNow(1000)
-const open = ref(true)
+const layout = useLayoutStore()
+const open = computed({ get: () => layout.progressOpen, set: (v: boolean) => { layout.progressOpen = v } })
 const toolsOpen = ref(false)
 
 const p = computed(() => props.progress)

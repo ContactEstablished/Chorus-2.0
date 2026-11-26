@@ -130,9 +130,6 @@ function groupTone(key: string): string {
       </div>
     </header>
 
-    <!-- P18: the chosen project's hand-off note, baton and branches. -->
-    <ProjectHandoff v-if="chosenProject" :project="chosenProject" />
-
     <div class="toolbar">
       <!-- Opened from a project in the rail, the page is already that project: no project chips.
            Overview in the rail shows every project again. -->
@@ -200,6 +197,9 @@ function groupTone(key: string): string {
         />
       </div>
     </section>
+
+    <!-- P18: the chosen project's hand-off note, baton and branches. -->
+    <ProjectHandoff v-if="chosenProject" :project="chosenProject" />
   </section>
 </template>
 
